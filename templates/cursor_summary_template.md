@@ -26,6 +26,14 @@ Result:
 
 - ...
 
+## Project summary update
+
+Updated `.ai-loop/project_summary.md`:
+
+- yes/no
+- durable changes added:
+  - ...
+
 ## Skipped work
 
 - ...

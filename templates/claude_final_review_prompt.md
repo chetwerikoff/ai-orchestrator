@@ -4,6 +4,7 @@ Claude is the final reviewer after Codex returns `VERDICT: PASS`.
 
 Read:
 
+- `.ai-loop/project_summary.md`
 - `.ai-loop/task.md`
 - `.ai-loop/cursor_summary.md`
 - `.ai-loop/codex_review.md`
@@ -14,10 +15,11 @@ Read:
 Check:
 
 1. Did the implementation actually satisfy `.ai-loop/task.md`?
-2. Do tests cover the requested behavior?
-3. Are there Critical or High issues that should block commit/push?
-4. Are there automation/git safety risks?
-5. Is it safe to commit and push?
+2. Is `.ai-loop/project_summary.md` consistent with durable project-level changes?
+3. Do tests cover the requested behavior?
+4. Are there Critical or High issues that should block commit/push?
+5. Are there automation/git safety risks?
+6. Is it safe to commit and push?
 
 Return exactly:
 

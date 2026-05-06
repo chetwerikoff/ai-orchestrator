@@ -1,5 +1,13 @@
 # Task: <task name>
 
+## Project context
+
+Before starting, read:
+
+- `.ai-loop/project_summary.md`
+- `.ai-loop/task.md`
+- `.ai-loop/cursor_summary.md` if it exists
+
 ## Goal
 
 Describe the exact task.
@@ -60,6 +68,23 @@ Update `.ai-loop/cursor_summary.md` with:
 3. What was implemented.
 4. What was skipped and why.
 5. Remaining risks.
+
+## Project summary update
+
+After completing the task, update:
+
+- `.ai-loop/project_summary.md`
+
+Update it only with durable project-level information:
+
+- new architecture decisions;
+- new modules/components;
+- changed pipeline;
+- important risks;
+- current stage;
+- next likely steps.
+
+Do not turn it into a verbose task log.
 
 ## Important
 

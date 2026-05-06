@@ -5,6 +5,7 @@
 The orchestrator uses a file-based protocol:
 
 ```text
+.ai-loop/project_summary.md
 .ai-loop/task.md
   -> Cursor implements
   -> .ai-loop/cursor_summary.md
@@ -15,6 +16,16 @@ The orchestrator uses a file-based protocol:
   -> final test gate
   -> git commit/push
 ```
+
+## File roles
+
+- `.ai-loop/project_summary.md` — durable project-level context.
+- `.ai-loop/task.md` — current task contract.
+- `.ai-loop/cursor_summary.md` — latest implementation summary.
+- `.ai-loop/codex_review.md` — primary review output.
+- `.ai-loop/claude_final_review.md` — final review output.
+- `.ai-loop/last_diff.patch` — current diff.
+- `.ai-loop/test_output.txt` — current test output.
 
 ## Start
 

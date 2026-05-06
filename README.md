@@ -12,14 +12,15 @@ The orchestrator is designed to be installed into any git project that uses a fi
 
 ## What it does
 
-1. Runs tests.
-2. Saves `git diff` and `git status`.
-3. Runs Codex review.
-4. If Codex requests fixes, runs Cursor Agent.
-5. Repeats until Codex passes or `MaxIterations` is reached.
-6. Runs Claude as final reviewer.
-7. If Claude passes, runs a final test gate.
-8. Commits and optionally pushes safe project files.
+1. Reads durable project context from `.ai-loop/project_summary.md`.
+2. Runs tests.
+3. Saves `git diff` and `git status`.
+4. Runs Codex review.
+5. If Codex requests fixes, runs Cursor Agent.
+6. Repeats until Codex passes or `MaxIterations` is reached.
+7. Runs Claude as final reviewer.
+8. If Claude passes, runs a final test gate.
+9. Commits and optionally pushes safe project files.
 
 ## Requirements
 
@@ -38,6 +39,27 @@ Expected CLIs:
 - OpenAI Codex CLI: `codex`
 - Claude Code CLI: `claude`
 
+## Project-level memory
+
+The orchestrator uses:
+
+```text
+.ai-loop/project_summary.md
+```
+
+as durable project-level memory.
+
+This file is not a detailed task log. It should contain durable context:
+
+- project purpose;
+- architecture;
+- important design decisions;
+- current stage;
+- known risks;
+- next likely steps.
+
+Cursor updates it after each task. Codex and Claude read it during review.
+
 ## Install into a target project
 
 From this repository:
@@ -53,10 +75,13 @@ This copies:
 scripts/ai_loop_auto.ps1
 scripts/continue_ai_loop.ps1
 .ai-loop/task.md
+.ai-loop/project_summary.md
 .ai-loop/codex_review_prompt.md
 .ai-loop/claude_final_review_prompt.md
 .ai-loop/cursor_summary_template.md
 ```
+
+Existing `.ai-loop/task.md` and `.ai-loop/project_summary.md` are not overwritten unless you pass `-OverwriteTask` or `-OverwriteProjectSummary`.
 
 ## Start a new loop in the target project
 
@@ -92,7 +117,7 @@ or, if scripts are unblocked:
 -NoClaudeFinalReview
 -TestCommand "python -m pytest"
 -PostFixCommand "python src/main.py some-command"
--SafeAddPaths "src/,tests/,README.md,scripts/,.gitignore,requirements.txt,pyproject.toml,.ai-loop/task.md,.ai-loop/cursor_summary.md"
+-SafeAddPaths "src/,tests/,README.md,scripts/,.gitignore,requirements.txt,pyproject.toml,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
 ```
 
 ## Safety model
@@ -130,10 +155,11 @@ Before publishing this project publicly, make sure you have not committed:
 ## Suggested workflow
 
 1. Write a precise task into `.ai-loop/task.md`.
-2. Run `ai_loop_auto.ps1`.
-3. Wait for `final_status.md`.
-4. If stopped, inspect:
+2. Make sure `.ai-loop/project_summary.md` describes the current project context.
+3. Run `ai_loop_auto.ps1`.
+4. Wait for `final_status.md`.
+5. If stopped, inspect:
    - `.ai-loop/codex_review.md`
    - `.ai-loop/claude_final_review.md`
    - `.ai-loop/cursor_summary.md`
-5. Continue with `continue_ai_loop.ps1`.
+6. Continue with `continue_ai_loop.ps1`.

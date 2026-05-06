@@ -28,3 +28,4 @@ __pycache__/
 .ai-loop/claude_final_review.md
 .ai-loop/git_status.txt
 .ai-loop/cursor_agent_output.txt
+.ai-loop/post_fix_output.txt

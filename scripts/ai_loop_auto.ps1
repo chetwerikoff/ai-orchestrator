@@ -6,7 +6,7 @@ param(
     [switch]$NoClaudeFinalReview,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,scripts/,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md"
+    [string]$SafeAddPaths = "src/,tests/,README.md,scripts/,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
 )
 
 $ErrorActionPreference = "Continue"
@@ -26,6 +26,62 @@ $env:PYTEST_DEBUG_TEMPROOT = $Tmp
 function Write-FinalStatus {
     param([string]$Text)
     $Text | Set-Content (Join-Path $AiLoop "final_status.md") -Encoding UTF8
+}
+
+function Ensure-AiLoopFiles {
+    $projectSummary = Join-Path $AiLoop "project_summary.md"
+    $cursorSummary = Join-Path $AiLoop "cursor_summary.md"
+    $taskFile = Join-Path $AiLoop "task.md"
+
+    if (!(Test-Path $projectSummary)) {
+        @"
+# Project Summary
+
+## Project purpose
+
+TODO: Describe the purpose of this project.
+
+## Current architecture
+
+TODO: List main modules/components.
+
+## Current pipeline / workflow
+
+TODO: Describe workflow.
+
+## Important design decisions
+
+- TODO
+
+## Known risks / constraints
+
+- TODO
+
+## Current stage
+
+TODO
+
+## Last completed task
+
+TODO
+
+## Next likely steps
+
+1. TODO
+
+## Notes for future AI sessions
+
+- Keep durable project-level context here.
+"@ | Set-Content $projectSummary -Encoding UTF8
+    }
+
+    if (!(Test-Path $cursorSummary)) {
+        "# Cursor Summary`n`nNo task has been completed yet." | Set-Content $cursorSummary -Encoding UTF8
+    }
+
+    if (!(Test-Path $taskFile)) {
+        "# Task: TODO`n`nDescribe the current task." | Set-Content $taskFile -Encoding UTF8
+    }
 }
 
 function Invoke-CommandToFile {
@@ -53,6 +109,8 @@ function Add-IntentToAddForReview {
 }
 
 function Save-TestAndDiff {
+    Ensure-AiLoopFiles
+
     Write-Host ""
     Write-Host "Running tests..."
     Invoke-CommandToFile $TestCommand (Join-Path $AiLoop "test_output.txt") | Out-Null
@@ -79,10 +137,13 @@ function Run-PostFixCommand {
 }
 
 function Run-CodexReview {
+    Ensure-AiLoopFiles
+
     $prompt = @"
 You are the reviewer in an authenticated development loop.
 
 Read:
+- .ai-loop/project_summary.md
 - .ai-loop/task.md
 - .ai-loop/cursor_summary.md
 - .ai-loop/last_diff.patch
@@ -92,6 +153,8 @@ Read:
 Review the latest changes.
 
 Important:
+- project_summary.md is durable project context.
+- task.md is the current task contract.
 - The user explicitly authorized the scope described in .ai-loop/task.md.
 - If Cursor deferred the task instead of implementing it, mark FIX_REQUIRED and provide a concrete fix prompt.
 - If new files are required by the task, make sure they are present in the diff/status.
@@ -101,7 +164,8 @@ Check:
 1. Was the task completed?
 2. Are tests meaningful and passing?
 3. Are there Critical or High issues?
-4. Is it safe to proceed to final Claude review?
+4. Is project_summary.md updated when durable project-level context changed?
+5. Is it safe to proceed to final Claude review?
 
 Return exactly:
 
@@ -132,6 +196,8 @@ Brief summary.
 }
 
 function Run-ClaudeFinalReview {
+    Ensure-AiLoopFiles
+
     if ($NoClaudeFinalReview) {
         Write-Host "Claude final review disabled."
         "VERDICT: PASS`nFINAL_NOTE:`nClaude final review was disabled." | Set-Content (Join-Path $AiLoop "claude_final_review.md") -Encoding UTF8
@@ -150,6 +216,7 @@ You are the final reviewer in an authenticated development loop.
 Codex already returned PASS. Your role is to provide an independent final review before commit/push.
 
 Read:
+- .ai-loop/project_summary.md
 - .ai-loop/task.md
 - .ai-loop/cursor_summary.md
 - .ai-loop/codex_review.md
@@ -159,10 +226,11 @@ Read:
 
 Focus:
 1. Did the implementation actually satisfy .ai-loop/task.md?
-2. Do tests cover the requested behavior?
-3. Are there any Critical or High issues that should block commit/push?
-4. Are there automation/git safety risks?
-5. Is it safe to commit and push?
+2. Is project_summary.md consistent with durable project-level changes?
+3. Do tests cover the requested behavior?
+4. Are there any Critical or High issues that should block commit/push?
+5. Are there automation/git safety risks?
+6. Is it safe to commit and push?
 
 Return exactly:
 
@@ -273,10 +341,18 @@ function Extract-FixPrompt {
 }
 
 function Run-CursorFix {
+    Ensure-AiLoopFiles
+
     $cursorPrompt = @"
-Read .ai-loop/next_cursor_prompt.md and fix only the issues described there.
+Read:
+- .ai-loop/project_summary.md
+- .ai-loop/next_cursor_prompt.md
+- .ai-loop/task.md if needed
+
+Fix only the issues described in .ai-loop/next_cursor_prompt.md.
 
 Important rules:
+- project_summary.md is durable project-level memory.
 - The user explicitly authorized the task and the fix prompt.
 - If .ai-loop/next_cursor_prompt.md asks to implement the full task from .ai-loop/task.md, do it. Do not refuse because of scope.
 - Do not start unrelated features.
@@ -293,6 +369,12 @@ After changes:
    - implementation summary
    - task-specific outputs or skipped live-run reason
    - remaining risks
+4. Update .ai-loop/project_summary.md with durable project-level changes only:
+   - new modules/components
+   - architecture/pipeline changes
+   - important design decisions
+   - current stage
+   - next likely steps
 "@
 
     Write-Host ""
@@ -325,6 +407,8 @@ function Stage-SafeProjectFiles {
 }
 
 function Commit-And-Push {
+    Ensure-AiLoopFiles
+
     Write-Host ""
     Write-Host "Preparing Git commit..."
 
@@ -384,6 +468,8 @@ function Commit-And-Push {
 }
 
 function Try-ResumeFromExistingReview {
+    Ensure-AiLoopFiles
+
     if (!$Resume) {
         return $false
     }
@@ -454,6 +540,8 @@ function Try-ResumeFromExistingReview {
     return $false
 }
 
+Ensure-AiLoopFiles
+
 $resumed = Try-ResumeFromExistingReview
 
 if ($resumed) {
@@ -496,6 +584,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
             Write-Host ".ai-loop\codex_review.md"
             Write-Host ".ai-loop\claude_final_review.md"
             Write-Host ".ai-loop\cursor_summary.md"
+            Write-Host ".ai-loop\project_summary.md"
 
             exit 0
         }
@@ -537,5 +626,6 @@ Write-Host ".ai-loop\final_status.md"
 Write-Host ".ai-loop\codex_review.md"
 Write-Host ".ai-loop\claude_final_review.md"
 Write-Host ".ai-loop\cursor_summary.md"
+Write-Host ".ai-loop\project_summary.md"
 
 exit 2
