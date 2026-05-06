@@ -1,0 +1,61 @@
+# Safety
+
+## Do not run two agents in one repository
+
+Run only one orchestrator per target repository at a time.
+
+It is safe to run agents in parallel only if they work in different git repositories.
+
+## Safe staging
+
+By default, the orchestrator stages only explicit safe paths:
+
+```text
+src/
+tests/
+README.md
+scripts/
+.gitignore
+requirements.txt
+pyproject.toml
+setup.cfg
+.ai-loop/task.md
+.ai-loop/cursor_summary.md
+```
+
+Runtime artifacts are not staged.
+
+## Private data
+
+Before making a repository public, verify that it does not include:
+
+- API keys
+- credentials
+- real user data
+- private configs
+- generated output
+- `input/`
+- `output/`
+- `.ai-loop/*review.md`
+
+## Recommended public repo check
+
+```powershell
+git status
+git ls-files
+git grep -n "api_key\|token\|password\|secret" .
+```
+
+## PowerShell execution policy
+
+If Windows blocks scripts, run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_auto.ps1
+```
+
+or unblock local scripts:
+
+```powershell
+Get-ChildItem .\scripts\*.ps1 | Unblock-File
+```
