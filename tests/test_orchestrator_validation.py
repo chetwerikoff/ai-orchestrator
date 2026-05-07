@@ -227,3 +227,15 @@ def test_invoke_cursor_implementation_wraps_path_sets_for_compare_object() -> No
     assert "$beforePaths = @(Get-ImplementationDeltaPaths)" in text
     assert "$afterPaths = @(Get-ImplementationDeltaPaths)" in text
     assert "Compare-Object @($beforePaths) @($afterPaths)" in text
+
+
+def test_native_argv_escape_present_in_both_scripts() -> None:
+    """PS 5.1 native-arg quoting workaround: prompts sent to agent/codex must go through ConvertTo-CrtSafeArg."""
+    expected_helper = "function ConvertTo-CrtSafeArg"
+    expected_call = "ConvertTo-CrtSafeArg -Value"
+    for name in ("ai_loop_task_first.ps1", "ai_loop_auto.ps1"):
+        text = (_SCRIPTS / name).read_text(encoding="utf-8")
+        assert expected_helper in text, f"{name} missing ConvertTo-CrtSafeArg definition"
+        assert expected_call in text, f"{name} does not invoke ConvertTo-CrtSafeArg"
+    auto = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert auto.count("ConvertTo-CrtSafeArg -Value") >= 2, "auto must escape both Cursor and Codex prompts"

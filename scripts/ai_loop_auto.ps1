@@ -40,6 +40,16 @@ function Clear-AiLoopRuntimeState {
     }
 }
 
+function ConvertTo-CrtSafeArg {
+    # Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
+    # element contains both whitespace and embedded double quotes, PS does not escape the inner
+    # quotes correctly, and node-CRT re-splits the argument so tokens like `->` leak out as
+    # standalone args (rejected by commander.js as unknown options). Pre-escape per MS CRT rules:
+    # double any run of backslashes that immediately precedes a quote, then turn the quote into \".
+    param([string]$Value)
+    return [regex]::Replace($Value, '(\\*)"', { param($m) ($m.Groups[1].Value * 2) + '\"' })
+}
+
 function Write-FinalStatus {
     param([string]$Text)
     $Text | Set-Content (Join-Path $AiLoop "final_status.md") -Encoding UTF8
@@ -208,7 +218,8 @@ Brief summary.
     Write-Host ""
     Write-Host "Running Codex review..."
 
-    codex exec $prompt > (Join-Path $AiLoop "codex_review.md")
+    $codexArgs = @("exec", (ConvertTo-CrtSafeArg -Value $prompt))
+    & codex @codexArgs > (Join-Path $AiLoop "codex_review.md")
     return $LASTEXITCODE
 }
 
@@ -326,7 +337,8 @@ After changes:
     Write-Host ""
     Write-Host "Running Cursor agent in non-interactive mode..."
 
-    agent --print --trust --workspace $ProjectRoot $cursorPrompt *> (Join-Path $AiLoop "cursor_agent_output.txt")
+    $cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot, (ConvertTo-CrtSafeArg -Value $cursorPrompt))
+    & agent @cursorArgs *> (Join-Path $AiLoop "cursor_agent_output.txt")
     return $LASTEXITCODE
 }
 

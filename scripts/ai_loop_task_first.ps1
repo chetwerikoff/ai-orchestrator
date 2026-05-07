@@ -16,6 +16,16 @@ $ProjectRoot = (Resolve-Path ".").Path
 $AiLoop = Join-Path $ProjectRoot ".ai-loop"
 $ResultPathRelative = ".ai-loop/cursor_implementation_result.md"
 
+function ConvertTo-CrtSafeArg {
+    # Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
+    # element contains both whitespace and embedded double quotes, PS does not escape the inner
+    # quotes correctly, and node-CRT re-splits the argument so tokens like `->` leak out as
+    # standalone args (rejected by commander.js as unknown options). Pre-escape per MS CRT rules:
+    # double any run of backslashes that immediately precedes a quote, then turn the quote into \".
+    param([string]$Value)
+    return [regex]::Replace($Value, '(\\*)"', { param($m) ($m.Groups[1].Value * 2) + '\"' })
+}
+
 function Write-Section {
     param([string]$Text)
     Write-Host ""
@@ -145,7 +155,7 @@ $taskText
     $beforePaths = @(Get-ImplementationDeltaPaths)
     $agentArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
     if (-not [string]::IsNullOrWhiteSpace($Model)) { $agentArgs += @("--model", $Model) }
-    $agentArgs += $prompt
+    $agentArgs += (ConvertTo-CrtSafeArg -Value $prompt)
     & $CommandName @agentArgs *> $outputPath
     if ($LASTEXITCODE -ne 0) {
         throw "Cursor implementation failed with exit code $LASTEXITCODE. See: $outputPath"
