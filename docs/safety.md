@@ -15,6 +15,10 @@ src/
 tests/
 README.md
 scripts/
+docs/
+templates/
+ai_loop.py
+pytest.ini
 .gitignore
 requirements.txt
 pyproject.toml

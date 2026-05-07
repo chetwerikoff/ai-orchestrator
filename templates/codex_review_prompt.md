@@ -19,7 +19,7 @@ Check:
 2. Are tests meaningful and passing?
 3. Are there Critical or High issues?
 4. Was `.ai-loop/project_summary.md` updated when durable project-level context changed?
-5. Is it safe to proceed to final Claude review?
+5. Is it safe to run the final test gate, commit, and push?
 
 Return exactly:
 

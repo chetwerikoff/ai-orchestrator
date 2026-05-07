@@ -1,21 +1,8 @@
-Remove all Claude final review logic from scripts/ai_loop_auto.ps1 and scripts/continue_ai_loop.ps1.
+# Task
 
-Delete:
+The prior Cursor specification for P0 orchestrator fixes is **implemented**. Drive the loop from:
 
-- NoClaudeFinalReview parameter
+- **New task (Cursor first):** `scripts\ai_loop_task_first.ps1` — clears stale `.ai-loop` runtime files (except this file), runs Cursor, then `ai_loop_auto.ps1` only when there are meaningful working tree changes.
+- **Review-first (existing changes):** `scripts\ai_loop_auto.ps1`
 
-- Run-ClaudeFinalReview function
-
-- Get-ClaudeVerdict function
-
-- all reads/writes of .ai-loop/claude_final_[review.md](http://review.md)
-
-- all calls to claude -p
-
-- all resume-mode Claude branches
-
-- all PASS_WITH_CAVEATS handling from Claude
-
-After Codex PASS, the loop must run final tests, commit, and push.
-
-Do not leave any active Claude final review path.
+See `README.md` and `docs/workflow.md` for flags and behavior (including `NO_CHANGES_AFTER_CURSOR` and `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED`).

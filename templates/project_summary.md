@@ -24,8 +24,7 @@ Example:
 task.md
 → Cursor implementation
 → Codex review
-→ Claude final review
-→ tests
+→ final test gate (after Codex PASS)
 → commit/push
 ```
 
@@ -57,6 +56,6 @@ Summary:
 
 ## Notes for future AI sessions
 
-Things Cursor, Codex, and Claude should remember before making changes:
+Things Cursor and Codex should remember before making changes:
 
 - ...

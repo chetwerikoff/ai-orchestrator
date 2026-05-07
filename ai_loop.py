@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-ai_loop.py - GitHub PR orchestrator for AI coding loops
+ai_loop.py - Experimental GitHub PR orchestrator for AI coding loops
+
+This module is separate from the primary local workflow driven by PowerShell
+(`scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`). Use those for the
+Cursor + Codex file-based loop installed into projects.
 
 Constraints:
 - Standard library only

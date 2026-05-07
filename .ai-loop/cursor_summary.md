@@ -2,31 +2,25 @@
 
 ## Changed files
 
-- `scripts/ai_loop_auto.ps1` — removed `NoClaudeFinalReview`, Claude final review functions, `claude_final_review.md` I/O, `PASS_WITH_CAVEATS` handling, and resume/main-loop Claude branches; Codex `PASS` goes straight to `Commit-And-Push` (final test gate inside it); `Extract-FixPrompt` reads Codex only; Codex checklist item 5 updated for commit/push safety.
-- `scripts/continue_ai_loop.ps1` — removed `-NoClaudeFinalReview` forwarding.
-- `README.md`, `docs/workflow.md`, `docs/decisions.md` — pipeline and requirements updated (no Claude in automated path).
-- `templates/codex_review_prompt.md`, `templates/task.md`, `templates/project_summary.md` — aligned with Codex-only gate before commit.
+- `scripts/ai_loop_task_first.ps1` — `Get-FilteredPorcelainLinesForImplementation` documents why `git status --porcelain --untracked-files=all` is used; `Get-ResultFileSnapshot` wraps file hashing in try/catch (`FILEHASH_UNREADABLE`), aggregates directory manifests as before, and **never** returns `Exists=true` with null/empty `Hash` (falls back to `SNAPSHOT_HASH_UNAVAILABLE`) so content-delta logic cannot treat two live snapshots as identical just because `Hash` was null on both sides.
+- `docs/workflow.md` — documents the exact `Test-CursorResultAllowsNoCodeChanges` regex `(?im)^IMPLEMENTATION_STATUS:\s*DONE_NO_CODE_CHANGES_REQUIRED\s*$`, literal valid line, trailing-space rule, and `RESULT_ONLY_WITHOUT_DONE_NO_CODE_MARKER` outcome.
+- `tests/test_orchestrator_validation.py` — `test_task_first_porcelain_uses_untracked_files_all` regression guard; existing stable `?? dir/` + fingerprint test unchanged.
 
 ## Test result
 
-Command: `python -m pytest -q` from repo root.
+Command: `python -m pytest -q` from repo root (`C:\Users\che\Documents\Projects\ai-git-orchestrator`).
 
-Result: **4 passed** in ~0.01s (exit code 0).
+Result: **19 passed** (exit code 0).
 
 ## Implementation summary
 
-- Implemented `.ai-loop/task.md` / `.ai-loop/next_cursor_prompt.md`: orchestrator no longer invokes Claude or maintains an active Claude final-review path; resume mode only uses `next_cursor_prompt.md` or `codex_review.md`.
+Task-first porcelain continues to use `--untracked-files=all` so nested untracked paths participate in the filtered status line set together with directory manifest hashing when porcelain stays stable. Snapshot hardening removes the `Exists=true` + `Hash=null` blind spot for files (hash failures, odd empty-hash edge cases) so merged deltas stay trustworthy.
 
 ## Task-specific CLI / live run
 
-`.ai-loop/task.md` specifies pytest-level validation only (`python -m pytest`); satisfied by the test command above. No separate application CLI.
-
-## PowerShell validation
-
-Attempted to run `[System.Management.Automation.Language.Parser]::ParseFile` on `scripts/ai_loop_auto.ps1` and `scripts/continue_ai_loop.ps1` from this environment; nested `powershell.exe` / composite shell invocations were rejected, so syntax was validated by inspection only. Recommend running a parse check locally if desired.
+`.ai-loop/task.md` references `scripts\ai_loop_task_first.ps1` / `ai_loop_auto.ps1`. **Skipped:** live PowerShell orchestrator and Cursor `agent` invocation (interactive / environment-specific; pytest covers parsing and delta semantics).
 
 ## Remaining risks
 
-- `templates/claude_final_review_prompt.md` and installer copy to `.ai-loop/` remain as optional reference only; they are not used by the orchestrator.
-- Existing `.gitignore` may still list `claude_final_review.md`; stale local files possible but not read by scripts.
-- Codex verdict parsing still treats any line matching `VERDICT: PASS` as pass (unchanged behavior).
+- Very large untracked directories remain potentially expensive to fingerprint when those paths appear in the porcelain-derived snapshot union.
+- `FILEHASH_UNREADABLE` / `SNAPSHOT_HASH_UNAVAILABLE` stabilize comparisons but mark paths where byte-accurate hashing was not possible; unusual ACL or transient I/O errors could still surface as coarse sentinels rather than fine-grained content hashes.

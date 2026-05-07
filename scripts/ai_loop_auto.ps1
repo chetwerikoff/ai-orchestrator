@@ -5,7 +5,7 @@ param(
     [switch]$NoPush,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,scripts/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
+    [string]$SafeAddPaths = "src/,tests/,README.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
 )
 
 $ErrorActionPreference = "Continue"
@@ -228,19 +228,33 @@ function Extract-FixPromptFromFile {
 
     $review = Get-Content $ReviewFile -Raw
 
+    # Codex sometimes omits or renames FINAL_NOTE; still recover the fix prompt when the delimiter exists.
     $match = [regex]::Match(
         $review,
         "FIX_PROMPT_FOR_CURSOR:\s*(?<prompt>[\s\S]*?)FINAL_NOTE:",
         [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
     )
 
-    if (!$match.Success) {
-        return $false
+    $prompt = $null
+    if ($match.Success) {
+        $prompt = $match.Groups["prompt"].Value.Trim()
+    }
+    else {
+        $matchTail = [regex]::Match(
+            $review,
+            "FIX_PROMPT_FOR_CURSOR:\s*(?<prompt>[\s\S]*)",
+            [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+        )
+
+        if (!$matchTail.Success) {
+            return $false
+        }
+
+        $prompt = $matchTail.Groups["prompt"].Value.Trim()
     }
 
-    $prompt = $match.Groups["prompt"].Value.Trim()
-
     if (!$prompt -or $prompt -eq "none") {
+        Write-Host "Extract-FixPromptFromFile: extracted prompt was empty or 'none'."
         return $false
     }
 

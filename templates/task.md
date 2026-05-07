@@ -88,4 +88,4 @@ Do not turn it into a verbose task log.
 
 ## Important
 
-Do not commit or push manually. The orchestrator handles git after Codex and Claude reviews.
+Do not commit or push manually. The orchestrator handles git after Codex passes and the final test gate.
