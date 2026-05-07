@@ -3,7 +3,6 @@ param(
     [string]$CommitMessage = "AI loop auto update",
     [switch]$Resume,
     [switch]$NoPush,
-    [switch]$NoClaudeFinalReview,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
     [string]$SafeAddPaths = "src/,tests/,README.md,scripts/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
@@ -165,7 +164,7 @@ Check:
 2. Are tests meaningful and passing?
 3. Are there Critical or High issues?
 4. Is project_summary.md updated when durable project-level context changed?
-5. Is it safe to proceed to final Claude review?
+5. Is it safe to run the final test gate, commit, and push?
 
 Return exactly:
 
@@ -195,75 +194,9 @@ Brief summary.
     return $LASTEXITCODE
 }
 
-function Run-ClaudeFinalReview {
-    Ensure-AiLoopFiles
-
-    if ($NoClaudeFinalReview) {
-        Write-Host "Claude final review disabled."
-        "VERDICT: PASS`nFINAL_NOTE:`nClaude final review was disabled." | Set-Content (Join-Path $AiLoop "claude_final_review.md") -Encoding UTF8
-        return 0
-    }
-
-    if (!(Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "Claude CLI not found."
-        Write-FinalStatus "STOPPED: Claude CLI not found. Install/login Claude Code CLI or run with -NoClaudeFinalReview."
-        return 127
-    }
-
-    $prompt = @"
-You are the final reviewer in an authenticated development loop.
-
-Codex already returned PASS. Your role is to provide an independent final review before commit/push.
-
-Read:
-- .ai-loop/project_summary.md
-- .ai-loop/task.md
-- .ai-loop/cursor_summary.md
-- .ai-loop/codex_review.md
-- .ai-loop/last_diff.patch
-- .ai-loop/test_output.txt
-- .ai-loop/git_status.txt
-
-Focus:
-1. Did the implementation actually satisfy .ai-loop/task.md?
-2. Is project_summary.md consistent with durable project-level changes?
-3. Do tests cover the requested behavior?
-4. Are there any Critical or High issues that should block commit/push?
-5. Are there automation/git safety risks?
-6. Is it safe to commit and push?
-
-Return exactly:
-
-VERDICT: PASS or PASS_WITH_CAVEATS or FIX_REQUIRED
-
-CRITICAL:
-- ...
-
-HIGH:
-- ...
-
-MEDIUM:
-- ...
-
-FIX_PROMPT_FOR_CURSOR:
-If fixes are required, write a concrete prompt for Cursor.
-If no fixes are required, write: none
-
-FINAL_NOTE:
-Brief summary.
-"@
-
-    Write-Host ""
-    Write-Host "Running Claude final review..."
-
-    claude -p $prompt > (Join-Path $AiLoop "claude_final_review.md")
-    return $LASTEXITCODE
-}
-
 function Get-ReviewVerdict {
     param(
-        [string]$ReviewFile,
-        [bool]$AllowPassWithCaveats = $false
+        [string]$ReviewFile
     )
 
     if (!(Test-Path $ReviewFile)) {
@@ -271,10 +204,6 @@ function Get-ReviewVerdict {
     }
 
     $review = Get-Content $ReviewFile -Raw
-
-    if ($AllowPassWithCaveats -and ($review -match "VERDICT:\s*PASS_WITH_CAVEATS")) {
-        return "PASS_WITH_CAVEATS"
-    }
 
     if ($review -match "VERDICT:\s*PASS") {
         return "PASS"
@@ -285,10 +214,6 @@ function Get-ReviewVerdict {
 
 function Get-CodexVerdict {
     return Get-ReviewVerdict -ReviewFile (Join-Path $AiLoop "codex_review.md")
-}
-
-function Get-ClaudeVerdict {
-    return Get-ReviewVerdict -ReviewFile (Join-Path $AiLoop "claude_final_review.md") -AllowPassWithCaveats $true
 }
 
 function Extract-FixPromptFromFile {
@@ -325,17 +250,6 @@ function Extract-FixPromptFromFile {
 
 function Extract-FixPrompt {
     $nextPromptFile = Join-Path $AiLoop "next_cursor_prompt.md"
-
-    $claudeReview = Join-Path $AiLoop "claude_final_review.md"
-    if (Test-Path $claudeReview) {
-        $claudeVerdict = Get-ClaudeVerdict
-        if ($claudeVerdict -eq "FIX_REQUIRED") {
-            if (Extract-FixPromptFromFile -ReviewFile $claudeReview -OutputPromptFile $nextPromptFile) {
-                return $true
-            }
-        }
-    }
-
     $codexReview = Join-Path $AiLoop "codex_review.md"
     return Extract-FixPromptFromFile -ReviewFile $codexReview -OutputPromptFile $nextPromptFile
 }
@@ -395,7 +309,6 @@ function Stage-SafeProjectFiles {
 
     # Intentionally do NOT stage runtime artifacts:
     # .ai-loop/codex_review.md
-    # .ai-loop/claude_final_review.md
     # .ai-loop/last_diff.patch
     # .ai-loop/test_output.txt
     # .ai-loop/test_output_before_commit.txt
@@ -485,48 +398,16 @@ function Try-ResumeFromExistingReview {
         return $true
     }
 
-    $claudeReview = Join-Path $AiLoop "claude_final_review.md"
-    if (Test-Path $claudeReview) {
-        $claudeVerdict = Get-ClaudeVerdict
-
-        if (($claudeVerdict -eq "PASS") -or ($claudeVerdict -eq "PASS_WITH_CAVEATS")) {
-            Write-Host "Existing Claude final verdict allows commit/push."
-            Commit-And-Push
-            Write-FinalStatus "PASS from resume mode. Changes committed and pushed if NoPush was not enabled."
-            Write-Host "Final status: PASS"
-            exit 0
-        }
-
-        if (Extract-FixPrompt) {
-            Write-Host "Extracted fix prompt from existing Claude review."
-            Run-CursorFix | Out-Null
-            return $true
-        }
-    }
-
     $codexReview = Join-Path $AiLoop "codex_review.md"
     if (Test-Path $codexReview) {
         $codexVerdict = Get-CodexVerdict
 
         if ($codexVerdict -eq "PASS") {
-            Write-Host "Existing Codex verdict is PASS. Running Claude final review."
-            Run-ClaudeFinalReview | Out-Null
-
-            $claudeVerdict = Get-ClaudeVerdict
-            if (($claudeVerdict -eq "PASS") -or ($claudeVerdict -eq "PASS_WITH_CAVEATS")) {
-                Commit-And-Push
-                Write-FinalStatus "PASS from resume mode after Claude final review. Changes committed and pushed if NoPush was not enabled."
-                Write-Host "Final status: PASS"
-                exit 0
-            }
-
-            if (Extract-FixPrompt) {
-                Run-CursorFix | Out-Null
-                return $true
-            }
-
-            Write-FinalStatus "STOPPED: Claude requested fixes, but no fix prompt could be extracted."
-            exit 1
+            Write-Host "Existing Codex verdict is PASS. Running final test gate, commit, and push."
+            Commit-And-Push
+            Write-FinalStatus "PASS from resume mode. Changes committed and pushed if NoPush was not enabled."
+            Write-Host "Final status: PASS"
+            exit 0
         }
 
         if (Extract-FixPrompt) {
@@ -566,41 +447,19 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         Write-Host ""
         Write-Host "Codex verdict: PASS"
 
-        Run-ClaudeFinalReview | Out-Null
+        Commit-And-Push
 
-        $claudeVerdict = Get-ClaudeVerdict
+        Write-FinalStatus "PASS after iteration $i. Codex=PASS. Changes committed and pushed if NoPush was not enabled."
 
-        if (($claudeVerdict -eq "PASS") -or ($claudeVerdict -eq "PASS_WITH_CAVEATS")) {
-            Write-Host "Claude final verdict: $claudeVerdict"
+        Write-Host ""
+        Write-Host "Final status: PASS"
+        Write-Host "See:"
+        Write-Host ".ai-loop\final_status.md"
+        Write-Host ".ai-loop\codex_review.md"
+        Write-Host ".ai-loop\cursor_summary.md"
+        Write-Host ".ai-loop\project_summary.md"
 
-            Commit-And-Push
-
-            Write-FinalStatus "PASS after iteration $i. Codex=$codexVerdict; Claude=$claudeVerdict. Changes committed and pushed if NoPush was not enabled."
-
-            Write-Host ""
-            Write-Host "Final status: PASS"
-            Write-Host "See:"
-            Write-Host ".ai-loop\final_status.md"
-            Write-Host ".ai-loop\codex_review.md"
-            Write-Host ".ai-loop\claude_final_review.md"
-            Write-Host ".ai-loop\cursor_summary.md"
-            Write-Host ".ai-loop\project_summary.md"
-
-            exit 0
-        }
-
-        Write-Host "Claude final verdict: FIX_REQUIRED"
-
-        $hasPrompt = Extract-FixPrompt
-
-        if (!$hasPrompt) {
-            Write-FinalStatus "STOPPED: Claude requested fixes, but no fix prompt was extracted."
-            Write-Host "Stopped: Claude requested fixes, but no fix prompt was extracted."
-            exit 1
-        }
-
-        Run-CursorFix | Out-Null
-        continue
+        exit 0
     }
 
     $hasPrompt = Extract-FixPrompt
@@ -624,7 +483,6 @@ Write-Host "Stopped: max iterations reached. Manual review required."
 Write-Host "See:"
 Write-Host ".ai-loop\final_status.md"
 Write-Host ".ai-loop\codex_review.md"
-Write-Host ".ai-loop\claude_final_review.md"
 Write-Host ".ai-loop\cursor_summary.md"
 Write-Host ".ai-loop\project_summary.md"
 

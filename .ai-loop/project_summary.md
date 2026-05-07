@@ -2,7 +2,7 @@
 
 ## Project purpose
 
-Local PowerShell-based AI development loop that coordinates Cursor (implementer), Codex (review), Claude (final review), optional tests, and guarded git commit/push using a file-based contract under `.ai-loop/`.
+Local PowerShell-based AI development loop that coordinates Cursor (implementer), Codex (review), optional tests, and guarded git commit/push using a file-based contract under `.ai-loop/`.
 
 ## Current architecture
 
@@ -14,7 +14,7 @@ Local PowerShell-based AI development loop that coordinates Cursor (implementer)
 
 ## Current pipeline / workflow
 
-Install scripts into a target repo, author task and context, run `ai_loop_auto.ps1`, review artifacts, continue or commit per safety model (`SafeAddPaths`, ignored runtime files).
+Install scripts into a target repo, author task and context, run `ai_loop_auto.ps1`, review artifacts, continue or commit per safety model (`SafeAddPaths`, ignored runtime files). After Codex returns `PASS`, the PowerShell orchestrator runs the final test gate (`Commit-And-Push`), then stages safe paths and pushes unless `-NoPush`. Resume mode respects existing `next_cursor_prompt.md` or `codex_review.md` (`PASS` → final gate + commit/push; `FIX_REQUIRED` → extract fix prompt → Cursor).
 
 ## Important design decisions
 
@@ -22,23 +22,24 @@ Install scripts into a target repo, author task and context, run `ai_loop_auto.p
 - Default `SafeAddPaths` in `ai_loop_auto.ps1` and `continue_ai_loop.ps1` includes repo-root `ai_loop.py` and `pytest.ini` so intent-to-add review covers the Python entry and pytest config.
 - `project_summary.md` holds long-lived context; it is not a per-task changelog.
 - Parity between the Python `after-cursor` step and PowerShell `Save-TestAndDiff` includes a short git status file for reviewers.
+- No automated Claude final review in the orchestrator path; Codex PASS triggers final tests then commit/push.
 
 ## Known risks / constraints
 
-- External CLIs (`agent`, `codex`, `claude`) must be installed and authenticated where those steps are used.
+- External CLIs (`agent`, `codex`) must be installed and authenticated where those steps are used.
 
 ## Current stage
 
-**In progress / reviewable:** Default `SafeAddPaths` covers root `ai_loop.py` and `pytest.ini`; README optional-parameters example matches those defaults. Pytest remains root-safe via `pytest.ini`; `after-cursor` artifacts refreshed.
+**In progress / reviewable:** Claude final review removed from `ai_loop_auto.ps1` / `continue_ai_loop.ps1`; post-Codex PASS flow runs final test gate, commit, and optional push. Docs and templates aligned with Codex-only gate.
 
 ## Last completed task
 
-Per `.ai-loop/next_cursor_prompt.md`: extend default `SafeAddPaths` with repo-root `ai_loop.py` and `pytest.ini`; align README `-SafeAddPaths` example with script defaults; rerun `after-cursor` with pytest.
+Per `.ai-loop/next_cursor_prompt.md`: remove Claude final review (`NoClaudeFinalReview`, `Run-ClaudeFinalReview`, `Get-ClaudeVerdict`, `claude_final_review.md`, `claude -p`, resume Claude branches, `PASS_WITH_CAVEATS`); Codex PASS → final tests + commit/push; resume handles `next_cursor_prompt.md` and `codex_review.md` only.
 
 ## Next likely steps
 
-1. Stage root `ai_loop.py`, `pytest.ini`, `tests/`, and other paths listed in orchestrator `SafeAddPaths` when committing.
-2. Re-run `ai_loop_auto.ps1` / Codex or Claude when ready for the next review round or feature.
+1. Stage root `ai_loop.py`, `pytest.ini`, `tests/`, `scripts/`, and other paths listed in orchestrator `SafeAddPaths` when committing.
+2. Re-run `ai_loop_auto.ps1` / Codex when ready for the next review round or feature.
 
 ## Notes for future AI sessions
 

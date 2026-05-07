@@ -3,8 +3,7 @@
 A local PowerShell-based AI development loop for coordinating:
 
 - Cursor Agent as implementer
-- Codex as primary reviewer
-- Claude as final reviewer
+- Codex as reviewer
 - project tests
 - safe git commit and push
 
@@ -18,9 +17,8 @@ The orchestrator is designed to be installed into any git project that uses a fi
 4. Runs Codex review.
 5. If Codex requests fixes, runs Cursor Agent.
 6. Repeats until Codex passes or `MaxIterations` is reached.
-7. Runs Claude as final reviewer.
-8. If Claude passes, runs a final test gate.
-9. Commits and optionally pushes safe project files.
+7. Runs a final test gate.
+8. Commits and optionally pushes safe project files.
 
 ## Requirements
 
@@ -29,7 +27,6 @@ Install and authenticate:
 ```powershell
 agent --version
 codex --version
-claude --version
 git --version
 ```
 
@@ -37,7 +34,6 @@ Expected CLIs:
 
 - Cursor CLI: `agent`
 - OpenAI Codex CLI: `codex`
-- Claude Code CLI: `claude`
 
 ## Project-level memory
 
@@ -58,7 +54,7 @@ This file is not a detailed task log. It should contain durable context:
 - known risks;
 - next likely steps.
 
-Cursor updates it after each task. Codex and Claude read it during review.
+Cursor updates it after each task. Codex reads it during review.
 
 ## Install into a target project
 
@@ -114,7 +110,6 @@ or, if scripts are unblocked:
 -MaxIterations 10
 -CommitMessage "Message"
 -NoPush
--NoClaudeFinalReview
 -TestCommand "python -m pytest"
 -PostFixCommand "python src/main.py some-command"
 -SafeAddPaths "src/,tests/,README.md,scripts/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
@@ -128,7 +123,6 @@ It stages only `SafeAddPaths`. Runtime artifacts are intentionally excluded:
 
 ```text
 .ai-loop/codex_review.md
-.ai-loop/claude_final_review.md
 .ai-loop/last_diff.patch
 .ai-loop/test_output.txt
 .ai-loop/test_output_before_commit.txt
@@ -160,6 +154,5 @@ Before publishing this project publicly, make sure you have not committed:
 4. Wait for `final_status.md`.
 5. If stopped, inspect:
    - `.ai-loop/codex_review.md`
-   - `.ai-loop/claude_final_review.md`
    - `.ai-loop/cursor_summary.md`
 6. Continue with `continue_ai_loop.ps1`.
