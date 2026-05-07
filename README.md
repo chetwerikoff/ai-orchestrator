@@ -117,7 +117,7 @@ or, if scripts are unblocked:
 -NoClaudeFinalReview
 -TestCommand "python -m pytest"
 -PostFixCommand "python src/main.py some-command"
--SafeAddPaths "src/,tests/,README.md,scripts/,.gitignore,requirements.txt,pyproject.toml,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
+-SafeAddPaths "src/,tests/,README.md,scripts/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
 ```
 
 ## Safety model
