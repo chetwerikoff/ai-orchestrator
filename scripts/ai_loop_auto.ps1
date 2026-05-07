@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = "Continue"
 
-$ProjectRoot = Resolve-Path "."
+$ProjectRoot = (Resolve-Path ".").Path
 $AiLoop = Join-Path $ProjectRoot ".ai-loop"
 $Tmp = Join-Path $ProjectRoot ".tmp"
 
@@ -21,6 +21,24 @@ New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 $env:TEMP = $Tmp
 $env:TMP = $Tmp
 $env:PYTEST_DEBUG_TEMPROOT = $Tmp
+
+function Clear-AiLoopRuntimeState {
+    # Duplicated from ai_loop_task_first.ps1 (no shared module). When ai_loop_auto.ps1 is spawned
+    # from task-first right after Cursor, $env:AI_LOOP_CHAIN_FROM_TASK_FIRST skips deleting
+    # cursor_implementation_result.md so the implementer handoff stays intact.
+    $files = @(
+        ".ai-loop\codex_review.md", ".ai-loop/next_cursor_prompt.md", ".ai-loop/cursor_agent_output.txt",
+        ".ai-loop/cursor_implementation_output.txt", ".ai-loop/cursor_implementation_prompt.md", ".ai-loop/cursor_implementation_result.md",
+        ".ai-loop/test_output.txt", ".ai-loop/test_output_before_commit.txt", ".ai-loop/last_diff.patch", ".ai-loop/final_status.md",
+        ".ai-loop/git_status.txt", ".ai-loop/post_fix_output.txt", ".ai-loop/claude_final_review.md"
+    )
+    if ($env:AI_LOOP_CHAIN_FROM_TASK_FIRST -eq "1") {
+        $files = $files | Where-Object { $_ -notmatch 'cursor_implementation_result\.md' }
+    }
+    foreach ($rel in $files) {
+        Remove-Item (Join-Path $ProjectRoot $rel) -Force -ErrorAction SilentlyContinue
+    }
+}
 
 function Write-FinalStatus {
     param([string]$Text)
@@ -437,6 +455,10 @@ function Try-ResumeFromExistingReview {
 
 Ensure-AiLoopFiles
 
+if (-not $Resume) {
+    Clear-AiLoopRuntimeState
+}
+
 $resumed = Try-ResumeFromExistingReview
 
 if ($resumed) {
@@ -452,6 +474,35 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
 
     Save-TestAndDiff | Out-Null
     Run-PostFixCommand | Out-Null
+
+    $porcelainLines = @(git status --porcelain --untracked-files=all 2>$null)
+    $hasWork = $false
+    foreach ($ln in $porcelainLines) {
+        if (-not [string]::IsNullOrWhiteSpace($ln)) {
+            $hasWork = $true
+            break
+        }
+    }
+    if (-not $hasWork) {
+        if ($i -eq 1) {
+            Write-FinalStatus @"
+STATUS: FAILED
+REASON: REVIEW_STARTED_ON_CLEAN_TREE
+DETAIL: Working tree is clean before Codex review. Use scripts/ai_loop_task_first.ps1 when starting from scratch with Cursor, or make changes before calling REVIEW-only mode.
+"@
+            Write-Host ""
+            Write-Host "Clean tree on iteration 1: skipping Codex. Prefer task-first (ai_loop_task_first.ps1) when the working tree has no changes yet." -ForegroundColor Yellow
+            exit 6
+        }
+        Write-FinalStatus @"
+STATUS: FAILED
+REASON: NO_CHANGES_AFTER_CURSOR_FIX
+DETAIL: No working-tree changes before Codex review on iteration $i after the Cursor fix pass.
+"@
+        Write-Host ""
+        Write-Host "Iteration $i`: working tree clean before Codex (Cursor fix produced no git-visible changes). See .ai-loop\final_status.md" -ForegroundColor Yellow
+        exit 7
+    }
 
     Run-CodexReview | Out-Null
 
