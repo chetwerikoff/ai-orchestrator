@@ -59,8 +59,8 @@ def run_cmd(
     print(f"$ {printable}")
 
     try:
-        cp = subprocess.run(
-            cmd,
+        run_kwargs: dict[str, object] = dict(
+            args=cmd,
             cwd=str(cwd) if cwd else None,
             check=False,
             text=True,
@@ -68,6 +68,11 @@ def run_cmd(
             shell=shell,
             env=env,
         )
+        # Avoid locale decode errors when capturing on Windows (e.g. smart quotes in pytest output).
+        if capture:
+            run_kwargs["encoding"] = "utf-8"
+            run_kwargs["errors"] = "replace"
+        cp = subprocess.run(**run_kwargs)
     except FileNotFoundError as ex:
         raise CmdError(f"Command not found: {printable}") from ex
     except OSError as ex:
@@ -184,6 +189,12 @@ def git_status_porcelain(root: Path) -> str:
     return cp.stdout or ""
 
 
+def git_status_short(root: Path) -> str:
+    """Same as `git status --short` (matches PowerShell orchestrator artifact)."""
+    cp = run_cmd(["git", "status", "--short"], cwd=root, capture=True)
+    return cp.stdout or ""
+
+
 def git_diff_stat(root: Path) -> str:
     cp = run_cmd(["git", "diff", "--stat"], cwd=root, capture=True)
     return cp.stdout or ""
@@ -235,6 +246,7 @@ def make_ai_loop_paths(root: Path) -> dict[str, Path]:
         "codex_review": base / "codex_review.md",
         "pr_body": base / "pr_body.md",
         "test_output": base / "test_output.txt",
+        "git_status": base / "git_status.txt",
         "last_diff": base / "last_diff.patch",
         "pr_url": base / "pr_url.txt",
     }
@@ -358,6 +370,7 @@ def cmd_init(args: argparse.Namespace) -> None:
         root,
         [
             f"{APP_DIRNAME}/test_output.txt",
+            f"{APP_DIRNAME}/git_status.txt",
             f"{APP_DIRNAME}/last_diff.patch",
         ],
     )
@@ -515,6 +528,10 @@ def _save_diff_and_summaries(root: Path, paths: dict[str, Path]) -> tuple[str, s
     ]
     paths["last_diff"].parent.mkdir(parents=True, exist_ok=True)
     paths["last_diff"].write_text("\n".join(composite), encoding="utf-8")
+
+    status_short = git_status_short(root)
+    paths["git_status"].parent.mkdir(parents=True, exist_ok=True)
+    paths["git_status"].write_text(status_short, encoding="utf-8")
 
     # Print status and diff summary, explicitly including untracked files.
     print(status_full.rstrip())
@@ -827,6 +844,7 @@ def cmd_status(args: argparse.Namespace) -> None:
         paths["codex_review"],
         paths["pr_body"],
         paths["test_output"],
+        paths["git_status"],
         paths["last_diff"],
         paths["pr_url"],
     ]
