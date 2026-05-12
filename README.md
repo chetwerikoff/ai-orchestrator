@@ -21,6 +21,9 @@ Flow:
 task.md -> Cursor implementation -> if relevant git changes exist -> ai_loop_auto.ps1 (tests + Codex review/fix loop)
 ```
 
+> Local OpenCode + Qwen integration is in Phase 0/1 (see
+> `docs/architecture.md` §0.3); production implementer today is Cursor.
+
 If Cursor produces no relevant working tree changes twice (excluding orchestrator scratch files), Codex is skipped, `.ai-loop/final_status.md` records `NO_CHANGES_AFTER_CURSOR`, and the script exits non-zero.
 
 If Cursor only adds `.ai-loop/cursor_implementation_result.md` without editing code, that file must contain `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED`, or the script exits before Codex. That check uses the git delta for the Cursor pass (not unrelated pre-existing dirt), so a stale dirty `.ai-loop/task.md` alone does not bypass the marker requirement.
@@ -133,7 +136,7 @@ or, if scripts are unblocked:
 -NoPush
 -TestCommand "python -m pytest"
 -PostFixCommand "python src/main.py some-command"
--SafeAddPaths "src/,tests/,README.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
+-SafeAddPaths "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
 ```
 
 `ai_loop_task_first.ps1` accepts the Cursor-related switches above plus forwarding to the embedded auto loop: `-NoPush`, `-TestCommand`, `-PostFixCommand`, and `-SafeAddPaths` (same meanings as `ai_loop_auto.ps1`).

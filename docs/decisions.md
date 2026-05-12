@@ -1,5 +1,9 @@
 # Design Decisions
 
+Full rationale, risks, and supersession status for each decision are in
+`docs/architecture.md` §12 Decision Log. This file is a numbered index;
+treat the architecture-doc version as authoritative when they diverge.
+
 ## DD-001: File-based memory instead of chat memory
 
 Agents do not rely on shared chat context. They exchange durable state through `.ai-loop/`.
@@ -28,3 +32,69 @@ Review logs, diffs, test outputs, final status, temp files, input data, and outp
 ## DD-006: Task-first mode skips Codex on Cursor no-op
 
 `scripts/ai_loop_task_first.ps1` clears stale `.ai-loop` runtime files (except `task.md`), runs Cursor first, and calls `ai_loop_auto.ps1` only after detecting meaningful git changes (or an explicit `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED` in `cursor_implementation_result.md` when only that file changed). Two Cursor passes with no detectable changes skips Codex and exits non-zero with `NO_CHANGES_AFTER_CURSOR`.
+
+## DD-007: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-008: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-009: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-010: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-011: MaxIterations cap (pending alignment)
+
+Orchestrator entrypoints default `-MaxIterations` to **10**; architecture review recommends **3** to limit reviewer thrash and cost. Alignment of scripts and docs is deferred to a dedicated change; scripts still use 10 today.
+
+See `docs/architecture.md` §12 DD-011 for rationale and risk notes.
+
+## DD-012: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-013: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-014: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-015: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-016: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-017: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-018: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-019: (reserved / not yet defined)
+
+Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+
+## DD-020: OpenCode proxy as required Phase-0/Phase-1 integration component
+
+Use a local HTTP proxy (`opencode_proxy.py` on port **8090**) between OpenCode and llama.cpp `llama-server` to convert text-format tool calls (`<tool_call>`, `<function=name>`, `<tools>`) into structured `tool_calls[]`. The proxy is the canonical integration point; it currently lives outside this repository pending relocation (Q-10).
+
+See `docs/architecture.md` §12 DD-020 for rationale and risk notes.
+
+## DD-021: Cursor as transitional implementer through Phase 1
+
+Keep Cursor Agent as the production implementer until OpenCode + Qwen3-Coder-30B-A3B has demonstrated stable behavior across real H2N workloads under the DD-020 proxy stack; until then OpenCode runs only on Phase-1 A/B comparison tasks.
+
+See `docs/architecture.md` §12 DD-021 for rationale and risk notes.

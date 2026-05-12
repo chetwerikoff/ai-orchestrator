@@ -1,5 +1,11 @@
 # Workflow
 
+> **Current state vs target.** This document describes the workflow that
+> runs in production today (Cursor as implementer, Codex as reviewer).
+> See `docs/architecture.md` §0 for a structured statement of current
+> state, and §1 onwards for the target multi-model design we are
+> building toward.
+
 ## Overview
 
 The orchestrator uses a file-based protocol:
