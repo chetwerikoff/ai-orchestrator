@@ -1,4 +1,4 @@
-# O04 — Sync docs/decisions.md, docs/workflow.md, README.md with architecture.md
+# O05 — Update all 4 files in templates/ with AGENTS.md reference, read priority, anti-leak rules
 
 - **Target project:** `ai-git-orchestrator`
 - **CWD:** `C:\Users\che\Documents\Projects\ai-git-orchestrator`
@@ -8,15 +8,15 @@
   powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPush
   ```
 
-- **Prerequisites:** O03 completed (architecture.md is the source of truth
-  for DD-020, DD-021, Q-10, §0 current state).
-- **Risk:** low. All three files are small; updates are additive plus a
-  couple of factual corrections.
-- **Estimated lines touched:** ~80 lines added across three files.
+- **Prerequisites:** O01..O04 completed.
+- **Risk:** low. Templates are inert files until copied into a target
+  project. Bad edits propagate only on next `install_into_project.ps1`
+  run.
+- **Estimated lines touched:** ~60 lines across 4 files.
 
 ---
 
-# Task: Synchronize decisions.md, workflow.md, README.md with the restructured architecture.md
+# Task: Update templates/ files with AGENTS.md reference, explicit read priority, and anti-history-leak rules
 
 ## Project context
 
@@ -25,204 +25,249 @@ Before starting, read:
 - `.ai-loop/project_summary.md`
 - `.ai-loop/task.md`
 - `.ai-loop/cursor_summary.md` if it exists
-- `AGENTS.md`
-- `docs/architecture.md` §0 (Current state), §12 (Decision Log), §13 (Open
-  Questions) — to pull current truth
-- `docs/decisions.md` — file you will extend
-- `docs/workflow.md` — file you will lightly update
-- `README.md` — file you may lightly update
+- `AGENTS.md` (root) — the rules these templates should align with
+- `templates/task.md` — current state
+- `templates/codex_review_prompt.md` — current state
+- `templates/project_summary.md` — current state
+- `templates/cursor_summary_template.md` — current state
+- `scripts/install_into_project.ps1` — to confirm which files get copied
 
 ## Background
 
-After O03, `docs/architecture.md` has a "§0 Current state" section and an
-extended §12 Decision Log (DD-001..DD-021) plus Q-10. The companion docs
-have not been updated yet:
+The current templates work but encode an outdated mental model:
 
-- `docs/decisions.md` currently lists only DD-001..DD-006.
-- `docs/workflow.md` describes the current Cursor + Codex workflow
-  accurately but does not point at architecture.md §0 / §1+ separation.
-- `README.md` is accurate for current state but does not mention
-  `AGENTS.md` (will be addressed by the optional README line in O02, or
-  here if O02 skipped it).
+- `templates/task.md` tells implementers to read `project_summary.md` and
+  `task.md` but does not mention `AGENTS.md`, does not prescribe a read
+  order, and does not prohibit reading the archive directories.
+- `templates/codex_review_prompt.md` lists files to read in a flat order
+  with no priority and reads raw `test_output.txt`. After O06 (next task)
+  the reviewer should prefer `test_failures_summary.md` when it exists.
+- `templates/project_summary.md` is just a structural template with TODO
+  placeholders. It does not warn the implementer against accumulating a
+  growing list of "Earlier rolls" — exactly the antipattern the audit
+  found in H2N parser's project_summary.md.
+- `templates/cursor_summary_template.md` is a passive scaffold. It does
+  not enforce "current iteration only, no historical rolls".
+
+This task hardens all four templates without changing the file contract
+(filenames, section names that scripts grep for must stay).
 
 ## Goal
 
-Make `docs/decisions.md`, `docs/workflow.md`, `README.md` consistent with
-`docs/architecture.md` after O03. No re-architecture: just propagate the
-decisions, add pointers, and remove inaccuracies.
+Update each template to:
+
+1. Reference `AGENTS.md` as required reading.
+2. State an explicit read priority.
+3. Prohibit prior-task history in the file (where applicable).
+4. Where applicable, prefer filtered artefacts over raw artefacts.
+
+Templates stay short (no template should exceed ~80 lines after edit).
 
 ## Scope
 
 ### Allowed
 
-- Edit `docs/decisions.md`:
-  - Add DD-007 through DD-021 entries (short summary + pointer to
-    `docs/architecture.md §12` for full rationale).
-  - Add a one-line preamble at top: "Full rationale and risks are in
-    `docs/architecture.md` §12 Decision Log. This file is a numbered index."
-- Edit `docs/workflow.md`:
-  - Add a one-line note near the top pointing readers to
-    `docs/architecture.md §0` for current state vs §1+ for target.
-  - Update the safe paths list at the bottom if it diverges from the
-    actual literal in `ai_loop_auto.ps1` (it currently matches; just
-    re-verify).
-- Edit `README.md`:
-  - If `AGENTS.md` pointer was not added by O02, add one line near top.
-  - Update the "What it does" or "Requirements" subsection to mention that
-    OpenCode + Qwen is in Phase 0/1 (not the default implementer) so
-    readers do not expect the canonical workflow to involve local models
-    by default. One sentence is enough.
-  - Update the "Install into a target project" subsection's file list
-    (currently lists 7 paths including `.ai-loop/codex_review_prompt.md`
-    and `.ai-loop/cursor_summary_template.md`). Verify against
-    `scripts/install_into_project.ps1` and fix any drift.
+- Edit `templates/task.md`
+- Edit `templates/codex_review_prompt.md`
+- Edit `templates/project_summary.md`
+- Edit `templates/cursor_summary_template.md`
 
 ### Not allowed
 
-- Do **not** modify `docs/architecture.md` (that was O03; this is sync).
-- Do **not** modify `docs/safety.md` (safe paths literal lives there in
-  prose; only update if it diverges from the script literal).
-- Do **not** modify any file in `scripts/`, `tests/`, `templates/`,
-  `.ai-loop/`.
-- Do **not** introduce new decisions in this task. Only mirror what
-  `docs/architecture.md` already records.
-- Do **not** expand `docs/decisions.md` into a full essay. Each entry is
-  one short paragraph + pointer.
+- Do **not** rename any template file. `install_into_project.ps1` copies
+  by exact name.
+- Do **not** modify `scripts/install_into_project.ps1` or any other script.
+- Do **not** modify the parseable / regex-matched portions of any
+  template. Specifically:
+  - The Codex review template's "VERDICT: PASS or FIX_REQUIRED" and
+    "FIX_PROMPT_FOR_CURSOR:" / "FINAL_NOTE:" labels are parsed by
+    `Get-ReviewVerdict` and `Extract-FixPromptFromFile` in
+    `ai_loop_auto.ps1`. **Keep these exact strings.**
+  - The cursor_summary template's section ordering is referenced in
+    several places. Keep top-level `##` sections and their order; you
+    may add new ones at the end.
+- Do **not** include references to artefacts that do not yet exist as of
+  this task (e.g. `test_failures_summary.md` is created in O06). Use
+  conditional wording: "if `test_failures_summary.md` exists, read it
+  first; otherwise read `test_output.txt`".
+- Do **not** modify any file in `docs/`, `.ai-loop/`, `scripts/`,
+  `tests/`, `AGENTS.md`, `README.md`.
 
 ## Files likely to change
 
-- `docs/decisions.md` (extend)
-- `docs/workflow.md` (small addition)
-- `README.md` (small corrections)
+- `templates/task.md`
+- `templates/codex_review_prompt.md`
+- `templates/project_summary.md`
+- `templates/cursor_summary_template.md`
 
 ## Required behavior
 
-### Part 1: `docs/decisions.md`
+### Template 1: `templates/task.md`
 
-Current state: lists DD-001 through DD-006. Each is a short paragraph.
-
-Add at top of file (right under the `# Design Decisions` heading):
-
-```markdown
-Full rationale, risks, and supersession status for each decision are in
-`docs/architecture.md` §12 Decision Log. This file is a numbered index;
-treat the architecture-doc version as authoritative when they diverge.
-```
-
-Add entries DD-007 through DD-021 below DD-006. For each, write a single
-short paragraph (2–4 lines) that summarizes the decision and links to
-architecture.md. Do **not** copy the full rationale from architecture.md —
-this file is an index.
-
-Template for each entry:
+Current header section starts with "## Project context" and lists three
+files to read. Replace with:
 
 ```markdown
-## DD-NNN: <short title>
+## Project context
 
-<2-4 line summary of the decision and its current status>
+Required reading before starting (in order; stop when you have enough):
 
-See `docs/architecture.md` §12 DD-NNN for rationale and risk notes.
+1. `AGENTS.md` at repo root — working rules and forbidden paths
+2. `.ai-loop/task.md` — this task
+3. `.ai-loop/project_summary.md` — durable project orientation
+4. `.ai-loop/cursor_summary.md` — only if this is iteration 2+
+
+Do not read by default:
+
+- `docs/archive/` — superseded design documents
+- `.ai-loop/archive/` — historical task rolls
+- `.ai-loop/_debug/` — raw agent stdout, debug-only
 ```
 
-For DD-007 through DD-021, pull the title and one-line summary directly
-from the corresponding entry in `docs/architecture.md` §12. If a decision
-listed in architecture.md does not yet have a clearly defined title in
-that doc, use the implementer's best judgment to pick a concise title
-(≤8 words) and note "(title may need revision)" in cursor_summary.md.
+Keep all other sections of the template intact. They are reasonable as-is.
 
-DD-020 and DD-021 (added by O03) MUST be present.
-
-If any of DD-007 through DD-019 are not yet defined in
-`docs/architecture.md` §12 (because the architecture doc skipped numbers),
-note the gap explicitly:
+Add a new section right before "## Important" at the end:
 
 ```markdown
-## DD-NNN: (reserved / not yet defined)
+## Output hygiene
 
-Placeholder; see `docs/architecture.md` §12 for current decision numbering.
+The implementer must not:
+
+- duplicate this task description into `.ai-loop/cursor_summary.md`
+- include earlier task narrative in `.ai-loop/project_summary.md`
+- write to `.ai-loop/_debug/` or `docs/archive/`
+- commit or push (the orchestrator handles git)
 ```
 
-This makes future drift visible without forcing a fabrication.
+### Template 2: `templates/codex_review_prompt.md`
 
-### Part 2: `docs/workflow.md`
-
-Add a single paragraph near the top of the file (after the `# Workflow`
-heading, before the existing `## Overview`):
+This is the prompt Codex receives. Replace the "Read:" block with:
 
 ```markdown
-> **Current state vs target.** This document describes the workflow that
-> runs in production today (Cursor as implementer, Codex as reviewer).
-> See `docs/architecture.md` §0 for a structured statement of current
-> state, and §1 onwards for the target multi-model design we are
-> building toward.
+Read in this priority order (stop reading once verdict is clear):
+
+1. `.ai-loop/task.md` — current task contract
+2. `.ai-loop/project_summary.md` — durable project orientation
+3. `AGENTS.md` at repo root — working rules
+4. `.ai-loop/cursor_summary.md` — implementer's report on the latest
+   iteration
+5. `.ai-loop/diff_summary.txt` — `git diff --stat` short overview
+   (if present)
+6. `.ai-loop/test_output.txt` — pytest -q output
+7. `.ai-loop/test_failures_summary.md` — filtered failures
+   (if present; this file is generated only when pytest fails)
+8. `.ai-loop/last_diff.patch` — full git diff (only if items 5–7 are
+   not sufficient)
+9. `.ai-loop/git_status.txt` — short porcelain status
 ```
 
-Then verify the safe paths literal at the bottom (if mentioned) matches
-the literal in `scripts/ai_loop_auto.ps1` `$SafeAddPaths` parameter
-default. If `workflow.md` does not contain that literal, do not add it —
-`docs/safety.md` is the home for it.
+Note: items 5 and 7 (`diff_summary.txt`, `test_failures_summary.md`) are
+introduced by O06. Until O06 runs, these files do not exist; the
+"(if present)" wording handles that gracefully.
 
-No other changes to `workflow.md`.
+Keep the "Check:" numbered list and the "Return exactly:" block intact.
+Specifically these EXACT strings must remain unchanged (regex-matched in
+scripts):
 
-### Part 3: `README.md`
+- `VERDICT: PASS or FIX_REQUIRED`
+- `FIX_PROMPT_FOR_CURSOR:`
+- `FINAL_NOTE:`
 
-Three small corrections:
-
-**3.a** — If `README.md` does not yet contain a line about `AGENTS.md` (O02
-optionally added one), add this single line right after the title line:
+Add a new sentence at the bottom of the prompt template, right before the
+`Return exactly:` block:
 
 ```markdown
-See `AGENTS.md` for AI-agent working rules.
+Do not request manual steps unless absolutely required. If the implementer
+deferred the task instead of implementing it, return `VERDICT: FIX_REQUIRED`
+with a concrete fix prompt.
 ```
 
-Verify first by grep:
+(The current template already says something similar; merge without
+duplication.)
 
-```powershell
-Select-String -Path .\README.md -Pattern "AGENTS\.md" | Measure-Object |
-  Select-Object -ExpandProperty Count
-```
+### Template 3: `templates/project_summary.md`
 
-If 0, add the line. If ≥1, leave README.md untouched for this sub-step.
+This template is what gets copied into a target project's
+`.ai-loop/project_summary.md` on first install. It is a scaffold with
+TODO placeholders.
 
-**3.b** — In the "What it does" subsection (or whichever subsection
-describes the implementer), add a single short sentence acknowledging that
-local-model integration is in progress:
+Add a single block at the very top (before the existing `# Project Summary`
+heading or as a Markdown comment under the heading):
 
 ```markdown
-> Local OpenCode + Qwen integration is in Phase 0/1 (see
-> `docs/architecture.md §0.3`); production implementer today is Cursor.
+<!--
+HARD RULES for project_summary.md:
+
+1. This file is DURABLE orientation, not a per-task changelog.
+2. Target length: under 80 lines. If the file exceeds 100 lines, compact
+   it: move "Earlier roll" / "Last completed task" content into
+   .ai-loop/archive/rolls/<date>_<topic>.md.
+3. Do NOT accumulate "Earlier roll" sections in this file. The
+   "Last completed task" section holds ONLY the most recent task.
+4. Do NOT copy code, function signatures, or backtick-heavy API surfaces.
+   Use prose pointers to source files.
+5. Active design constraints stay here. Historical decisions go to
+   docs/decisions.md.
+
+When in doubt: ask, does this help an agent orient on the NEXT task?
+If no, it belongs in archive/.
+-->
 ```
 
-This should go right after the existing "Flow: ..." codeblock, as a single
-quoted note paragraph. One paragraph, two lines max.
+Keep the existing section structure (## Project purpose, ## Current
+architecture, etc.). Do not add new top-level sections.
 
-**3.c** — Verify the install-into-target-project file list (currently
-listed in `## Install into a target project`):
+If the current template has a "## Last completed task" section with
+multiple bullets/blocks, add a one-line constraint right under that
+heading:
 
-```text
-scripts/ai_loop_auto.ps1
-scripts/ai_loop_task_first.ps1
-scripts/continue_ai_loop.ps1
-.ai-loop/task.md
-.ai-loop/project_summary.md
-.ai-loop/codex_review_prompt.md
-.ai-loop/cursor_summary_template.md
+```markdown
+Most recent task only. Older tasks belong in `.ai-loop/archive/rolls/`.
 ```
 
-Open `scripts/install_into_project.ps1` and compare. If the actual list
-differs (file added or removed), correct README to match. Do NOT modify
-`scripts/install_into_project.ps1` itself.
+### Template 4: `templates/cursor_summary_template.md`
 
-Common drift to look for:
-- Templates from `templates/` are copied INTO target's `.ai-loop/`, so the
-  source path is `templates/X.md` but the README documents the target
-  basename. Both lists should reflect what the user will see in their
-  target project.
-- If `install_into_project.ps1` copies `AGENTS.md` (it may not yet — that
-  could be a future step), README should reflect actual current behavior,
-  not aspiration.
+This template is what the orchestrator resets to a stub on each task run
+(see `Initialize-CursorSummaryForImplementation` in
+`ai_loop_task_first.ps1`).
 
-If the lists already agree, no change needed for 3.c.
+Add the following hard rules right under the `# Cursor Summary` heading
+(as a Markdown comment block or visible note — implementer's choice):
+
+```markdown
+<!--
+HARD RULES for cursor_summary.md:
+
+1. This file describes ONLY the current iteration / task.
+2. Do NOT include "Earlier roll", "Prior task", or any historical content.
+3. Target length: under 50 lines.
+4. Do NOT paste the full diff. Use the diff for verification, not for
+   storage.
+5. Do NOT duplicate the task description from .ai-loop/task.md.
+
+Each section below has a target length; respect it.
+-->
+```
+
+Update the existing section headers with target line counts in parens:
+
+- `## Changed files` (≤ 10 lines)
+- `## Test result` (≤ 5 lines — just the summary line, not full output)
+- `## Implementation summary` (≤ 10 lines)
+- `## Task-specific verification` (≤ 10 lines)
+- `## Project summary update` (≤ 3 lines)
+- `## Skipped work` (≤ 5 lines)
+- `## Remaining risks` (≤ 5 lines, bullet form)
+
+You may add the target counts in italic next to each header, e.g.:
+
+```markdown
+## Changed files
+*(target: ≤ 10 lines)*
+```
+
+Section ordering must stay the same as the current template — scripts may
+not care, but humans skim by position.
 
 ## Tests
 
@@ -232,90 +277,97 @@ Run:
 python -m pytest -q
 ```
 
-Expected: same passing count.
+Expected: same count of passing tests. None of the template files are
+imported or parsed by current tests.
 
-The orchestrator-validation tests include `SafeAddPaths` parity. They do
-not parse decisions.md or workflow.md, so this task should not affect
-them. If a test breaks, debug rather than blindly aligning — likely a real
-drift was already present.
+If `tests/test_orchestrator_validation.py` greps for specific strings
+inside templates (the literal `VERDICT: PASS or FIX_REQUIRED`), those
+strings must still exist after this task — verification step 4 confirms.
 
 ## Verification
 
-1. `docs/decisions.md` contains DD-001 through DD-021 (or placeholder
-   entries for skipped numbers):
+1. All four template files still exist:
 
    ```powershell
-   Select-String -Path .\docs\decisions.md -Pattern "^## DD-0\d{2}" |
+   Test-Path .\templates\task.md
+   Test-Path .\templates\codex_review_prompt.md
+   Test-Path .\templates\project_summary.md
+   Test-Path .\templates\cursor_summary_template.md
+   ```
+
+   All return `True`.
+
+2. Each template references `AGENTS.md`:
+
+   ```powershell
+   @('task.md','codex_review_prompt.md','project_summary.md','cursor_summary_template.md') | ForEach-Object {
+       $count = (Select-String -Path ".\templates\$_" -Pattern "AGENTS\.md" | Measure-Object).Count
+       "$_ : $count"
+   }
+   ```
+
+   Each returns at least 1, except `cursor_summary_template.md` may
+   return 0 (that template does not need to reference AGENTS.md
+   directly — it's a fill-in scaffold, not an instruction sheet).
+
+3. Critical regex-matched strings in codex_review_prompt.md are intact:
+
+   ```powershell
+   Select-String -Path .\templates\codex_review_prompt.md -Pattern "VERDICT: PASS or FIX_REQUIRED" |
+     Measure-Object | Select-Object -ExpandProperty Count
+   Select-String -Path .\templates\codex_review_prompt.md -Pattern "FIX_PROMPT_FOR_CURSOR:" |
+     Measure-Object | Select-Object -ExpandProperty Count
+   Select-String -Path .\templates\codex_review_prompt.md -Pattern "FINAL_NOTE:" |
      Measure-Object | Select-Object -ExpandProperty Count
    ```
 
-   Returns 21.
+   All three return at least 1.
 
-2. `docs/decisions.md` references architecture.md for at least DD-007..DD-021:
-
-   ```powershell
-   Select-String -Path .\docs\decisions.md -Pattern "docs/architecture\.md" |
-     Measure-Object | Select-Object -ExpandProperty Count
-   ```
-
-   Returns ≥ 15.
-
-3. `docs/workflow.md` mentions §0 current state:
+4. Each template's line count is in target range:
 
    ```powershell
-   Select-String -Path .\docs\workflow.md -Pattern "§0|architecture\.md" |
-     Measure-Object | Select-Object -ExpandProperty Count
+   Get-ChildItem .\templates\*.md | ForEach-Object {
+       $lines = (Get-Content $_.FullName | Measure-Object -Line).Lines
+       "$($_.Name): $lines lines"
+   }
    ```
 
-   Returns ≥ 1.
+   - `task.md`: ≤ 120 lines (was ~90 before; expect modest growth)
+   - `codex_review_prompt.md`: ≤ 80 lines (was ~45 before)
+   - `project_summary.md`: ≤ 80 lines
+   - `cursor_summary_template.md`: ≤ 60 lines
 
-4. `README.md` mentions both `AGENTS.md` and OpenCode/Qwen phase:
-
-   ```powershell
-   Select-String -Path .\README.md -Pattern "AGENTS\.md" |
-     Measure-Object | Select-Object -ExpandProperty Count
-   Select-String -Path .\README.md -Pattern "Phase 0|Phase 1|OpenCode|Qwen" |
-     Measure-Object | Select-Object -ExpandProperty Count
-   ```
-
-   Both return ≥ 1.
-
-5. Install file list in `README.md` matches actual behavior of
-   `scripts/install_into_project.ps1` (manual visual check or grep
-   pairs).
-
-6. `pytest -q` passes.
+5. `pytest -q` passes.
 
 ## Cursor summary requirements
 
 Update `.ai-loop/cursor_summary.md` with:
 
-1. `docs/decisions.md`: extended from DD-006 to DD-021 (with N placeholder
-   entries for any reserved numbers).
-2. `docs/workflow.md`: added one current-vs-target note paragraph.
-3. `README.md`: added AGENTS.md pointer (if missing), OpenCode/Qwen phase
-   sentence, install list verified (Y/N drift fixed).
-4. `pytest -q` result.
+1. Per-template, one line stating what was added (read-priority block,
+   anti-leak comment, target line counts, etc.).
+2. Confirmation that VERDICT / FIX_PROMPT_FOR_CURSOR / FINAL_NOTE labels
+   in codex_review_prompt.md are unchanged.
+3. `pytest -q` result.
 
 Target length: 10–15 lines.
 
 ## Project summary update
 
 Update `.ai-loop/project_summary.md` only if durable architecture changed.
-For this task, no durable architecture change — just doc sync. One line is
-fine, e.g. under "Notes for future AI sessions":
+One line is enough, in "Notes for future AI sessions":
 
-- "`docs/decisions.md` is the numbered index; `docs/architecture.md` §12
-  is the authoritative version with rationale."
+- "Templates in `templates/` enforce AGENTS.md reading and anti-history-
+  leak rules. See `tasks/context_audit/O05_*.md` for rationale."
 
 ## Important
 
-- This is a synchronization task. **Do not introduce decisions** that are
-  not in `docs/architecture.md`. If you notice missing decisions while
-  writing `decisions.md`, leave a placeholder and mention it in
-  `cursor_summary.md` so a follow-up task can address the gap in
-  `architecture.md`.
+- **Do not change** the parseable strings in codex_review_prompt.md. If
+  unsure whether a string is parseable, check the regex usage in
+  `scripts/ai_loop_auto.ps1` (`Get-ReviewVerdict`,
+  `Extract-FixPromptFromFile`).
+- Markdown HTML comments (`<!--...-->`) are fine inside templates — they
+  render invisibly in Markdown viewers and survive copy-into-target via
+  `install_into_project.ps1`.
+- Keep templates short. If a section grows past the target line count,
+  prune rather than break the target.
 - Do not commit. The orchestrator handles commit after Codex PASS.
-- Resist scope creep. If you see other doc errors during this task,
-  list them in `cursor_summary.md` "Remaining risks" — do not fix in
-  this task.

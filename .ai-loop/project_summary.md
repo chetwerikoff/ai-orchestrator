@@ -51,6 +51,7 @@ Install scripts into a target repo, author task and context. For a **new** task,
 
 ## Notes for future AI sessions
 
+- Templates in `templates/` enforce `AGENTS.md` reading and anti-history-leak rules. See `tasks/context_audit/O05_update_templates.md` for rationale.
 - `docs/decisions.md` is the numbered index; `docs/architecture.md` §12 is the authoritative version with rationale.
 - Working rules for AI agents are in `AGENTS.md` at repo root.
 - Keep durable project-level context here; put per-iteration detail in `.ai-loop/cursor_summary.md`.

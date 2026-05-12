@@ -2,11 +2,18 @@
 
 ## Project context
 
-Before starting, read:
+Required reading before starting (in order; stop when you have enough):
 
-- `.ai-loop/project_summary.md`
-- `.ai-loop/task.md`
-- `.ai-loop/cursor_summary.md` if it exists
+1. `AGENTS.md` at repo root — working rules and forbidden paths
+2. `.ai-loop/task.md` — this task
+3. `.ai-loop/project_summary.md` — durable project orientation
+4. `.ai-loop/cursor_summary.md` — only if this is iteration 2+
+
+Do not read by default:
+
+- `docs/archive/` — superseded design documents
+- `.ai-loop/archive/` — historical task rolls
+- `.ai-loop/_debug/` — raw agent stdout, debug-only
 
 ## Goal
 
@@ -85,6 +92,15 @@ Update it only with durable project-level information:
 - next likely steps.
 
 Do not turn it into a verbose task log.
+
+## Output hygiene
+
+The implementer must not:
+
+- duplicate this task description into `.ai-loop/cursor_summary.md`
+- include earlier task narrative in `.ai-loop/project_summary.md`
+- write to `.ai-loop/_debug/` or `docs/archive/`
+- commit or push (the orchestrator handles git)
 
 ## Important
 
