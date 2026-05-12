@@ -14,6 +14,7 @@ By default, the orchestrator stages only explicit safe paths:
 src/
 tests/
 README.md
+AGENTS.md
 scripts/
 docs/
 templates/

@@ -1,4 +1,4 @@
-# O01 — Archive obsolete root docs
+# O02 — Create AGENTS.md at orchestrator root
 
 - **Target project:** `ai-git-orchestrator`
 - **CWD:** `C:\Users\che\Documents\Projects\ai-git-orchestrator`
@@ -8,15 +8,15 @@
   powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPush
   ```
 
-- **Prerequisites:** none. This is the first task in the orchestrator queue.
-- **Risk:** very low (pure file moves, no content change, fully reversible
-  with `git mv` back).
-- **Estimated lines touched:** 3 file moves, possibly small README.md update if
-  it references any of the moved files.
+- **Prerequisites:** O01 completed (so the root namespace is clean).
+- **Risk:** low (new file, no existing file modified beyond an optional
+  README.md pointer).
+- **Estimated lines touched:** +1 new file (~70 lines), maybe +2 lines in
+  README.md for a pointer.
 
 ---
 
-# Task: Archive obsolete root-level architecture documents
+# Task: Create root AGENTS.md with concise working rules
 
 ## Project context
 
@@ -26,110 +26,179 @@ Before starting, read:
 - `.ai-loop/task.md`
 - `.ai-loop/cursor_summary.md` if it exists
 
-Background (for the implementer):
+Background:
 
-The repository root currently contains five large markdown files that
-compete for context every time an agent loads "project documentation":
+There is currently no `AGENTS.md` or `CLAUDE.md` at the root of any of the
+three projects (`ai-git-orchestrator`, `H2N_parser/h2n-range-extractor`,
+`H2N_parser/h2n-claude-review`). The context audit (2026-05-12) identified
+this as a gap: rules are scattered across `docs/safety.md`,
+`docs/workflow.md`, inline PowerShell prompts, and project_summary prose.
 
-```text
-task.md                                340 lines  (current task — KEEP)
-README.md                              187 lines  (keep)
-architecture_review.md                1312 lines  (historical, supersede)
-opencode_harness_expert_review.md     1154 lines  (historical, supersede)
-qwen_opencode_problem_for_claude.md    512 lines  (P0 diagnostic, superseded)
-```
-
-The last three are historical / superseded reviews. They were useful at the
-time but should not be discoverable as primary documentation. `docs/architecture.md`
-is now the active architectural source of truth, and the audit at
-`docs/context_audit.md` (or in chat) is the latest review.
+This task creates the orchestrator's `AGENTS.md` first. The other two
+projects get their own files in deferred tasks D02/D04.
 
 ## Goal
 
-Move the three superseded root markdown files into `docs/archive/` with a date
-prefix so they remain in history but are off the root namespace and off the
-default agent read path.
+Produce a concise (50–80 line) `AGENTS.md` at repo root that gives any AI
+agent (Cursor, Codex, Claude, or any tool that respects this convention) the
+working rules in one place, with pointers — not duplications — to detailed
+docs.
 
 ## Scope
 
 ### Allowed
 
-- `git mv` each of the three files into `docs/archive/` with date-prefixed
-  names (see Required behavior).
-- Create the `docs/archive/` directory if it does not exist.
-- If `README.md` references the moved files by name, update those references
-  to point to the new paths in `docs/archive/`.
-- Update `.gitignore` only if archive paths need explicit inclusion (they
-  should not — `docs/` is tracked by default).
+- Create new file `AGENTS.md` at repo root.
+- Optionally add one line to `README.md` pointing to `AGENTS.md` near the
+  top.
 
 ### Not allowed
 
-- Do **not** modify the contents of the moved files. Only rename / move.
-- Do **not** delete the files (this is archival, not removal).
-- Do **not** touch `docs/architecture.md`, `docs/decisions.md`,
-  `docs/workflow.md`, `docs/safety.md` in this task.
+- Do **not** copy the entire content of `docs/architecture.md`,
+  `docs/safety.md`, `docs/workflow.md`, `docs/decisions.md` into `AGENTS.md`.
+  Use pointers.
 - Do **not** modify any file in `scripts/`, `tests/`, `templates/`,
-  `.ai-loop/` (except the task contract files this template already covers).
-- Do **not** touch `task.md` at repo root — it is the current task surface.
+  `.ai-loop/`, `docs/` (except optionally `README.md` as noted above).
+- Do **not** create a `CLAUDE.md` in this task. That can be a follow-up if
+  needed; for now `AGENTS.md` covers all agents.
+- Do **not** include forbidden-paths rules for target projects here. This
+  file is about `ai-git-orchestrator` itself.
 
 ## Files likely to change
 
-- `architecture_review.md` → `docs/archive/2026-05-11_architecture_review.md`
-- `opencode_harness_expert_review.md` → `docs/archive/2026-05-11_opencode_harness_expert_review.md`
-- `qwen_opencode_problem_for_claude.md` → `docs/archive/2026-05-11_qwen_opencode_problem.md`
-- `README.md` — only if it references the moved filenames
-- new directory: `docs/archive/`
+- new file: `AGENTS.md`
+- optionally: `README.md` (add one pointer line)
 
 ## Required behavior
 
-1. Verify the three source files exist at repo root:
+Create `AGENTS.md` with **exactly the structure below**. Adapt the bracketed
+placeholders to actual current state. Total length target: 50–80 lines.
 
-   ```powershell
-   Test-Path .\architecture_review.md
-   Test-Path .\opencode_harness_expert_review.md
-   Test-Path .\qwen_opencode_problem_for_claude.md
-   ```
+```markdown
+# AGENTS.md
 
-   All three must return `True`.
+Working rules for AI agents operating in `ai-git-orchestrator`.
+Read this file once at the start of any task; it points to deeper docs only
+when needed.
 
-2. Create `docs/archive/` if not present:
+## Project purpose (one line)
 
-   ```powershell
-   New-Item -ItemType Directory -Force -Path .\docs\archive | Out-Null
-   ```
+PowerShell-based AI development loop coordinating Cursor (implementer),
+Codex (technical reviewer), and safe git commit/push for target projects.
 
-3. Move each file using `git mv` (not `Move-Item`, so git records as rename):
+## Working scope
 
-   ```powershell
-   git mv .\architecture_review.md `
-          .\docs\archive\2026-05-11_architecture_review.md
+You may edit:
 
-   git mv .\opencode_harness_expert_review.md `
-          .\docs\archive\2026-05-11_opencode_harness_expert_review.md
+- `scripts/` — orchestration logic
+- `tests/` — orchestrator validation tests
+- `templates/` — files copied into target projects by `install_into_project.ps1`
+- `docs/` — architecture, decisions, safety, workflow (NOT `docs/archive/`)
+- `README.md`, `AGENTS.md`, `.gitignore`, `pytest.ini`, `requirements.txt`
+- `.ai-loop/task.md`, `.ai-loop/cursor_summary.md`, `.ai-loop/project_summary.md`
+- `tasks/` — queued task specs
 
-   git mv .\qwen_opencode_problem_for_claude.md `
-          .\docs\archive\2026-05-11_qwen_opencode_problem.md
-   ```
+Never edit (forbidden):
 
-4. Search the rest of the repository for any references to the moved files by
-   their old basenames. Use the workspace search tool or:
+- `docs/archive/` — superseded design documents, history-only
+- `.ai-loop/_debug/` — raw agent stdout, debug-only (will exist after O06)
+- target project files via this repo
+- `ai_loop.py` unless task explicitly authorizes (it is experimental and
+  separate from the PowerShell loop)
 
-   ```powershell
-   rg -i "architecture_review\.md|opencode_harness_expert_review\.md|qwen_opencode_problem_for_claude\.md" `
-      --glob '!docs/archive/*' --glob '!.git/*' --glob '!.ai-loop/*'
-   ```
+## Read priority
 
-   Expected: zero matches outside `docs/archive/` and `.ai-loop/`. If matches
-   exist (likely in `README.md` or `docs/architecture.md`):
+When loading context for a task, read in this order. Stop reading when you
+have enough information:
 
-   - In Markdown links, update the path to `docs/archive/<dated_name>.md`.
-   - In prose references, prefer phrasing like
-     "(see `docs/archive/2026-05-11_architecture_review.md` for the original
-     review)".
+1. `.ai-loop/task.md` — current task contract (always)
+2. `.ai-loop/project_summary.md` — durable orientation (always)
+3. `AGENTS.md` — this file (always, once)
+4. `.ai-loop/cursor_summary.md` — previous iteration only (if N > 1)
+5. `docs/architecture.md` — only if task is architecture-related
+6. `docs/decisions.md`, `docs/workflow.md`, `docs/safety.md` — only when
+   directly relevant to task scope
 
-5. Do **not** edit `.ai-loop/architecture.md` references — that file
-   should not exist; if it does, leave it alone for now (it would be a
-   separate cleanup).
+Do not read by default:
+
+- `docs/archive/` — only by explicit task request
+- `tasks/context_audit/` — those are queued specs, not orientation
+- `.ai-loop/_debug/` — for human debugging only
+
+## Commands
+
+Test: `python -m pytest -q`
+Test with traceback: `python -m pytest -q --tb=short`
+
+PowerShell parse check:
+
+```powershell
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"
+```
+
+## Safe paths (committed by orchestrator)
+
+The default `SafeAddPaths` literal is:
+
+`src/,tests/,README.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md`
+
+This literal lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`,
+`scripts/continue_ai_loop.ps1`, and is documented in `docs/safety.md`. Keep
+them in sync. If you add a new always-commit path, update all four places.
+
+## Templates contract
+
+When you add or remove a file in `templates/`, also check
+`scripts/install_into_project.ps1` to update what is auto-copied into target
+projects.
+
+## Decision document policy
+
+- `docs/architecture.md` is the single source of truth for target design.
+- `docs/decisions.md` tracks numbered `DD-XXX` decisions.
+- When a decision is superseded, do not delete it. Mark it superseded inline
+  and keep the entry; add the new decision with a higher number.
+
+## Cursor summary contract
+
+After every iteration, update `.ai-loop/cursor_summary.md` with:
+
+- Changed files (brief list)
+- Test result (count, not full output)
+- What was implemented (3-5 lines)
+- Skipped items with reason
+- Remaining risks (1-3 bullets)
+
+Do NOT include:
+
+- Earlier task history ("Earlier roll", "Prior task", etc.)
+- Full diffs
+- Multi-page narratives
+
+Target length: under 50 lines.
+
+## Git hygiene
+
+- Do not commit `.ai-loop/_debug/` content
+- Do not commit `.tmp/`, `input/`, `output/`
+- Use `git mv` for renames so history is preserved
+- Do not commit secrets — check `docs/safety.md` for the recommended scan
+
+## When in doubt
+
+Ask the user. Do not invent commands, paths, or behaviors that are not
+documented here or in the linked docs.
+```
+
+After creating `AGENTS.md`, optionally add a single line near the top of
+`README.md` (e.g. right after the title or first paragraph):
+
+```markdown
+See `AGENTS.md` for AI-agent working rules.
+```
+
+Only add this line if `README.md` does not already mention `AGENTS.md`.
 
 ## Tests
 
@@ -139,101 +208,86 @@ Run:
 python -m pytest -q
 ```
 
-Expected: all tests pass. Currently the suite has ~23 tests in
-`tests/test_ai_loop.py` and `tests/test_orchestrator_validation.py`. No
-change in count is expected from this task.
+Expected: same passing count as before this task. No new tests are required
+for this task (a placeholder check that `AGENTS.md` exists is acceptable but
+optional — see "Optional test" below).
 
-The orchestrator-validation tests parse PowerShell scripts and check
-`SafeAddPaths` literals. None of those reference the moved files, so the test
-count should be unchanged.
+### Optional test (allowed, not required)
+
+If you want to lock in the file's presence, add a one-line test to
+`tests/test_orchestrator_validation.py`:
+
+```python
+def test_agents_md_exists():
+    assert Path("AGENTS.md").is_file()
+```
+
+Skip this if it would expand the test file structure significantly.
 
 ## Verification
 
-1. Three files exist at new locations:
+1. `AGENTS.md` exists at repo root:
 
    ```powershell
-   Test-Path .\docs\archive\2026-05-11_architecture_review.md
-   Test-Path .\docs\archive\2026-05-11_opencode_harness_expert_review.md
-   Test-Path .\docs\archive\2026-05-11_qwen_opencode_problem.md
+   Test-Path .\AGENTS.md
    ```
 
-   All must return `True`.
+   Returns `True`.
 
-2. Three files do **not** exist at old locations:
+2. Line count is 50–80:
 
    ```powershell
-   Test-Path .\architecture_review.md
-   Test-Path .\opencode_harness_expert_review.md
-   Test-Path .\qwen_opencode_problem_for_claude.md
+   (Get-Content .\AGENTS.md | Measure-Object -Line).Lines
    ```
 
-   All must return `False`.
+3. File mentions all required sections by header name:
 
-3. Git recognizes them as renames (not delete+add):
+   ```powershell
+   Select-String -Path .\AGENTS.md -Pattern "^## (Project purpose|Working scope|Read priority|Commands|Safe paths|Templates contract|Decision document policy|Cursor summary contract|Git hygiene)" |
+     Measure-Object | Select-Object -ExpandProperty Count
+   ```
+
+   Should return 9 (one match per required `##` header).
+
+4. `pytest -q` passes.
+
+5. No file in `docs/archive/` was modified (only the new `AGENTS.md` and
+   possibly `README.md`):
 
    ```powershell
    git status --short
    ```
 
-   Should show `R  architecture_review.md -> docs/archive/2026-05-11_architecture_review.md`
-   pattern (the `R` for rename), not `D` + `??`. If git did not detect the
-   rename (rare on this size), the file contents are identical so git's
-   rename heuristics should pick them up; if not, that's still fine — the
-   important property is content preservation.
-
-4. No broken references outside archive:
-
-   ```powershell
-   rg -i "architecture_review\.md|opencode_harness_expert_review\.md|qwen_opencode_problem_for_claude\.md" `
-      --glob '!docs/archive/*' --glob '!.git/*' --glob '!.ai-loop/*' .
-   ```
-
-   Either zero matches, or all remaining matches point to the new path.
-
-5. pytest passes:
-
-   ```powershell
-   python -m pytest -q
-   ```
+   Should only show `AGENTS.md` (new) and optionally `README.md` (modified).
 
 ## Cursor summary requirements
 
 Update `.ai-loop/cursor_summary.md` with:
 
-1. Three files moved with `git mv` and their new locations.
-2. Whether `README.md` (or any other file) was updated to fix references —
-   if yes, list the file and the change in one line.
-3. `pytest -q` result (count of passed / skipped tests).
-4. Risks remaining: none expected. If git did not detect a rename, mention
-   that the file contents are byte-identical so a future `git log --follow`
-   still works on the archived files.
+1. `AGENTS.md` created with ~N lines.
+2. Whether `README.md` was updated with the pointer line (yes/no).
+3. Whether optional test was added (yes/no).
+4. `pytest -q` result.
 
-Do **not** include:
+Do not include the content of `AGENTS.md` in the summary. A line count + 9
+section headers is sufficient.
 
-- A description of the moved files' contents.
-- The reason they were archived (already in this task spec).
-- History of previous Cursor rolls.
-
-Target length: 15–25 lines.
+Target length: 10–15 lines.
 
 ## Project summary update
 
 Update `.ai-loop/project_summary.md` only if durable architecture changed.
-For this task, the only durable change is: "the orchestrator now has a
-`docs/archive/` directory for superseded design documents". One line is
-enough, added to the "Current architecture" or "Important design decisions"
-section.
+For this task, add one line to "Important design decisions" or "Notes for
+future AI sessions":
 
-Do **not** turn `project_summary.md` into a per-task changelog.
+- "Working rules for AI agents are in `AGENTS.md` at repo root."
 
 ## Important
 
-- Do **not** modify the moved files' contents. Use `git mv` so git tracks the
-  rename and history is preserved.
-- Do **not** stage or commit. The orchestrator handles commit after Codex
-  PASS.
-- Do **not** introduce any other "while I'm here" refactors. If you notice
-  other doc cleanup opportunities, leave a note in `cursor_summary.md` —
-  there is a follow-up task queue for those.
-- Date prefix `2026-05-11` reflects when the original reviews were produced.
-  Do not change to today's date.
+- Stay within the 50–80 line target for `AGENTS.md`. If you find yourself
+  copying paragraphs from `docs/safety.md` or `docs/workflow.md`, stop and
+  replace with a pointer link.
+- Do not duplicate `docs/architecture.md` content. Reference it.
+- Do not commit. The orchestrator handles commit after Codex PASS.
+- Use exactly the section headers given in "Required behavior". Codex review
+  will check for their presence (verification step 3).

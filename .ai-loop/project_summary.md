@@ -23,7 +23,7 @@ Install scripts into a target repo, author task and context. For a **new** task,
 
 - Staging is restricted to explicit safe paths; runtime outputs under `.ai-loop/` (e.g. `last_diff.patch`, `test_output*.txt`, `git_status.txt`, Cursor implementation scratch/result files, reviews) stay out of commits by default.
 - Task-first mode enforces “result only” completions using a **symmetric path-set** delta from `git status --porcelain --untracked-files=all` after excluding the same orchestrator scratch paths (`cursor_summary.md`, implementation prompt/output), merged with **last-write-time / existence** checks for `.ai-loop/cursor_implementation_result.md`; each task-first run resets `cursor_summary.md` to a stub so Codex does not read stale summaries.
-- Default `SafeAddPaths` in `ai_loop_auto.ps1`, `continue_ai_loop.ps1`, and `ai_loop_task_first.ps1` includes repo-root `ai_loop.py`, `pytest.ini`, `docs/`, and `templates/` so intent-to-add review covers the Python entry, pytest config, and durable docs/templates. `docs/safety.md` documents that same default list (path order matches the shared literal).
+- Default `SafeAddPaths` in `ai_loop_auto.ps1`, `continue_ai_loop.ps1`, and `ai_loop_task_first.ps1` includes `src/`, `tests/`, `README.md`, `AGENTS.md`, `scripts/`, `docs/`, `templates/`, `ai_loop.py`, pytest/config paths, and the durable `.ai-loop/task.md`, `.ai-loop/cursor_summary.md`, `.ai-loop/project_summary.md` trio. `docs/safety.md` documents that same default list (path order matches the shared literal).
 - `project_summary.md` holds long-lived context; it is not a per-task changelog.
 - Parity between the Python `after-cursor` step and PowerShell `Save-TestAndDiff` includes a short git status file for reviewers.
 - Codex is the automated review gate before commit/push; Codex PASS triggers final tests then commit/push.
@@ -39,14 +39,15 @@ Install scripts into a target repo, author task and context. For a **new** task,
 
 ## Last completed task
 
-Task-first **path-set comparison hardening** plus **helper cleanup:** `Test-ResultFileChangedDuringPass` / `Assert-CanProceedAfterImplementation` removed in favor of inlined equivalent checks; `Get-ImplementationDeltaPaths` remains the single path-set helper. Prior: empty-set `Compare-Object` hardening, P0 porcelain path-set + result mtime, auto-loop clean-tree exits 6/7, Claude review template removed. Latest hygiene pass: removed untracked root `task.md` and `.claude/` local settings so only `.ai-loop/task.md` documents the task.
+**O02 follow-on:** default `SafeAddPaths` now includes root `AGENTS.md` in `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, `continue_ai_loop.ps1`, and `docs/safety.md`; parity test asserts the segment. Prior: task-first **path-set comparison hardening** plus **helper cleanup**; empty-set `Compare-Object` hardening; P0 porcelain path-set + result mtime; auto-loop clean-tree exits 6/7; Claude review template removed. Root `AGENTS.md` documents agent working rules (including the synced SafeAddPaths literal).
 
 ## Next likely steps
 
-1. Stage root `ai_loop.py`, `pytest.ini`, `tests/`, `scripts/`, `docs/`, `templates/`, and other paths listed in orchestrator `SafeAddPaths` when committing.
+1. Stage root `ai_loop.py`, `pytest.ini`, `tests/`, `scripts/`, `docs/`, `templates/`, **`AGENTS.md`**, and other paths listed in orchestrator `SafeAddPaths` when committing.
 2. Re-run `ai_loop_task_first.ps1` or `ai_loop_auto.ps1` / Codex when ready for the next task or review round.
 
 ## Notes for future AI sessions
 
+- Working rules for AI agents are in `AGENTS.md` at repo root.
 - Keep durable project-level context here; put per-iteration detail in `.ai-loop/cursor_summary.md`.
-- Use **`.ai-loop/task.md`** as the task source of truth; do not reintroduce a duplicate root `task.md` or editor-local `.claude/` permission files — they are not part of the repo contract.
+- Use **`.ai-loop/task.md`** as the task source of truth; do not reintroduce a duplicate root `task.md`.

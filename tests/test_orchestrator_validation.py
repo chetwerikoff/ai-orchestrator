@@ -33,6 +33,7 @@ def test_default_safe_add_paths_parity_includes_docs_and_templates() -> None:
     literals = [_default_safe_add_paths_literal(_SCRIPTS / n) for n in names]
     assert len(set(literals)) == 1, dict(zip(names, literals, strict=True))
     segments = [s.strip() for s in literals[0].split(",") if s.strip()]
+    assert "AGENTS.md" in segments
     assert "docs/" in segments
     assert "templates/" in segments
 

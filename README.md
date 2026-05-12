@@ -1,5 +1,7 @@
 # A Git Orchestrator
 
+See `AGENTS.md` for AI-agent working rules.
+
 A local PowerShell-based AI development loop for coordinating:
 
 - Cursor Agent as implementer
