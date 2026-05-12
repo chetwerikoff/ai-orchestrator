@@ -12,6 +12,7 @@ Local PowerShell-based AI development loop that coordinates Cursor (implementer)
 - `tests/test_ai_loop.py` -- pytest coverage for pure helpers (`slugify`, `write_text_safe`). The `write_text_safe` test uses a unique-named scratch file under `tests/` removed in `finally`, avoiding pytest `tmp_path`, basetemp under `.tmp/`, repo-root temp dirs, and `tempfile.TemporaryDirectory(dir=repo)` (all problematic on some Windows setups).
 - `tests/test_orchestrator_validation.py` -- PowerShell parser smoke check for `ai_loop_auto.ps1` / `ai_loop_task_first.ps1`, parity and porcelain-flag checks, path-set delta + marker-gate reference tests, auto-loop no-op reason literals, and `SafeAddPaths` parity across `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, and `continue_ai_loop.ps1` (includes `docs/` and `templates/`).
 - `pytest.ini` -- limits collection to `tests/` via `testpaths` and skips common runtime dirs (`.ai-loop`, `.tmp`, stray root temp names, caches) via `norecursedirs` so pytest does not wander the repo root by default.
+- `docs/archive/` -- dated superseded design / review Markdown under `docs/` (O01 moved three root-level review/diagnostic files to `2026-05-11_*.md` without editing file bodies). O01 does **not** introduce or stage `docs/architecture.md`; that remains a separate doc-maintenance task when scheduled.
 - `.ai-loop/*.md` -- task file, durable summary, review prompts, cursor summary template.
 
 ## Current pipeline / workflow

@@ -1,68 +1,39 @@
-# Cursor summary
+﻿# Cursor summary
 
-## Changed / deleted files (this iteration)
+## O01 — Archived root docs (destinations)
 
-**Removed (untracked noise — not staged):**
+Three files live under `docs/archive/` (content unchanged; git move / index as tracked archival paths):
 
-- `task.md` (repo root duplicate of `.ai-loop/task.md`)
-- `.claude/settings.local.json`
-- `.claude/` directory (removed after it became empty)
+1. `docs/archive/2026-05-11_architecture_review.md` (from `architecture_review.md`)
+2. `docs/archive/2026-05-11_opencode_harness_expert_review.md` (from `opencode_harness_expert_review.md`)
+3. `docs/archive/2026-05-11_qwen_opencode_problem.md` (from `qwen_opencode_problem_for_claude.md`)
 
-**Refreshed artifacts:**
+## Reference updates
 
-- `.ai-loop/test_output.txt` — current `python -m pytest -q` log
-- `.ai-loop/git_status.txt` — current `git status --porcelain --untracked-files=all`
+- **`README.md`:** no references to the old basenames; **no change**.
+- **Other tracked docs:** searched under `docs/` (excluding archive content in verification); **no** updates required for broken links to the old root paths.
 
-**Prior / ongoing tracked edits (unchanged this iteration, still reflected in git status):**
+## Fix prompt (this iteration)
 
-- `scripts/ai_loop_task_first.ps1` — simplified implementation-delta / no-op flow; inlined post-implementation gate (see below)
-- `scripts/ai_loop_auto.ps1` — non-`Resume` startup `Clear-AiLoopRuntimeState`; per-iteration no-op guard before Codex (see below)
-- `tests/test_orchestrator_validation.py` — aligned with simplified orchestrator scripts
-- `templates/claude_final_review_prompt.md` — **deleted** (staged `D` in git)
-- `.ai-loop/cursor_summary.md`, `.ai-loop/project_summary.md`, `.ai-loop/task.md` — loop contract files as edited for this task
+- **Out-of-scope `docs/architecture.md`:** removed from the index (`git rm --cached -f`) and deleted from the working tree so O01 stays limited to the three dated archive files plus loop artifacts. Archived Markdown bodies were **not** edited.
 
-## Line counts (physical)
+## Changed files (this iteration)
 
-| Script | Before (`HEAD`) | After (working tree) |
-|--------|-----------------|----------------------|
-| `scripts/ai_loop_task_first.ps1` | **724** | **263** |
-| `scripts/ai_loop_auto.ps1` | **503** | **554** |
-
-## `ai_loop_auto.ps1`: no-op guard and cleanup
-
-- **`Clear-AiLoopRuntimeState`:** invoked after `Ensure-AiLoopFiles` when `-Resume` is **not** set, matching task-first stale `.ai-loop` runtime cleanup (same helper name and role inside the script).
-- **No-op guard (before `Run-CodexReview` each iteration):** if `git status --porcelain --untracked-files=all` is whitespace-only, Codex is skipped. Iteration 1 → `REASON: REVIEW_STARTED_ON_CLEAN_TREE`, exit **6**; on later iterations → `REASON: NO_CHANGES_AFTER_CURSOR_FIX`, exit **7** (literals present for tests / reviewers).
-
-## Claude final-review artifacts
-
-- **`templates/claude_final_review_prompt.md`:** removed (deleted file in index; `Get-ChildItem templates/claude_final_review_prompt.md` returns nothing).
-- **`.ai-loop/claude_final_review.md`:** absent from the tree (defensive ignore/cleanup entries in scripts remain).
+- `.ai-loop/cursor_summary.md` — this file.
+- `.ai-loop/project_summary.md` — durable O01 scope clarification (`docs/archive/` moves only; `docs/architecture.md` out of scope for that pass).
+- `.ai-loop/git_status.txt` — refreshed after cleanup.
+- `.ai-loop/test_output.txt` — refreshed from `python -m pytest -q`.
 
 ## Tests
 
-- `python -m pytest -q` → **23 passed** (recorded in `.ai-loop/test_output.txt`).
-- PowerShell AST: `test_powershell_orchestrator_scripts_parse_cleanly` parses both driver scripts.
+- `python -m pytest -q` → **24 passed**, **0 skipped** (~0.19s, exit 0). Full console capture: `.ai-loop/test_output.txt`.
 
-## Implementation summary (task-first + prior Cursor round)
+## Task-specific live run
 
-- **Removed helpers (task-first):** `Test-ResultFileChangedDuringPass`, `Assert-CanProceedAfterImplementation`.
-- **Replacement:** No new named helper for the gate. Path-set delta remains **`Get-ImplementationDeltaPaths`**; result-file change during a pass uses inline `LastWriteTimeUtc` / existence checks; “only `cursor_implementation_result.md` changed” uses the same marker regex and `Compare-Object` pattern as before.
-
-### One-line evidence — four preserved observable behaviors (Goal)
-
-1. **`NO_CHANGES_AFTER_CURSOR`** — `Write-NoChangesFinalStatus` still writes `REASON: NO_CHANGES_AFTER_CURSOR` when the implementation pass has no delta after two Cursor attempts.
-2. **`DONE_NO_CODE_CHANGES_REQUIRED`** — `Test-CursorResultAllowsNoCodeChanges` unchanged; inlined gate still enforces the marker when the sole delta is the result path.
-3. **`Extract-FixPromptFromFile`** — not altered in this task line.
-4. **`tests/test_orchestrator_validation.py`** — 23 tests passing.
-
-## Task-specific verification (.ai-loop/task.md)
-
-- Pytest (required): **run** — see Tests and `.ai-loop/test_output.txt`.
-- Manual `[Parser]::ParseFile(...)` on both scripts: **redundant** with `test_powershell_orchestrator_scripts_parse_cleanly` when PowerShell is available; not run separately.
-- `wc -l` / line-cap check: covered by the table above (task-first ≤ 300).
+- `powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPush` — **skipped**: full Cursor + Codex orchestrator run with local CLIs/UI; fix-prompt cleanup applied directly in-repo without re-invoking the driver.
 
 ## Remaining risks
 
-- Callers must still use `@(Get-ImplementationDeltaPaths)` where an array is required so empty pipeline output does not become `$null` on Windows PowerShell.
-- **`AI_LOOP_CHAIN_FROM_TASK_FIRST`** — when set for standalone `ai_loop_auto.ps1`, startup cleanup can skip `.ai-loop/cursor_implementation_result.md`.
-- Inlined post-implementation gate must stay aligned with `Get-ImplementationDeltaPaths` skip list and `$ResultPathRelative`.
+- If git does not show rename similarity for a move, history is still preserved via byte-identical content; `git log --follow` on the archived paths remains viable.
+- Untracked `.claude/` and `tasks/context_audit/` paths may still appear in porcelain; staging should stay within orchestrator `SafeAddPaths` only.
+- Formal `docs/architecture.md` (and supporting doc sync) remain **future queued tasks** (e.g. O03+) — **not** introduced as staged content under O01.
