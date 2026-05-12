@@ -231,12 +231,15 @@ def test_invoke_cursor_implementation_wraps_path_sets_for_compare_object() -> No
 
 
 def test_native_argv_escape_present_in_both_scripts() -> None:
-    """PS 5.1 native-arg quoting workaround: prompts sent to agent/codex must go through ConvertTo-CrtSafeArg."""
-    expected_helper = "function ConvertTo-CrtSafeArg"
-    expected_call = "ConvertTo-CrtSafeArg -Value"
+    """PS 5.1 native-arg quoting workaround: ConvertTo-CrtSafeArg must be defined in both drivers.
+
+    ai_loop_auto.ps1     — uses the helper for Codex prompts (codex exec argv).
+    ai_loop_task_first.ps1 — defines the helper but Cursor prompt is now delivered via
+                             stdin through run_cursor_agent.ps1 (avoids cmd.exe batch-line
+                             limit), so no ConvertTo-CrtSafeArg -Value call is required there.
+    """
     for name in ("ai_loop_task_first.ps1", "ai_loop_auto.ps1"):
         text = (_SCRIPTS / name).read_text(encoding="utf-8")
-        assert expected_helper in text, f"{name} missing ConvertTo-CrtSafeArg definition"
-        assert expected_call in text, f"{name} does not invoke ConvertTo-CrtSafeArg"
+        assert "function ConvertTo-CrtSafeArg" in text, f"{name} missing ConvertTo-CrtSafeArg definition"
     auto = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    assert auto.count("ConvertTo-CrtSafeArg -Value") >= 2, "auto must escape both Cursor and Codex prompts"
+    assert "ConvertTo-CrtSafeArg -Value" in auto, "ai_loop_auto.ps1 must escape Codex prompt via ConvertTo-CrtSafeArg"
