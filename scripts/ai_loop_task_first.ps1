@@ -3,7 +3,7 @@ param(
     [string]$CommitMessage = "AI loop task implementation",
     [string]$TaskPath = ".ai-loop\task.md",
     [string]$AutoLoopScript = ".\scripts\ai_loop_auto.ps1",
-    [string]$CursorCommand = "agent",
+    [string]$CursorCommand = ".\scripts\run_cursor_agent.ps1",
     [string]$CursorModel = "",
     [switch]$SkipInitialCursor,
     [switch]$NoPush,
@@ -155,8 +155,9 @@ $taskText
     $beforePaths = @(Get-ImplementationDeltaPaths)
     $agentArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
     if (-not [string]::IsNullOrWhiteSpace($Model)) { $agentArgs += @("--model", $Model) }
-    $agentArgs += (ConvertTo-CrtSafeArg -Value $prompt)
-    & $CommandName @agentArgs *> $outputPath
+    # Prompt via stdin to avoid cmd.exe ~8 191-char batch-line limit (ERROR_ACCESS_DENIED).
+    # run_cursor_agent.ps1 calls node.exe directly so stdin is never dropped mid-chain.
+    $prompt | & $CommandName @agentArgs *> $outputPath
     if ($LASTEXITCODE -ne 0) {
         throw "Cursor implementation failed with exit code $LASTEXITCODE. See: $outputPath"
     }

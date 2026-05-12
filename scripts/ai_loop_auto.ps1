@@ -337,8 +337,11 @@ After changes:
     Write-Host ""
     Write-Host "Running Cursor agent in non-interactive mode..."
 
-    $cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot, (ConvertTo-CrtSafeArg -Value $cursorPrompt))
-    & agent @cursorArgs *> (Join-Path $AiLoop "cursor_agent_output.txt")
+    # Prompt via stdin to run_cursor_agent.ps1, which calls node.exe directly so stdin
+    # is never dropped by the cmd.exe -> powershell.exe chain in cursor-agent.cmd.
+    $cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
+    $runWrapper = Join-Path $PSScriptRoot "run_cursor_agent.ps1"
+    $cursorPrompt | & $runWrapper @cursorArgs *> (Join-Path $AiLoop "cursor_agent_output.txt")
     return $LASTEXITCODE
 }
 
