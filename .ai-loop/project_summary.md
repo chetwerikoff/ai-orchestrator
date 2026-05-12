@@ -41,7 +41,7 @@ Install scripts into a target repo, author task and context. For a **new** task,
 
 ## Current stage
 
-**Reviewable:** O04 companion doc sync (**`docs/decisions.md`**, **`docs/workflow.md`**, **`README.md`**). **`python -m pytest -q`** passes with current orchestrator validation (including native-arg helper checks). PowerShell orchestrator still uses Codex-only automated review; post-Codex PASS runs final test gate, commit, and optional push. Task-first mode gates Codex until Cursor produces a path-set delta or updates the result file on disk; `ai_loop_auto.ps1` skips Codex when the tree is clean before review (exits **6** / **7**) and clears stale `.ai-loop` runtime artifacts on non-resume starts.
+**Reviewable:** O04 companion doc sync (**`docs/decisions.md`**, **`docs/workflow.md`**, **`README.md`**). **`python -m pytest -q`** passes with current orchestrator validation (including native-arg helper checks). PowerShell orchestrator still uses Codex-only automated review; post-Codex PASS runs final test gate, commit, and optional push. Task-first mode gates Codex until Cursor produces a path-set delta or updates the result file on disk; `ai_loop_auto.ps1` skips Codex when the tree is clean before review (exits **6** / **7**) and clears stale `.ai-loop` runtime artifacts on non-resume starts. **Operational:** Companion edits (e.g. **D01** in `h2n-range-extractor`) should land directly in that repo’s `.ai-loop/` plus regenerated reviewer artifacts (`git_status.txt`, `last_diff.patch`, `diff_summary.txt`, `test_output.txt`); avoid keeping duplicate target Markdown stubs in this orchestrator `.ai-loop/`.
 
 ## Last completed task
 
@@ -59,3 +59,4 @@ Install scripts into a target repo, author task and context. For a **new** task,
 - Working rules for AI agents are in `AGENTS.md` at repo root.
 - Keep durable project-level context here; put per-iteration detail in `.ai-loop/cursor_summary.md`.
 - Use **`.ai-loop/task.md`** as the task source of truth; do not reintroduce a duplicate root `task.md`.
+- Companion tasks that edit another repo’s `.ai-loop/` should apply changes directly in that repo when possible (short Python/Open helper acceptable). Regenerate target `.ai-loop/git_status.txt`, `last_diff.patch`, `diff_summary.txt`, and `test_output.txt` there for Codex. Do **not** keep pasted copies of the target Markdown in this orchestrator `.ai-loop/` unless the tooling contract explicitly requests a stub.
