@@ -27,10 +27,21 @@ function Clear-AiLoopRuntimeState {
     # from task-first right after Cursor, $env:AI_LOOP_CHAIN_FROM_TASK_FIRST skips deleting
     # cursor_implementation_result.md so the implementer handoff stays intact.
     $files = @(
-        ".ai-loop\codex_review.md", ".ai-loop/next_cursor_prompt.md", ".ai-loop/cursor_agent_output.txt",
-        ".ai-loop/cursor_implementation_output.txt", ".ai-loop/cursor_implementation_prompt.md", ".ai-loop/cursor_implementation_result.md",
-        ".ai-loop/test_output.txt", ".ai-loop/test_output_before_commit.txt", ".ai-loop/last_diff.patch", ".ai-loop/final_status.md",
-        ".ai-loop/git_status.txt", ".ai-loop/post_fix_output.txt", ".ai-loop/claude_final_review.md"
+        ".ai-loop/codex_review.md",
+        ".ai-loop/next_cursor_prompt.md",
+        ".ai-loop/test_output.txt",
+        ".ai-loop/test_output_before_commit.txt",
+        ".ai-loop/test_failures_summary.md",
+        ".ai-loop/last_diff.patch",
+        ".ai-loop/diff_summary.txt",
+        ".ai-loop/final_status.md",
+        ".ai-loop/git_status.txt",
+        ".ai-loop/post_fix_output.txt",
+        ".ai-loop/claude_final_review.md",
+        ".ai-loop/cursor_implementation_result.md",
+        ".ai-loop/_debug/cursor_agent_output.txt",
+        ".ai-loop/_debug/cursor_implementation_prompt.md",
+        ".ai-loop/_debug/cursor_implementation_output.txt"
     )
     if ($env:AI_LOOP_CHAIN_FROM_TASK_FIRST -eq "1") {
         $files = $files | Where-Object { $_ -notmatch 'cursor_implementation_result\.md' }
@@ -148,6 +159,19 @@ function Save-TestAndDiff {
 
     Add-IntentToAddForReview
     git diff > (Join-Path $AiLoop "last_diff.patch")
+    git diff --stat > (Join-Path $AiLoop "diff_summary.txt")
+
+    if ($testExit -ne 0) {
+        Write-Host "Tests failed; generating filtered failures summary..."
+        $filterScript = Join-Path $ProjectRoot "scripts\filter_pytest_failures.py"
+        if (Test-Path $filterScript) {
+            python $filterScript `
+                --input  (Join-Path $AiLoop "test_output.txt") `
+                --output (Join-Path $AiLoop "test_failures_summary.md")
+        }
+        # If filter script is missing, skip silently — test_output.txt remains
+        # available for the reviewer as fallback.
+    }
 
     return $testExit
 }
@@ -173,8 +197,8 @@ Read:
 - .ai-loop/project_summary.md
 - .ai-loop/task.md
 - .ai-loop/cursor_summary.md
-- .ai-loop/last_diff.patch
-- .ai-loop/test_output.txt
+- .ai-loop/last_diff.patch (with .ai-loop/diff_summary.txt — git diff --stat for the same change set)
+- If .ai-loop/test_failures_summary.md exists, read it first for structured pytest failure context; otherwise read .ai-loop/test_output.txt
 - .ai-loop/git_status.txt
 
 Review the latest changes.
@@ -339,9 +363,11 @@ After changes:
 
     # Prompt via stdin to run_cursor_agent.ps1, which calls node.exe directly so stdin
     # is never dropped by the cmd.exe -> powershell.exe chain in cursor-agent.cmd.
+    $debugDir = Join-Path $AiLoop "_debug"
+    New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
     $cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
     $runWrapper = Join-Path $PSScriptRoot "run_cursor_agent.ps1"
-    $cursorPrompt | & $runWrapper @cursorArgs *> (Join-Path $AiLoop "cursor_agent_output.txt")
+    $cursorPrompt | & $runWrapper @cursorArgs *> (Join-Path $debugDir "cursor_agent_output.txt")
     return $LASTEXITCODE
 }
 

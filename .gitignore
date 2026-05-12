@@ -32,3 +32,10 @@ __pycache__/
 .ai-loop/cursor_implementation_output.txt
 .ai-loop/cursor_implementation_result.md
 .ai-loop/claude_final_review.md
+
+# Debug artefacts (raw agent stdout, prompts)
+.ai-loop/_debug/
+
+# Filtered review artefacts (regenerated each iteration)
+.ai-loop/test_failures_summary.md
+.ai-loop/diff_summary.txt

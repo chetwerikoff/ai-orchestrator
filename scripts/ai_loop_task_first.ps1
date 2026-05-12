@@ -48,10 +48,21 @@ function Clear-AiLoopRuntimeState {
     # Same file list as ai_loop_auto.ps1. Task-first always removes all listed files (no env guard).
     # Auto applies the AI_LOOP_CHAIN_FROM_TASK_FIRST omission only when spawned from this script after Cursor.
     $files = @(
-        ".ai-loop\codex_review.md", ".ai-loop/next_cursor_prompt.md", ".ai-loop/cursor_agent_output.txt",
-        ".ai-loop/cursor_implementation_output.txt", ".ai-loop/cursor_implementation_prompt.md", ".ai-loop/cursor_implementation_result.md",
-        ".ai-loop/test_output.txt", ".ai-loop/test_output_before_commit.txt", ".ai-loop/last_diff.patch", ".ai-loop/final_status.md",
-        ".ai-loop/git_status.txt", ".ai-loop/post_fix_output.txt", ".ai-loop/claude_final_review.md"
+        ".ai-loop/codex_review.md",
+        ".ai-loop/next_cursor_prompt.md",
+        ".ai-loop/test_output.txt",
+        ".ai-loop/test_output_before_commit.txt",
+        ".ai-loop/test_failures_summary.md",
+        ".ai-loop/last_diff.patch",
+        ".ai-loop/diff_summary.txt",
+        ".ai-loop/final_status.md",
+        ".ai-loop/git_status.txt",
+        ".ai-loop/post_fix_output.txt",
+        ".ai-loop/claude_final_review.md",
+        ".ai-loop/cursor_implementation_result.md",
+        ".ai-loop/_debug/cursor_agent_output.txt",
+        ".ai-loop/_debug/cursor_implementation_prompt.md",
+        ".ai-loop/_debug/cursor_implementation_output.txt"
     )
     foreach ($rel in $files) {
         Remove-Item (Join-Path $ProjectRoot $rel) -Force -ErrorAction SilentlyContinue
@@ -144,8 +155,10 @@ $taskText
         $prompt += "`n`n$($ExtraInstructions.Trim())`n"
     }
     New-Item -ItemType Directory -Force $AiLoop | Out-Null
-    $promptPath = Join-Path $AiLoop "cursor_implementation_prompt.md"
-    $outputPath = Join-Path $AiLoop "cursor_implementation_output.txt"
+    $debugDir = Join-Path $AiLoop "_debug"
+    New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
+    $promptPath = Join-Path $debugDir "cursor_implementation_prompt.md"
+    $outputPath = Join-Path $debugDir "cursor_implementation_output.txt"
     Set-Content -Path $promptPath -Value $prompt -Encoding UTF8
     Write-Host "Cursor implementation prompt saved to: $promptPath"
     Write-Host "Cursor implementation output will be saved to: $outputPath"

@@ -1,4 +1,4 @@
-# O05 — Update all 4 files in templates/ with AGENTS.md reference, read priority, anti-leak rules
+# O06 — Add log filtering (test_failures_summary, diff_summary) and hide debug artefacts under .ai-loop/_debug/
 
 - **Target project:** `ai-git-orchestrator`
 - **CWD:** `C:\Users\che\Documents\Projects\ai-git-orchestrator`
@@ -8,266 +8,507 @@
   powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPush
   ```
 
-- **Prerequisites:** O01..O04 completed.
-- **Risk:** low. Templates are inert files until copied into a target
-  project. Bad edits propagate only on next `install_into_project.ps1`
-  run.
-- **Estimated lines touched:** ~60 lines across 4 files.
+- **Prerequisites:** O01..O05 completed. In particular, O05 already added
+  conditional references to `test_failures_summary.md` and `diff_summary.txt`
+  in `templates/codex_review_prompt.md`.
+- **Risk:** medium. This is the first task in the queue that changes
+  PowerShell script behavior. Existing 23 orchestrator-validation tests
+  must keep passing, possibly with adjustments.
+- **Estimated lines touched:** ~80 lines in `scripts/ai_loop_auto.ps1`,
+  ~30 lines in `scripts/ai_loop_task_first.ps1`, ~20 lines new helper in
+  `scripts/` (Python or PowerShell, see below), small tests/.gitignore
+  updates.
 
 ---
 
-# Task: Update templates/ files with AGENTS.md reference, explicit read priority, and anti-history-leak rules
+# Task: Add filtered test failures + diff stat artefacts, and move raw agent stdout artefacts under .ai-loop/_debug/
 
 ## Project context
 
 Before starting, read:
 
+- `.ai-loop/task.md` (this task)
 - `.ai-loop/project_summary.md`
-- `.ai-loop/task.md`
-- `.ai-loop/cursor_summary.md` if it exists
-- `AGENTS.md` (root) — the rules these templates should align with
-- `templates/task.md` — current state
-- `templates/codex_review_prompt.md` — current state
-- `templates/project_summary.md` — current state
-- `templates/cursor_summary_template.md` — current state
-- `scripts/install_into_project.ps1` — to confirm which files get copied
+- `AGENTS.md` at repo root
+- `.ai-loop/cursor_summary.md` (if iteration ≥ 2)
+- `scripts/ai_loop_auto.ps1` — the file you will edit most
+- `scripts/ai_loop_task_first.ps1` — secondary edit
+- `tests/test_orchestrator_validation.py` — to understand which behaviors
+  are locked by tests
+- `templates/codex_review_prompt.md` (already updated by O05) — confirms
+  the artefacts this task creates are already referenced as "(if present)"
 
 ## Background
 
-The current templates work but encode an outdated mental model:
+The audit found two raw-artefact problems:
 
-- `templates/task.md` tells implementers to read `project_summary.md` and
-  `task.md` but does not mention `AGENTS.md`, does not prescribe a read
-  order, and does not prohibit reading the archive directories.
-- `templates/codex_review_prompt.md` lists files to read in a flat order
-  with no priority and reads raw `test_output.txt`. After O06 (next task)
-  the reviewer should prefer `test_failures_summary.md` when it exists.
-- `templates/project_summary.md` is just a structural template with TODO
-  placeholders. It does not warn the implementer against accumulating a
-  growing list of "Earlier rolls" — exactly the antipattern the audit
-  found in H2N parser's project_summary.md.
-- `templates/cursor_summary_template.md` is a passive scaffold. It does
-  not enforce "current iteration only, no historical rolls".
+1. **Test output filtering:** `python -m pytest -q` produces only a dot-line
+   on pass (which is fine — already a form of filtering) and a thin failure
+   list. But the **traceback / assertion content** is not preserved when
+   running `-q`. The Codex reviewer needs structured failure context on
+   FAIL, not just "5 failed, 260 passed". Currently `ai_loop_auto.ps1`
+   pipes `test_output.txt` raw to Codex. We need to add a deterministic
+   filtered summary when pytest fails.
 
-This task hardens all four templates without changing the file contract
-(filenames, section names that scripts grep for must stay).
+2. **Debug artefact pollution:** `cursor_agent_output.txt`,
+   `cursor_implementation_output.txt`, `cursor_implementation_prompt.md`,
+   and `cursor_implementation_result.md` are raw stdout / scratch from
+   agent invocations. They sit at the top level of `.ai-loop/` and clutter
+   that namespace. Codex review template (post-O05) no longer references
+   them. They are useful for human debugging but should not be loaded by
+   any agent.
+
+This task adds the filtered artefacts and hides the raw ones in
+`.ai-loop/_debug/`.
 
 ## Goal
 
-Update each template to:
+After this task:
 
-1. Reference `AGENTS.md` as required reading.
-2. State an explicit read priority.
-3. Prohibit prior-task history in the file (where applicable).
-4. Where applicable, prefer filtered artefacts over raw artefacts.
-
-Templates stay short (no template should exceed ~80 lines after edit).
+- `ai_loop_auto.ps1` writes `diff_summary.txt` (always) and
+  `test_failures_summary.md` (only when pytest fails) into `.ai-loop/`.
+- `cursor_agent_output.txt`, `cursor_implementation_output.txt`,
+  `cursor_implementation_prompt.md` are written into `.ai-loop/_debug/`
+  instead of `.ai-loop/`.
+- `cursor_implementation_result.md` stays at `.ai-loop/` root because it
+  is part of the gated implementation contract (the
+  `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED` marker file).
+  Hiding it would break `Test-CursorResultAllowsNoCodeChanges`.
+- `Clear-AiLoopRuntimeState` cleans up the new paths correctly.
+- `.gitignore` covers `.ai-loop/_debug/`.
+- Orchestrator-validation tests adjusted to assert the new paths.
 
 ## Scope
 
 ### Allowed
 
-- Edit `templates/task.md`
-- Edit `templates/codex_review_prompt.md`
-- Edit `templates/project_summary.md`
-- Edit `templates/cursor_summary_template.md`
+- Edit `scripts/ai_loop_auto.ps1`:
+  - In `Save-TestAndDiff`: add `git diff --stat` output to
+    `.ai-loop/diff_summary.txt`.
+  - In `Save-TestAndDiff`: after pytest, if exit code is non-zero, invoke
+    a deterministic Python or PowerShell helper to write
+    `.ai-loop/test_failures_summary.md`. Keep the helper inline as a
+    here-string Python `-c "..."` invocation OR add a separate
+    `scripts/filter_pytest_failures.py` (preferred — testable).
+  - In `Run-CursorFix`: redirect raw output from `*> .ai-loop/cursor_agent_output.txt`
+    to `*> .ai-loop/_debug/cursor_agent_output.txt`. Ensure the `_debug`
+    directory exists (`New-Item -ItemType Directory -Force`).
+  - In `Clear-AiLoopRuntimeState`: update the file list to remove
+    `.ai-loop/cursor_agent_output.txt`,
+    `.ai-loop/cursor_implementation_output.txt`,
+    `.ai-loop/cursor_implementation_prompt.md` and add their `_debug/`
+    counterparts. Also include `.ai-loop/test_failures_summary.md` and
+    `.ai-loop/diff_summary.txt` in the cleanup list.
+
+- Edit `scripts/ai_loop_task_first.ps1`:
+  - In `Clear-AiLoopRuntimeState`: same update as in `ai_loop_auto.ps1`
+    above.
+  - In `Invoke-CursorImplementation`: redirect raw output from
+    `*> $outputPath` (currently `.ai-loop/cursor_implementation_output.txt`)
+    to `.ai-loop/_debug/cursor_implementation_output.txt`. Also move
+    `cursor_implementation_prompt.md` save target to
+    `.ai-loop/_debug/cursor_implementation_prompt.md`.
+  - **Do NOT move** `cursor_implementation_result.md` — it stays at
+    `.ai-loop/` root.
+
+- Add new file `scripts/filter_pytest_failures.py` (if going the helper
+  route — preferred):
+  - Takes `--input <pytest_output.txt> --output <summary.md>` flags.
+  - Reads pytest -q output.
+  - Extracts the FAILED lines and any traceback lines (lines after a
+    `FAILED ...::test_name` until next blank line or next `FAILED` /
+    test summary).
+  - Writes a structured `.md` file: a `## Failed: N / M` header, then per
+    failure a `### tests/path.py::test_name` block with the captured
+    traceback indented.
+  - Deterministic (no LLM, no network).
+  - Exit code 0 always (it's diagnostic).
+
+- Add new file `tests/test_filter_pytest_failures.py` if you went the
+  helper route, with at least one input/output fixture.
+
+- Edit `.gitignore`:
+  - Add `.ai-loop/_debug/` line (the directory should not be committed).
+  - Add `.ai-loop/test_failures_summary.md` and `.ai-loop/diff_summary.txt`
+    if `.ai-loop/*.md` is not already covered (likely it is via
+    existing rules; verify before adding).
+
+- Edit `tests/test_orchestrator_validation.py`:
+  - Adjust any assertions that grep for `cursor_agent_output.txt` /
+    `cursor_implementation_*` paths to match the new `_debug/` paths.
+  - Add one new test: `ai_loop_auto.ps1` writes `diff_summary.txt`
+    (presence check via grep for the literal in the script).
+  - Add one new test: `ai_loop_auto.ps1` invokes
+    `filter_pytest_failures.py` (or equivalent inline Python) on test
+    failure (grep for `filter_pytest_failures` literal in script).
 
 ### Not allowed
 
-- Do **not** rename any template file. `install_into_project.ps1` copies
-  by exact name.
-- Do **not** modify `scripts/install_into_project.ps1` or any other script.
-- Do **not** modify the parseable / regex-matched portions of any
-  template. Specifically:
-  - The Codex review template's "VERDICT: PASS or FIX_REQUIRED" and
-    "FIX_PROMPT_FOR_CURSOR:" / "FINAL_NOTE:" labels are parsed by
-    `Get-ReviewVerdict` and `Extract-FixPromptFromFile` in
-    `ai_loop_auto.ps1`. **Keep these exact strings.**
-  - The cursor_summary template's section ordering is referenced in
-    several places. Keep top-level `##` sections and their order; you
-    may add new ones at the end.
-- Do **not** include references to artefacts that do not yet exist as of
-  this task (e.g. `test_failures_summary.md` is created in O06). Use
-  conditional wording: "if `test_failures_summary.md` exists, read it
-  first; otherwise read `test_output.txt`".
-- Do **not** modify any file in `docs/`, `.ai-loop/`, `scripts/`,
-  `tests/`, `AGENTS.md`, `README.md`.
+- Do **not** change `Get-ImplementationDeltaPaths` or
+  `Test-CursorResultAllowsNoCodeChanges` logic. They still consider
+  `.ai-loop/cursor_implementation_result.md` (which stays at root).
+- Do **not** move `codex_review.md`, `next_cursor_prompt.md`,
+  `final_status.md`, `last_diff.patch`, `test_output.txt`,
+  `git_status.txt`, `test_output_before_commit.txt`, or `post_fix_output.txt`
+  into `_debug/`. Those are not raw stdout dumps; they are part of the
+  agent file contract.
+- Do **not** change the `MaxIterations` default (still 10 — DD-011 is a
+  separate task).
+- Do **not** modify `templates/` (O05 already updated them).
+- Do **not** modify `docs/` (O03/O04 already updated them).
+- Do **not** introduce streaming, async, or background process behavior.
+  All filtering must be synchronous after pytest finishes.
 
 ## Files likely to change
 
-- `templates/task.md`
-- `templates/codex_review_prompt.md`
-- `templates/project_summary.md`
-- `templates/cursor_summary_template.md`
+- `scripts/ai_loop_auto.ps1`
+- `scripts/ai_loop_task_first.ps1`
+- `scripts/filter_pytest_failures.py` (new)
+- `tests/test_orchestrator_validation.py` (adjusted + 2 new tests)
+- `tests/test_filter_pytest_failures.py` (new)
+- `.gitignore` (one new pattern)
+- `.ai-loop/_debug/` (new directory, gitignored)
 
 ## Required behavior
 
-### Template 1: `templates/task.md`
+### Part 1: `Save-TestAndDiff` — diff_summary.txt + test_failures_summary.md
 
-Current header section starts with "## Project context" and lists three
-files to read. Replace with:
+Current implementation in `ai_loop_auto.ps1` (around line 138):
 
-```markdown
-## Project context
+```powershell
+function Save-TestAndDiff {
+    Ensure-AiLoopFiles
 
-Required reading before starting (in order; stop when you have enough):
+    Write-Host "Running tests..."
+    Invoke-CommandToFile $TestCommand (Join-Path $AiLoop "test_output.txt") | Out-Null
+    $testExit = $LASTEXITCODE
 
-1. `AGENTS.md` at repo root — working rules and forbidden paths
-2. `.ai-loop/task.md` — this task
-3. `.ai-loop/project_summary.md` — durable project orientation
-4. `.ai-loop/cursor_summary.md` — only if this is iteration 2+
+    Write-Host "Saving git status and diff..."
+    git status --short > (Join-Path $AiLoop "git_status.txt")
 
-Do not read by default:
+    Add-IntentToAddForReview
+    git diff > (Join-Path $AiLoop "last_diff.patch")
 
-- `docs/archive/` — superseded design documents
-- `.ai-loop/archive/` — historical task rolls
-- `.ai-loop/_debug/` — raw agent stdout, debug-only
+    return $testExit
+}
 ```
 
-Keep all other sections of the template intact. They are reasonable as-is.
+New behavior:
 
-Add a new section right before "## Important" at the end:
+```powershell
+function Save-TestAndDiff {
+    Ensure-AiLoopFiles
 
-```markdown
-## Output hygiene
+    Write-Host "Running tests..."
+    Invoke-CommandToFile $TestCommand (Join-Path $AiLoop "test_output.txt") | Out-Null
+    $testExit = $LASTEXITCODE
 
-The implementer must not:
+    Write-Host "Saving git status and diff..."
+    git status --short > (Join-Path $AiLoop "git_status.txt")
 
-- duplicate this task description into `.ai-loop/cursor_summary.md`
-- include earlier task narrative in `.ai-loop/project_summary.md`
-- write to `.ai-loop/_debug/` or `docs/archive/`
-- commit or push (the orchestrator handles git)
+    Add-IntentToAddForReview
+    git diff > (Join-Path $AiLoop "last_diff.patch")
+    git diff --stat > (Join-Path $AiLoop "diff_summary.txt")
+
+    if ($testExit -ne 0) {
+        Write-Host "Tests failed; generating filtered failures summary..."
+        $filterScript = Join-Path $ProjectRoot "scripts\filter_pytest_failures.py"
+        if (Test-Path $filterScript) {
+            python $filterScript `
+                --input  (Join-Path $AiLoop "test_output.txt") `
+                --output (Join-Path $AiLoop "test_failures_summary.md")
+        }
+        # If filter script is missing, skip silently — test_output.txt remains
+        # available for the reviewer as fallback.
+    }
+
+    return $testExit
+}
 ```
 
-### Template 2: `templates/codex_review_prompt.md`
+### Part 2: `scripts/filter_pytest_failures.py`
 
-This is the prompt Codex receives. Replace the "Read:" block with:
+Create a small (~80 line) Python script:
 
-```markdown
-Read in this priority order (stop reading once verdict is clear):
+```python
+"""Filter pytest -q output into a structured failures summary.
 
-1. `.ai-loop/task.md` — current task contract
-2. `.ai-loop/project_summary.md` — durable project orientation
-3. `AGENTS.md` at repo root — working rules
-4. `.ai-loop/cursor_summary.md` — implementer's report on the latest
-   iteration
-5. `.ai-loop/diff_summary.txt` — `git diff --stat` short overview
-   (if present)
-6. `.ai-loop/test_output.txt` — pytest -q output
-7. `.ai-loop/test_failures_summary.md` — filtered failures
-   (if present; this file is generated only when pytest fails)
-8. `.ai-loop/last_diff.patch` — full git diff (only if items 5–7 are
-   not sufficient)
-9. `.ai-loop/git_status.txt` — short porcelain status
+Deterministic: reads stdin/file, writes Markdown. No network, no LLM.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+
+FAILED_LINE_RE = re.compile(r"^FAILED\s+([^\s]+)")
+
+
+def parse_failures(text: str) -> list[dict]:
+    """Return list of {'name': str, 'traceback': list[str]}."""
+    failures: list[dict] = []
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        m = FAILED_LINE_RE.match(lines[i])
+        if m:
+            name = m.group(1)
+            trace: list[str] = []
+            j = i + 1
+            while j < len(lines):
+                ln = lines[j]
+                if FAILED_LINE_RE.match(ln):
+                    break
+                if ln.strip().startswith(("passed", "failed", "skipped")) and "=" in ln:
+                    break
+                trace.append(ln)
+                j += 1
+            failures.append({"name": name, "traceback": trace})
+            i = j
+        else:
+            i += 1
+    return failures
+
+
+def parse_summary_line(text: str) -> str:
+    """Return last non-empty line that looks like pytest summary."""
+    for line in reversed(text.splitlines()):
+        if "passed" in line or "failed" in line or "error" in line:
+            return line.strip()
+    return ""
+
+
+def render(failures: list[dict], summary_line: str) -> str:
+    parts = [f"# Test failures summary", ""]
+    parts.append(f"## Summary line")
+    parts.append("")
+    parts.append("```")
+    parts.append(summary_line or "(no summary line found)")
+    parts.append("```")
+    parts.append("")
+    parts.append(f"## Failed: {len(failures)}")
+    parts.append("")
+    for f in failures:
+        parts.append(f"### {f['name']}")
+        parts.append("")
+        parts.append("```")
+        # Drop trailing blank lines
+        trace = f["traceback"]
+        while trace and not trace[-1].strip():
+            trace.pop()
+        parts.extend(trace if trace else ["(no traceback captured)"])
+        parts.append("```")
+        parts.append("")
+    return "\n".join(parts).rstrip() + "\n"
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--input", required=True)
+    p.add_argument("--output", required=True)
+    args = p.parse_args()
+    text = Path(args.input).read_text(encoding="utf-8", errors="replace")
+    failures = parse_failures(text)
+    summary_line = parse_summary_line(text)
+    Path(args.output).write_text(render(failures, summary_line), encoding="utf-8")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
-Note: items 5 and 7 (`diff_summary.txt`, `test_failures_summary.md`) are
-introduced by O06. Until O06 runs, these files do not exist; the
-"(if present)" wording handles that gracefully.
+Key properties:
 
-Keep the "Check:" numbered list and the "Return exactly:" block intact.
-Specifically these EXACT strings must remain unchanged (regex-matched in
-scripts):
+- Pure stdlib, no third-party imports.
+- Deterministic.
+- Tolerates UTF-8 decode errors with `errors="replace"` (pytest emits
+  mixed encodings on Windows occasionally).
+- Always exits 0; missing failures are not an error.
 
-- `VERDICT: PASS or FIX_REQUIRED`
-- `FIX_PROMPT_FOR_CURSOR:`
-- `FINAL_NOTE:`
+### Part 3: `tests/test_filter_pytest_failures.py`
 
-Add a new sentence at the bottom of the prompt template, right before the
-`Return exactly:` block:
+```python
+from pathlib import Path
+import subprocess
+import sys
 
-```markdown
-Do not request manual steps unless absolutely required. If the implementer
-deferred the task instead of implementing it, return `VERDICT: FIX_REQUIRED`
-with a concrete fix prompt.
+
+REPO = Path(__file__).resolve().parents[1]
+SCRIPT = REPO / "scripts" / "filter_pytest_failures.py"
+
+
+def test_filter_handles_no_failures(tmp_path: Path) -> None:
+    src = tmp_path / "in.txt"
+    src.write_text("262 passed, 3 skipped in 63.81s\n", encoding="utf-8")
+    out = tmp_path / "out.md"
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--input", str(src), "--output", str(out)],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert out.exists()
+    body = out.read_text(encoding="utf-8")
+    assert "Failed: 0" in body
+    assert "262 passed, 3 skipped" in body
+
+
+def test_filter_extracts_one_failure(tmp_path: Path) -> None:
+    src = tmp_path / "in.txt"
+    src.write_text(
+        "\n".join(
+            [
+                "FAILED tests/test_foo.py::test_bar - assert 1 == 2",
+                "  E   assert 1 == 2",
+                "  E   +  where 1 = some_fn()",
+                "",
+                "1 failed, 261 passed in 5.0s",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "out.md"
+    subprocess.run(
+        [sys.executable, str(SCRIPT), "--input", str(src), "--output", str(out)],
+        check=True,
+    )
+    body = out.read_text(encoding="utf-8")
+    assert "Failed: 1" in body
+    assert "tests/test_foo.py::test_bar" in body
+    assert "assert 1 == 2" in body
 ```
 
-(The current template already says something similar; merge without
-duplication.)
+### Part 4: Move raw stdout artefacts to `.ai-loop/_debug/`
 
-### Template 3: `templates/project_summary.md`
+In `scripts/ai_loop_auto.ps1`, `Run-CursorFix` function. Current:
 
-This template is what gets copied into a target project's
-`.ai-loop/project_summary.md` on first install. It is a scaffold with
-TODO placeholders.
-
-Add a single block at the very top (before the existing `# Project Summary`
-heading or as a Markdown comment under the heading):
-
-```markdown
-<!--
-HARD RULES for project_summary.md:
-
-1. This file is DURABLE orientation, not a per-task changelog.
-2. Target length: under 80 lines. If the file exceeds 100 lines, compact
-   it: move "Earlier roll" / "Last completed task" content into
-   .ai-loop/archive/rolls/<date>_<topic>.md.
-3. Do NOT accumulate "Earlier roll" sections in this file. The
-   "Last completed task" section holds ONLY the most recent task.
-4. Do NOT copy code, function signatures, or backtick-heavy API surfaces.
-   Use prose pointers to source files.
-5. Active design constraints stay here. Historical decisions go to
-   docs/decisions.md.
-
-When in doubt: ask, does this help an agent orient on the NEXT task?
-If no, it belongs in archive/.
--->
+```powershell
+$cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot, (ConvertTo-CrtSafeArg -Value $cursorPrompt))
+& agent @cursorArgs *> (Join-Path $AiLoop "cursor_agent_output.txt")
 ```
 
-Keep the existing section structure (## Project purpose, ## Current
-architecture, etc.). Do not add new top-level sections.
+New:
 
-If the current template has a "## Last completed task" section with
-multiple bullets/blocks, add a one-line constraint right under that
-heading:
-
-```markdown
-Most recent task only. Older tasks belong in `.ai-loop/archive/rolls/`.
+```powershell
+$debugDir = Join-Path $AiLoop "_debug"
+New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
+$cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot, (ConvertTo-CrtSafeArg -Value $cursorPrompt))
+& agent @cursorArgs *> (Join-Path $debugDir "cursor_agent_output.txt")
 ```
 
-### Template 4: `templates/cursor_summary_template.md`
+In `scripts/ai_loop_task_first.ps1`, `Invoke-CursorImplementation` function:
 
-This template is what the orchestrator resets to a stub on each task run
-(see `Initialize-CursorSummaryForImplementation` in
-`ai_loop_task_first.ps1`).
-
-Add the following hard rules right under the `# Cursor Summary` heading
-(as a Markdown comment block or visible note — implementer's choice):
-
-```markdown
-<!--
-HARD RULES for cursor_summary.md:
-
-1. This file describes ONLY the current iteration / task.
-2. Do NOT include "Earlier roll", "Prior task", or any historical content.
-3. Target length: under 50 lines.
-4. Do NOT paste the full diff. Use the diff for verification, not for
-   storage.
-5. Do NOT duplicate the task description from .ai-loop/task.md.
-
-Each section below has a target length; respect it.
--->
+```powershell
+$promptPath = Join-Path $AiLoop "cursor_implementation_prompt.md"
+$outputPath = Join-Path $AiLoop "cursor_implementation_output.txt"
 ```
 
-Update the existing section headers with target line counts in parens:
+Becomes:
 
-- `## Changed files` (≤ 10 lines)
-- `## Test result` (≤ 5 lines — just the summary line, not full output)
-- `## Implementation summary` (≤ 10 lines)
-- `## Task-specific verification` (≤ 10 lines)
-- `## Project summary update` (≤ 3 lines)
-- `## Skipped work` (≤ 5 lines)
-- `## Remaining risks` (≤ 5 lines, bullet form)
-
-You may add the target counts in italic next to each header, e.g.:
-
-```markdown
-## Changed files
-*(target: ≤ 10 lines)*
+```powershell
+$debugDir = Join-Path $AiLoop "_debug"
+New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
+$promptPath = Join-Path $debugDir "cursor_implementation_prompt.md"
+$outputPath = Join-Path $debugDir "cursor_implementation_output.txt"
 ```
 
-Section ordering must stay the same as the current template — scripts may
-not care, but humans skim by position.
+The `cursor_implementation_result.md` path stays unchanged:
+
+```powershell
+$resultFull = Join-Path $ProjectRoot ".ai-loop\cursor_implementation_result.md"
+```
+
+### Part 5: `Clear-AiLoopRuntimeState`
+
+Both `ai_loop_auto.ps1` and `ai_loop_task_first.ps1` have a copy of this
+function. Update both to match. The new file list:
+
+```powershell
+$files = @(
+    ".ai-loop/codex_review.md",
+    ".ai-loop/next_cursor_prompt.md",
+    ".ai-loop/test_output.txt",
+    ".ai-loop/test_output_before_commit.txt",
+    ".ai-loop/test_failures_summary.md",
+    ".ai-loop/last_diff.patch",
+    ".ai-loop/diff_summary.txt",
+    ".ai-loop/final_status.md",
+    ".ai-loop/git_status.txt",
+    ".ai-loop/post_fix_output.txt",
+    ".ai-loop/claude_final_review.md",
+    ".ai-loop/cursor_implementation_result.md",
+    ".ai-loop/_debug/cursor_agent_output.txt",
+    ".ai-loop/_debug/cursor_implementation_prompt.md",
+    ".ai-loop/_debug/cursor_implementation_output.txt"
+)
+```
+
+Keep the existing conditional that skips `cursor_implementation_result.md`
+when `$env:AI_LOOP_CHAIN_FROM_TASK_FIRST -eq "1"`.
+
+Both copies of `Clear-AiLoopRuntimeState` must be byte-identical except
+where intentionally different (the chain handoff condition).
+
+### Part 6: `.gitignore`
+
+Add at end of `.gitignore`:
+
+```
+# Debug artefacts (raw agent stdout, prompts)
+.ai-loop/_debug/
+
+# Filtered review artefacts (regenerated each iteration)
+.ai-loop/test_failures_summary.md
+.ai-loop/diff_summary.txt
+```
+
+If existing `.gitignore` already covers `.ai-loop/*.md` or similar broad
+patterns, the new individual rules are redundant but harmless. Verify
+first; add only what is missing.
+
+### Part 7: `tests/test_orchestrator_validation.py`
+
+Find any test that asserts on the literal `cursor_agent_output.txt` or
+`cursor_implementation_output.txt` and update the expected path. If a test
+greps for `.ai-loop/cursor_agent_output.txt` in `ai_loop_auto.ps1`, the
+new expectation is `.ai-loop\_debug\cursor_agent_output.txt` or
+`_debug\cursor_agent_output.txt` depending on how the script writes the
+path.
+
+Add two new tests:
+
+```python
+def test_ai_loop_auto_writes_diff_summary():
+    script = Path("scripts/ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "diff_summary.txt" in script
+    assert "git diff --stat" in script
+
+
+def test_ai_loop_auto_invokes_pytest_failure_filter():
+    script = Path("scripts/ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "filter_pytest_failures.py" in script
+```
+
+Add a third test for the `_debug` directory convention:
+
+```python
+def test_cursor_agent_output_goes_to_debug_dir():
+    script = Path("scripts/ai_loop_auto.ps1").read_text(encoding="utf-8")
+    # Old location must not be present
+    assert ".ai-loop/cursor_agent_output.txt" not in script
+    assert ".ai-loop\\cursor_agent_output.txt" not in script
+    # New location must be present
+    assert "_debug" in script and "cursor_agent_output.txt" in script
+```
+
+Adjust path normalization (forward vs back slashes) to match how
+PowerShell composes paths in the actual script — use the path-handling
+helper if one exists, otherwise inspect the script for literal style.
 
 ## Tests
 
@@ -277,97 +518,125 @@ Run:
 python -m pytest -q
 ```
 
-Expected: same count of passing tests. None of the template files are
-imported or parsed by current tests.
+Expected:
 
-If `tests/test_orchestrator_validation.py` greps for specific strings
-inside templates (the literal `VERDICT: PASS or FIX_REQUIRED`), those
-strings must still exist after this task — verification step 4 confirms.
+- All 23 existing orchestrator-validation tests pass (after path
+  adjustments).
+- 2 new tests for filter_pytest_failures pass.
+- 3 new tests in test_orchestrator_validation.py pass.
+- Total around 28 passing tests.
+
+If the count diverges significantly, investigate before adjusting target.
 
 ## Verification
 
-1. All four template files still exist:
+1. `diff_summary.txt` and `test_failures_summary.md` references exist in
+   `ai_loop_auto.ps1`:
 
    ```powershell
-   Test-Path .\templates\task.md
-   Test-Path .\templates\codex_review_prompt.md
-   Test-Path .\templates\project_summary.md
-   Test-Path .\templates\cursor_summary_template.md
-   ```
-
-   All return `True`.
-
-2. Each template references `AGENTS.md`:
-
-   ```powershell
-   @('task.md','codex_review_prompt.md','project_summary.md','cursor_summary_template.md') | ForEach-Object {
-       $count = (Select-String -Path ".\templates\$_" -Pattern "AGENTS\.md" | Measure-Object).Count
-       "$_ : $count"
-   }
-   ```
-
-   Each returns at least 1, except `cursor_summary_template.md` may
-   return 0 (that template does not need to reference AGENTS.md
-   directly — it's a fill-in scaffold, not an instruction sheet).
-
-3. Critical regex-matched strings in codex_review_prompt.md are intact:
-
-   ```powershell
-   Select-String -Path .\templates\codex_review_prompt.md -Pattern "VERDICT: PASS or FIX_REQUIRED" |
-     Measure-Object | Select-Object -ExpandProperty Count
-   Select-String -Path .\templates\codex_review_prompt.md -Pattern "FIX_PROMPT_FOR_CURSOR:" |
-     Measure-Object | Select-Object -ExpandProperty Count
-   Select-String -Path .\templates\codex_review_prompt.md -Pattern "FINAL_NOTE:" |
+   Select-String -Path .\scripts\ai_loop_auto.ps1 -Pattern "diff_summary\.txt|test_failures_summary\.md" |
      Measure-Object | Select-Object -ExpandProperty Count
    ```
 
-   All three return at least 1.
+   Returns at least 4 (2 file mentions × at least 2 contexts each).
 
-4. Each template's line count is in target range:
+2. `filter_pytest_failures.py` exists and is referenced:
 
    ```powershell
-   Get-ChildItem .\templates\*.md | ForEach-Object {
-       $lines = (Get-Content $_.FullName | Measure-Object -Line).Lines
-       "$($_.Name): $lines lines"
-   }
+   Test-Path .\scripts\filter_pytest_failures.py
+   Select-String -Path .\scripts\ai_loop_auto.ps1 -Pattern "filter_pytest_failures\.py" |
+     Measure-Object | Select-Object -ExpandProperty Count
    ```
 
-   - `task.md`: ≤ 120 lines (was ~90 before; expect modest growth)
-   - `codex_review_prompt.md`: ≤ 80 lines (was ~45 before)
-   - `project_summary.md`: ≤ 80 lines
-   - `cursor_summary_template.md`: ≤ 60 lines
+   First returns `True`, second returns at least 1.
 
-5. `pytest -q` passes.
+3. Old debug paths absent from scripts (except in
+   `Clear-AiLoopRuntimeState` lists, which keep them for backward
+   cleanup):
+
+   ```powershell
+   Select-String -Path .\scripts\ai_loop_auto.ps1 -Pattern '\.ai-loop[/\\]cursor_agent_output\.txt"' |
+     Measure-Object | Select-Object -ExpandProperty Count
+   ```
+
+   Returns 0 outside the cleanup arrays. (The cleanup array correctly
+   targets the new `_debug/` paths.)
+
+4. `Clear-AiLoopRuntimeState` lists in both scripts are byte-identical
+   (excepting the chain-handoff condition):
+
+   ```powershell
+   $a = (Get-Content .\scripts\ai_loop_auto.ps1 -Raw) -match 'Clear-AiLoopRuntimeState'
+   $b = (Get-Content .\scripts\ai_loop_task_first.ps1 -Raw) -match 'Clear-AiLoopRuntimeState'
+   $a -and $b
+   ```
+
+   Manual diff of both function bodies should show identical file arrays.
+
+5. `.gitignore` covers `.ai-loop/_debug/`:
+
+   ```powershell
+   Select-String -Path .\.gitignore -Pattern "_debug" |
+     Measure-Object | Select-Object -ExpandProperty Count
+   ```
+
+   Returns at least 1.
+
+6. `pytest -q` passes with the expected new test count.
+
+7. (Manual) Simulate the failure path: artificially break a test, run
+   `ai_loop_auto.ps1` (or just `Save-TestAndDiff` interactively),
+   confirm `test_failures_summary.md` appears with structured content.
+   Not required by automated verification, but recommended once.
 
 ## Cursor summary requirements
 
 Update `.ai-loop/cursor_summary.md` with:
 
-1. Per-template, one line stating what was added (read-priority block,
-   anti-leak comment, target line counts, etc.).
-2. Confirmation that VERDICT / FIX_PROMPT_FOR_CURSOR / FINAL_NOTE labels
-   in codex_review_prompt.md are unchanged.
-3. `pytest -q` result.
+1. `Save-TestAndDiff` now emits `diff_summary.txt` always and
+   `test_failures_summary.md` on test failure.
+2. `filter_pytest_failures.py` added (line count, with 2 tests).
+3. Raw stdout artefacts moved to `.ai-loop/_debug/` in both scripts.
+4. `Clear-AiLoopRuntimeState` updated in both scripts (byte-identical
+   beyond chain-handoff condition).
+5. `.gitignore` updated.
+6. `tests/test_orchestrator_validation.py`: N existing tests adjusted,
+   3 new tests added.
+7. `pytest -q` result.
 
-Target length: 10–15 lines.
+Target length: 20–30 lines (this task touches more files than previous
+ones).
 
 ## Project summary update
 
-Update `.ai-loop/project_summary.md` only if durable architecture changed.
-One line is enough, in "Notes for future AI sessions":
+Update `.ai-loop/project_summary.md` durable changes:
 
-- "Templates in `templates/` enforce AGENTS.md reading and anti-history-
-  leak rules. See `tasks/context_audit/O05_*.md` for rationale."
+- Under "Current architecture" or "Important design decisions":
+  "Test failure context for Codex review is provided by
+  `filter_pytest_failures.py` (deterministic, no LLM) writing
+  `.ai-loop/test_failures_summary.md`."
+- Under same section:
+  "Raw agent stdout / scratch lives in `.ai-loop/_debug/` (gitignored).
+  Reviewer agents must not read that directory."
+
+Total update: 2–3 lines.
 
 ## Important
 
-- **Do not change** the parseable strings in codex_review_prompt.md. If
-  unsure whether a string is parseable, check the regex usage in
-  `scripts/ai_loop_auto.ps1` (`Get-ReviewVerdict`,
-  `Extract-FixPromptFromFile`).
-- Markdown HTML comments (`<!--...-->`) are fine inside templates — they
-  render invisibly in Markdown viewers and survive copy-into-target via
-  `install_into_project.ps1`.
-- Keep templates short. If a section grows past the target line count,
-  prune rather than break the target.
+- This is the first task in the queue that changes script behavior. After
+  this task, the loop runs differently. Verify by running one trivial task
+  end-to-end (your choice — even running this task itself through Cursor
+  exercises most of the new code).
+- The PowerShell `*>` redirection captures all streams (stdout + stderr +
+  warning + verbose + debug + information). Keep it; do not switch to
+  `>` (stdout-only) — the agent CLIs occasionally write errors to stderr
+  and we want full capture in `_debug/`.
+- The two copies of `Clear-AiLoopRuntimeState` are intentionally
+  duplicated (DD per project_summary.md: "no shared module"). When you
+  update one, update the other.
 - Do not commit. The orchestrator handles commit after Codex PASS.
+- If `python` is not in `PATH` for the orchestrator run, the
+  `filter_pytest_failures.py` invocation will silently fail; we catch
+  this with `if (Test-Path $filterScript)` only, not with `Get-Command
+  python`. That's acceptable for now — the failure mode is "Codex reads
+  raw test_output.txt as fallback". Flag in cursor_summary risks.

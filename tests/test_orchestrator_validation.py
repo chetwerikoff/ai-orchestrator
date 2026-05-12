@@ -243,3 +243,21 @@ def test_native_argv_escape_present_in_both_scripts() -> None:
         assert "function ConvertTo-CrtSafeArg" in text, f"{name} missing ConvertTo-CrtSafeArg definition"
     auto = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert "ConvertTo-CrtSafeArg -Value" in auto, "ai_loop_auto.ps1 must escape Codex prompt via ConvertTo-CrtSafeArg"
+
+
+def test_ai_loop_auto_writes_diff_summary() -> None:
+    script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "diff_summary.txt" in script
+    assert "git diff --stat" in script
+
+
+def test_ai_loop_auto_invokes_pytest_failure_filter() -> None:
+    script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "filter_pytest_failures.py" in script
+
+
+def test_cursor_agent_output_goes_to_debug_dir() -> None:
+    script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert ".ai-loop/cursor_agent_output.txt" not in script
+    assert ".ai-loop\\cursor_agent_output.txt" not in script
+    assert "_debug" in script and "cursor_agent_output.txt" in script
