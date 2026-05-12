@@ -12,7 +12,8 @@ Local PowerShell-based AI development loop that coordinates Cursor (implementer)
 - `tests/test_ai_loop.py` -- pytest coverage for pure helpers (`slugify`, `write_text_safe`). The `write_text_safe` test uses a unique-named scratch file under `tests/` removed in `finally`, avoiding pytest `tmp_path`, basetemp under `.tmp/`, repo-root temp dirs, and `tempfile.TemporaryDirectory(dir=repo)` (all problematic on some Windows setups).
 - `tests/test_orchestrator_validation.py` -- PowerShell parser smoke check for `ai_loop_auto.ps1` / `ai_loop_task_first.ps1`, parity and porcelain-flag checks, path-set delta + marker-gate reference tests, auto-loop no-op reason literals, and `SafeAddPaths` parity across `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, and `continue_ai_loop.ps1` (includes `docs/` and `templates/`).
 - `pytest.ini` -- limits collection to `tests/` via `testpaths` and skips common runtime dirs (`.ai-loop`, `.tmp`, stray root temp names, caches) via `norecursedirs` so pytest does not wander the repo root by default.
-- `docs/archive/` -- dated superseded design / review Markdown under `docs/` (O01 moved three root-level review/diagnostic files to `2026-05-11_*.md` without editing file bodies). O01 does **not** introduce or stage `docs/architecture.md`; that remains a separate doc-maintenance task when scheduled.
+- `docs/archive/` — dated superseded design / review Markdown under `docs/` (O01 moved three root-level review/diagnostic files to `2026-05-11_*.md` without editing file bodies).
+- `docs/architecture.md` — separates current state (§0) from target design (§1+); **§9** inlines the deferred multi-script / `orchestrator/` factory blueprint (**§10–§11** spell safety + companion references; archives hold verbatim critiques). OpenCode llama.cpp proxy documented as **DD-020** (see §5.3, §12). Decision log §12 lists **DD-001..DD-006**, **DD-011**, **DD-020**, **DD-021** (no blank “reserved” DD slots).
 - `.ai-loop/*.md` -- task file, durable summary, review prompts, cursor summary template.
 
 ## Current pipeline / workflow
@@ -21,6 +22,7 @@ Install scripts into a target repo, author task and context. For a **new** task,
 
 ## Important design decisions
 
+- `docs/architecture.md` is the single source of truth for target design; §0 is factual today, §1 onward is aspirational until phased rollout completes; **§9** embeds the full deferred-component blueprint inline (critique-heavy expert review prose stays archived). **DD-020** records the required `opencode_proxy` stack (port 8090); **DD-021** keeps Cursor as production implementer through Phase 1. Fix/review prompts invoke the **`agent` CLI with `ConvertTo-CrtSafeArg`** (no auxiliary `run_cursor_agent.ps1` shim in this repo).
 - Staging is restricted to explicit safe paths; runtime outputs under `.ai-loop/` (e.g. `last_diff.patch`, `test_output*.txt`, `git_status.txt`, Cursor implementation scratch/result files, reviews) stay out of commits by default.
 - Task-first mode enforces “result only” completions using a **symmetric path-set** delta from `git status --porcelain --untracked-files=all` after excluding the same orchestrator scratch paths (`cursor_summary.md`, implementation prompt/output), merged with **last-write-time / existence** checks for `.ai-loop/cursor_implementation_result.md`; each task-first run resets `cursor_summary.md` to a stub so Codex does not read stale summaries.
 - Default `SafeAddPaths` in `ai_loop_auto.ps1`, `continue_ai_loop.ps1`, and `ai_loop_task_first.ps1` includes `src/`, `tests/`, `README.md`, `AGENTS.md`, `scripts/`, `docs/`, `templates/`, `ai_loop.py`, pytest/config paths, and the durable `.ai-loop/task.md`, `.ai-loop/cursor_summary.md`, `.ai-loop/project_summary.md` trio. `docs/safety.md` documents that same default list (path order matches the shared literal).
@@ -39,7 +41,9 @@ Install scripts into a target repo, author task and context. For a **new** task,
 
 ## Last completed task
 
-**O02 follow-on:** default `SafeAddPaths` now includes root `AGENTS.md` in `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, `continue_ai_loop.ps1`, and `docs/safety.md`; parity test asserts the segment. Prior: task-first **path-set comparison hardening** plus **helper cleanup**; empty-set `Compare-Object` hardening; P0 porcelain path-set + result mtime; auto-loop clean-tree exits 6/7; Claude review template removed. Root `AGENTS.md` documents agent working rules (including the synced SafeAddPaths literal).
+**Architecture doc §9 substantive restore:** **`docs/architecture.md`** retains §0 proxy/Phase-0/DD edits; **§9** now carries the full target blueprint text (trees, artifact contracts, orchestrator modules, staged workflow, MVP excerpt) inlined from the consolidated harness specification — no longer summarized away as archive-only pointers. Earlier **O03 fix pass:** **`scripts/ai_loop_task_first.ps1`** returned to **`origin/master`** baseline; **`scripts/run_cursor_agent.ps1`** absent; **`agent`** + **`ConvertTo-CrtSafeArg`** remain in `ai_loop_auto.ps1`.
+
+Prior **O02 follow-on:** default `SafeAddPaths` includes root `AGENTS.md`; task-first path-set gates; clean-tree exits 6/7; root `AGENTS.md` working rules.
 
 ## Next likely steps
 
