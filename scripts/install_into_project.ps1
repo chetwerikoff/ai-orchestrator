@@ -43,7 +43,7 @@ if ($OverwriteOpencodeConfig) {
     Copy-Item (Join-Path $Root "templates\opencode.json") $OpencodeTarget -Force
 }
 
-Write-Host "AI git orchestrator installed into: $Target"
+Write-Host "AI orchestrator installed into: $Target"
 if ($opencodeExisted -and -not $OverwriteOpencodeConfig) {
     Write-Host "Left existing opencode.json unchanged (pass -OverwriteOpencodeConfig to replace)."
 }

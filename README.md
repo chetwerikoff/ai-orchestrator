@@ -1,4 +1,4 @@
-# A Git Orchestrator
+# AI Orchestrator
 
 See `AGENTS.md` for AI-agent working rules.
 
@@ -68,7 +68,7 @@ The implementer updates it after each task when durable context changes. Codex r
 
 ## Install into a target project
 
-From this repository:
+From the `ai-orchestrator` repository:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\install_into_project.ps1 `

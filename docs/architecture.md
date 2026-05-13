@@ -4,7 +4,7 @@ status: living_document
 as_of: 2026-05-13
 ---
 
-# Architecture — AI Git Orchestrator
+# Architecture — AI Orchestrator
 
 ## Single-Page Summary
 
@@ -341,19 +341,19 @@ Principle (unchanged):
 
 ```text
 OpenCode + local Qwen  = tool-using coding harness inside the target coding repo
-ai-git-orchestrator    = outer workflow (task contract, tests, safe git, Codex gate)
+ai-orchestrator        = outer workflow (task contract, tests, safe git, Codex gate)
 ```
 
 Until Phase 1 evidence satisfies **DD-021**, **Cursor Agent** remains the production implementer for tasks driven from this repository.
 
 Expert review verbatim (findings IDs, MVP debate, critique lists) stays in **`docs/archive/2026-05-11_opencode_harness_expert_review.md`** for traceability — **not** as a substitute for the numbered contracts above and below.
 
-### §9.1 Target layout — `ai-git-orchestrator` repository
+### §9.1 Target layout — `ai-orchestrator` repository
 
 Beyond the consolidated drivers already shipped, the endorsed target adds per-stage wrappers, a packaged Python core, prompts, rules, and config:
 
 ```text
-ai-git-orchestrator/
+ai-orchestrator/
   README.md
   pyproject.toml
 

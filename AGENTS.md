@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Working rules for AI agents operating in `ai-git-orchestrator`. Read this file once at the start of any task; it points to deeper docs only when needed.
+Working rules for AI agents operating in `ai-orchestrator`. Read this file once at the start of any task; it points to deeper docs only when needed.
 
 ## Project purpose (one line)
 PowerShell-based AI development loop coordinating an implementer (often Cursor Agent; configurable via script parameters), Codex (technical reviewer), and safe git commit/push for target projects.
