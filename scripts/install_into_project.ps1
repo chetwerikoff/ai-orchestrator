@@ -33,7 +33,7 @@ if ($OverwriteProjectSummary -or !(Test-Path $ProjectSummaryTarget)) {
 }
 
 Copy-Item (Join-Path $Root "templates\codex_review_prompt.md") (Join-Path $TargetAiLoop "codex_review_prompt.md") -Force
-Copy-Item (Join-Path $Root "templates\cursor_summary_template.md") (Join-Path $TargetAiLoop "cursor_summary_template.md") -Force
+Copy-Item (Join-Path $Root "templates\implementer_summary_template.md") (Join-Path $TargetAiLoop "implementer_summary_template.md") -Force
 
 $OpencodeTarget = Join-Path $Target "opencode.json"
 $opencodeExisted = Test-Path $OpencodeTarget

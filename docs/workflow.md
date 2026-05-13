@@ -1,7 +1,7 @@
 # Workflow
 
 > **Current state vs target.** This document describes the workflow that
-> runs in production today (Cursor as implementer, Codex as reviewer).
+> runs in production today (Cursor Agent as the default implementer, Codex as reviewer).
 > See `docs/architecture.md` §0 for a structured statement of current
 > state, and §1 onwards for the target multi-model design we are
 > building toward.
@@ -14,7 +14,7 @@ The orchestrator uses a file-based protocol:
 .ai-loop/project_summary.md
 .ai-loop/task.md
   -> Implementer implements (Cursor Agent by default, or `-CursorCommand` e.g. OpenCode wrapper)
-  -> .ai-loop/implementer_summary.md (+ legacy mirror `.ai-loop/cursor_summary.md`)
+  -> .ai-loop/implementer_summary.md
   -> tests + diff
   -> Codex review
   -> Implementer fixes if needed
@@ -26,8 +26,7 @@ The orchestrator uses a file-based protocol:
 
 - `.ai-loop/project_summary.md` — durable project-level context.
 - `.ai-loop/task.md` — current task contract.
-- `.ai-loop/implementer_summary.md` — latest implementation summary (primary).
-- `.ai-loop/cursor_summary.md` — legacy alias for the same summary role (kept in sync with `implementer_summary.md` when the orchestrator writes stubs).
+- `.ai-loop/implementer_summary.md` — latest implementation summary.
 - `.ai-loop/codex_review.md` — primary review output.
 - `.ai-loop/last_diff.patch` — current diff.
 - `.ai-loop/test_output.txt` — current test output.
@@ -44,13 +43,13 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 `
   -TestCommand "python -m pytest -q"
 ```
 
-This clears stale `.ai-loop` runtime files (except `task.md`), runs the configured implementer first (Cursor Agent by default; override with `-CursorCommand`), resets `.ai-loop/implementer_summary.md` and `.ai-loop/cursor_summary.md` to matching stubs (the implementer must fill them), then hands off to `ai_loop_auto.ps1` only if the implementer produced relevant git changes (or a documented no-code completion via `cursor_implementation_result.md`). If the implementer makes no effective changes twice, Codex is skipped and the script fails with `NO_CHANGES_AFTER_CURSOR`.
+This clears stale `.ai-loop` runtime files (except `task.md`), runs the configured implementer first (Cursor Agent by default; override with `-CursorCommand`), resets `.ai-loop/implementer_summary.md` to a fresh stub (the implementer must fill it), then hands off to `ai_loop_auto.ps1` only if the implementer produced relevant git changes (or a documented no-code completion via `implementer_result.md`). If the implementer makes no effective changes twice, Codex is skipped and the script fails with `NO_CHANGES_AFTER_IMPLEMENTER`.
 
 ### `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED`
 
-Task-first mode may treat **only** `.ai-loop/cursor_implementation_result.md` as the implementation delta (for example when git ignores that file or it alone changed vs filtered porcelain). In that situation the orchestrator allows proceeding **only if** `cursor_implementation_result.md` contains this marker as its **own line**.
+Task-first mode may treat **only** `.ai-loop/implementer_result.md` as the implementation delta (for example when git ignores that file or it alone changed vs filtered porcelain). In that situation the orchestrator allows proceeding **only if** `implementer_result.md` contains this marker as its **own line**.
 
-Exact marker behavior in `scripts/ai_loop_task_first.ps1` (`Test-CursorResultAllowsNoCodeChanges`): the file must match this regular expression (case-insensitive, multiline):
+Exact marker behavior in `scripts/ai_loop_task_first.ps1` (`Test-ImplementerResultAllowsNoCodeChanges`): the file must match this regular expression (case-insensitive, multiline):
 
 ```text
 (?im)^IMPLEMENTATION_STATUS:\s*DONE_NO_CODE_CHANGES_REQUIRED\s*$

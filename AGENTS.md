@@ -13,7 +13,7 @@ You may edit:
 - `templates/` — files copied into target projects by `install_into_project.ps1`
 - `docs/` — architecture, decisions, safety, workflow (**not** `docs/archive/`)
 - `README.md`, `AGENTS.md`, `.gitignore`, `pytest.ini`, `requirements.txt`
-- `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, `.ai-loop/cursor_summary.md`, `.ai-loop/project_summary.md`
+- `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, `.ai-loop/project_summary.md`
 - `tasks/` — queued task specs
 
 Never edit:
@@ -29,7 +29,7 @@ When loading context, read in this order and stop when you have enough:
 1. `.ai-loop/task.md` — current task contract (always)
 2. `.ai-loop/project_summary.md` — durable orientation (always)
 3. `AGENTS.md` — this file (always, once)
-4. `.ai-loop/implementer_summary.md` — previous iteration only (if N > 1); if missing, use `.ai-loop/cursor_summary.md` (legacy alias)
+4. `.ai-loop/implementer_summary.md` — previous iteration only (if N > 1)
 5. `docs/architecture.md` — only if the task is architecture-related
 6. `docs/decisions.md`, `docs/workflow.md`, `docs/safety.md` — only when directly relevant
 
@@ -51,7 +51,7 @@ powershell -NoProfile -Command "[void][System.Management.Automation.Language.Par
 ```
 
 ## Safe paths (committed by orchestrator)
-The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
+The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
 
 ## Templates contract
 When you add or remove a file in `templates/`, also check `scripts/install_into_project.ps1` so auto-copied target files stay correct.
@@ -61,7 +61,7 @@ When you add or remove a file in `templates/`, also check `scripts/install_into_
 - `docs/decisions.md` tracks numbered `DD-XXX` decisions; when superseded, mark inline and keep the entry; add replacements with higher numbers — never delete.
 
 ## Implementer summary contract
-After each iteration, update `.ai-loop/implementer_summary.md` and mirror the same content to `.ai-loop/cursor_summary.md` (legacy alias for older prompts and tools) with:
+After each iteration, update `.ai-loop/implementer_summary.md` with:
 
 - changed files (brief)
 - test result (count, not full output)

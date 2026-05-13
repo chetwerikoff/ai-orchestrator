@@ -1,66 +1,56 @@
 # Project Summary
 
-## Project purpose
+## Project Purpose
 
-Local PowerShell-based AI development loop that coordinates an **implementer** (Cursor Agent by default; configurable), Codex (review), optional tests, and guarded git commit/push using a file-based contract under `.ai-loop/`.
+Local PowerShell-based AI development loop that coordinates an implementer (Cursor Agent by default; OpenCode/Qwen via wrapper), Codex review, optional tests, and guarded git commit/push using a file contract under `.ai-loop/`.
 
-## Current architecture
+## Current Architecture
 
-- `ai_loop.py` -- experimental GitHub PR orchestrator (stdlib-only); separate from the primary PowerShell Cursor + Codex loop; does not replace `scripts/ai_loop_auto.ps1` / `ai_loop_task_first.ps1`.
-- `scripts/ai_loop_auto.ps1`, `scripts/continue_ai_loop.ps1`, `scripts/install_into_project.ps1` -- PowerShell drivers and installer (`install_into_project.ps1` copies `opencode.json` to the target root when absent, or when `-OverwriteOpencodeConfig`; does not clobber by default).
-- `scripts/ai_loop_task_first.ps1` -- task-first entry: clears a defined set of `.ai-loop` runtime artifacts, stubs **`implementer_summary.md` and `cursor_summary.md`** with matching content, runs the configured **implementer** (`-CursorCommand`; default Cursor `run_cursor_agent.ps1`), gates on a **path-set** delta from `git status --porcelain --untracked-files=all` (excluding orchestrator scratch paths) plus **mtime/existence** for `.ai-loop/cursor_implementation_result.md`. **STEP 1** console header is UX-only: `Get-ImplementerStepDisplayLabel` maps wrapper/model to `CURSOR` / `QWEN` / `IMPLEMENTER` (`STEP 1: <label> IMPLEMENTATION`); does not change execution. `Get-ImplementationDeltaPaths` emits sorted paths on the pipeline (avoids Windows PowerShell turning empty `return @()` into `$null`); `Invoke-CursorImplementation` assigns `@(Get-ImplementationDeltaPaths)` and uses `Compare-Object @($beforePaths) @($afterPaths)` so empty sets compare reliably. Then invokes `ai_loop_auto.ps1` forwarding `-NoPush`, `-TestCommand`, `-PostFixCommand`, and `-SafeAddPaths`.
-- `tests/test_ai_loop.py` -- pytest coverage for pure helpers (`slugify`, `write_text_safe`). The `write_text_safe` test uses a unique-named scratch file under `tests/` removed in `finally`, avoiding pytest `tmp_path`, basetemp under `.tmp/`, repo-root temp dirs, and `tempfile.TemporaryDirectory(dir=repo)` (all problematic on some Windows setups).
-- `tests/test_orchestrator_validation.py` -- PowerShell parser smoke checks for the driver scripts; `SafeAddPaths` default parity across `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, and `continue_ai_loop.ps1`; porcelain-flag and path-set / marker-gate reference tests; implementer-state (`implementer.json`) / resume guards; native-arg helper `ConvertTo-CrtSafeArg` present in both drivers with assertions on `-Value` usage and minimum call counts where applicable (`python -m pytest -q` passes with current drivers).
-- Test failure context for Codex review is provided by `scripts/filter_pytest_failures.py` (deterministic, no LLM) writing `.ai-loop/test_failures_summary.md` when pytest fails. It parses pytest’s `FAILURES` section (through `short test summary info`), pairs underscore-delimited traceback blocks with ordered `FAILED …` lines from the short summary, and keeps the final session count line out of traceback fences (including thin layouts where the closing line looks like `1 failed, … in 5.0s` without `===` wrappers). Thin layouts without `FAILURES` still fall back to scanning leading `FAILED` lines. `Save-TestAndDiff` also writes `.ai-loop/diff_summary.txt` via `git diff --stat`.
-- `pytest.ini` -- limits collection to `tests/` via `testpaths` and skips common runtime dirs (`.ai-loop`, `.tmp`, stray root temp names, caches) via `norecursedirs` so pytest does not wander the repo root by default.
-- `docs/archive/` — dated superseded design / review Markdown under `docs/` (O01 moved three root-level review/diagnostic files to `2026-05-11_*.md` without editing file bodies).
-- `docs/architecture.md` — separates current state (§0) from target design (§1+); **§9** inlines the deferred multi-script / `orchestrator/` factory blueprint (**§10–§11** spell safety + companion references; archives hold verbatim critiques). **`docs/decisions.md`** carries **DD-001..DD-021** with placeholders for numbers absent from **`docs/architecture.md`** §12. **DD-020** documents the optional **8090** `opencode_proxy` path for text-format tool normalization; Phase 1 A/B uses **direct** `llama-server` ports per **`templates/opencode.json`** (§5.3, §12). Decision log §12 lists concrete entries plus gaps between DD-007..DD-010 and DD-012..DD-019.
-- `.ai-loop/*.md` -- task file, durable summary, review prompts, implementer summary template (`cursor_summary_template.md` is the install name; content describes **implementer_summary** + legacy **cursor_summary**).
+- `ai_loop.py` -- experimental GitHub PR orchestrator; separate from the primary PowerShell loop.
+- `scripts/ai_loop_task_first.ps1` -- task-first entry: resets `implementer_summary.md`, saves the effective implementer selection, runs the configured implementer, gates on a path-set delta plus `.ai-loop/implementer_result.md` mtime/existence, then invokes `ai_loop_auto.ps1`.
+- `scripts/ai_loop_auto.ps1` -- test/diff capture, Codex review, fix-loop, final test gate, safe staging, commit/push.
+- `scripts/continue_ai_loop.ps1` -- resume wrapper for `ai_loop_auto.ps1 -Resume`; forwards explicit `-CursorCommand` / `-CursorModel` overrides.
+- `scripts/run_cursor_agent.ps1` and `scripts/run_opencode_agent.ps1` -- implementer wrappers; parameter names remain `-CursorCommand` / `-CursorModel` for compatibility.
+- `scripts/install_into_project.ps1` -- copies drivers, wrappers, templates, and `opencode.json` into target projects without clobbering existing task/project summary unless requested.
+- `tests/test_orchestrator_validation.py` -- parser smoke tests, safe-path parity, task-first delta semantics, implementer-state resume behavior, prompt parsing, and dynamic step-label checks.
+- `templates/` -- target-project scaffolds, including `implementer_summary_template.md`, `codex_review_prompt.md`, `project_summary.md`, `task.md`, and `opencode.json`.
 
-## Current pipeline / workflow
+## Current Pipeline / Workflow
 
-Install scripts into a target repo, author task and context. For a **new** task, run `ai_loop_task_first.ps1` (implementer first, then `ai_loop_auto.ps1` when there is a meaningful implementation delta). For **existing** changes, run `ai_loop_auto.ps1` directly. Review artifacts, continue or commit per safety model (`SafeAddPaths`, ignored runtime files). After Codex returns `PASS`, the PowerShell orchestrator runs the final test gate (`Commit-And-Push`), then stages safe paths and pushes unless `-NoPush`. **Resume** (`ai_loop_auto.ps1 -Resume` via `continue_ai_loop.ps1`) prefers **`.ai-loop/next_implementer_prompt.md`**, then legacy **`next_cursor_prompt.md`**, or existing `codex_review.md` (`PASS` → final gate + commit/push; `FIX_REQUIRED` → extract fix prompt → implementer). **`continue_ai_loop.ps1`** forwards optional `-CursorCommand` / `-CursorModel` when supplied as non-empty values (they override persisted state). On **`ai_loop_auto.ps1 -Resume`**, an **explicit** `-CursorCommand` argument skips **`implementer.json`** entirely (no persisted command/model merge, no missing-file warning); the model is empty/default unless **`-CursorModel`** is also explicit. When `-CursorCommand` is omitted, **`ai_loop_auto.ps1 -Resume`** reloads the effective wrapper and model from **`.ai-loop/implementer.json`** (runtime, gitignored) only when the persisted command is **non-empty** and **resolvable** like real invocation: rooted path, path under the project root (optional `.\` / `./` prefix), path valid relative to the repo root working directory, or **`Get-Command`**-discoverable name; the persisted model loads only when **`-CursorModel`** is not explicit. Missing, empty, invalid JSON, missing command, or unresolvable command yields a clear **WARNING** and default Cursor wrapper **without** applying a persisted model (avoids a stale OpenCode/Qwen model on bad state).
+For a new task, run `ai_loop_task_first.ps1`. It runs the implementer first, then hands off to `ai_loop_auto.ps1` only after meaningful implementation side effects or an accepted no-code marker in `.ai-loop/implementer_result.md`. For existing changes, run `ai_loop_auto.ps1` directly. Codex reviews after tests/diff capture; `PASS` triggers final tests and safe commit/push unless `-NoPush`; `FIX_REQUIRED` writes `.ai-loop/next_implementer_prompt.md` and reruns the selected implementer.
 
-## Important design decisions
+Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last effective wrapper/model when `-CursorCommand` is omitted. Explicit `-CursorCommand` / `-CursorModel` on `continue_ai_loop.ps1` or `ai_loop_auto.ps1 -Resume` override persisted state.
 
-- `docs/architecture.md` is the single source of truth for target design; §0 is factual today, §1 onward is aspirational until phased rollout completes; **§9** embeds the full deferred-component blueprint inline (critique-heavy expert review prose stays archived). **DD-020** is the optional **8090** normalization proxy for models that lack native `tool_calls[]`; Phase 1 default wiring is **direct** to **8081/8082/8083** (`templates/opencode.json`). **DD-021** keeps Cursor as production implementer through Phase 1.
-- Staging is restricted to explicit safe paths; runtime outputs under `.ai-loop/` (e.g. `last_diff.patch`, `test_output*.txt`, `git_status.txt`, Cursor implementation scratch/result files, reviews) stay out of commits by default.
-- Raw agent stdout and implementation scratch (`cursor_agent_output.txt`, `cursor_implementation_prompt.md`, `cursor_implementation_output.txt`) live under `.ai-loop/_debug/` (gitignored). Reviewer agents must not read that directory; `cursor_implementation_result.md` stays at `.ai-loop/` root for the gated contract.
-- Task-first mode enforces “result only” completions using a **symmetric path-set** delta from `git status --porcelain --untracked-files=all` after excluding the same orchestrator scratch paths (`implementer_summary.md`, `cursor_summary.md`, implementation prompt/output), merged with **last-write-time / existence** checks for `.ai-loop/cursor_implementation_result.md`; each task-first run resets **`implementer_summary.md` and `cursor_summary.md`** to matching stubs so Codex does not read stale summaries.
-- Default `SafeAddPaths` in `ai_loop_auto.ps1`, `continue_ai_loop.ps1`, and `ai_loop_task_first.ps1` includes `src/`, `tests/`, `README.md`, `AGENTS.md`, `scripts/`, `docs/`, `templates/`, `ai_loop.py`, pytest/config paths, and the durable `.ai-loop/task.md`, **`.ai-loop/implementer_summary.md`**, `.ai-loop/cursor_summary.md`, `.ai-loop/project_summary.md`. `docs/safety.md` documents that same default list (path order matches the shared literal).
-- Codex fix prompts: prefer **`FIX_PROMPT_FOR_IMPLEMENTER`** in templates; the orchestrator parses **`FIX_PROMPT_FOR_CURSOR`** too. Extracted prompts are written to **`next_implementer_prompt.md`** and mirrored to **`next_cursor_prompt.md`**.
-- **`.ai-loop/implementer.json`** (gitignored runtime) stores the last **effective** implementer wrapper path and model ID for PowerShell resume. Task-first and `ai_loop_auto.ps1` refresh it; `ai_loop_auto.ps1 -Resume` may load it when **`-CursorCommand` is not explicitly passed** (persisted model loads only when **`-CursorModel`** is not explicit), **only if** the persisted command is non-empty and resolvable (path under repo / cwd or **`Get-Command`**). An explicit **`-CursorCommand`** bypasses the file for that invocation (no stale model merge; missing JSON does not warn). Unusable state triggers warnings and skips loading a persisted model. It is **not** staged or treated as durable documentation (machine-local paths).
-- `project_summary.md` holds long-lived context; it is not a per-task changelog.
-- `templates/project_summary.md` (copied into target `.ai-loop/project_summary.md` by `install_into_project.ps1`) uses **implementer**-neutral pipeline and session notes; **Cursor Agent** remains the default example where the template calls that out.
-- Parity between the Python `after-cursor` step and PowerShell `Save-TestAndDiff` includes a short git status file for reviewers.
-- Codex is the automated review gate before commit/push; Codex PASS triggers final tests then commit/push.
-- Inline `Run-CodexReview` prompt in `ai_loop_auto.ps1` instructs reviewers to load `.ai-loop/diff_summary.txt` next to `.ai-loop/last_diff.patch`, and to read `.ai-loop/test_failures_summary.md` when it exists before falling back to `.ai-loop/test_output.txt`.
-- Installed **`templates/codex_review_prompt.md`** matches that read order in its numbered list (`test_failures_summary.md` before `test_output.txt`).
+## Important Design Decisions
 
-## Known risks / constraints
+- Active PowerShell artifacts are implementer-neutral: `implementer_summary.md`, `next_implementer_prompt.md`, `implementer_result.md`, `FIX_PROMPT_FOR_IMPLEMENTER`, and `_debug/implementer_*`.
+- Legacy Cursor-named alias artifacts are removed from the active PowerShell contract; summary, next-fix prompt, fix label, result marker, and debug outputs use implementer-neutral names.
+- `run_cursor_agent.ps1` remains because it is the real Cursor wrapper, not a legacy alias. `-CursorCommand` / `-CursorModel` remain as compatibility parameter names.
+- `SafeAddPaths` stages durable files only: project files plus `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, and `.ai-loop/project_summary.md`.
+- Runtime outputs (`codex_review.md`, diffs, test logs, `implementer_result.md`, `implementer.json`, `_debug/`, final status) are gitignored and not staged by default.
+- `docs/architecture.md` is the source of truth for target design; `docs/decisions.md` is the numbered index.
 
-- Native-arg escaping expectations in `tests/test_orchestrator_validation.py` should stay aligned whenever Cursor stdin / argv forwarding changes in the drivers; current repo state passes full pytest (`python -m pytest -q`).
-- External CLIs (`codex`; Cursor agent via `run_cursor_agent.ps1` / local install) must be installed and authenticated where those steps are used.
-- On Windows PowerShell, an empty array returned with `return @()` from a function can surface as `$null` to callers; task-first path capture avoids that for the implementation-delta helper (pipeline output + `@(Get-ImplementationDeltaPaths)` / wrapped `Compare-Object`).
+## Known Risks / Constraints
 
-## Current stage
+- External CLIs (`codex`, Cursor Agent, OpenCode, local llama.cpp servers) must be installed and authenticated/configured where used.
+- On Windows PowerShell, empty array returns can become `$null`; path-set helpers emit through the pipeline and callers wrap with `@(...)`.
+- `ai_loop.py` still carries older experimental Cursor-centric terminology and is intentionally separate from the active PowerShell loop unless a task explicitly authorizes changing it.
 
-**Reviewable:** OpenCode Phase 1 contract aligned across **`docs/architecture.md`**, **`docs/decisions.md`**, **`templates/opencode.json`**, and **`scripts/install_into_project.ps1`** (direct `llama-server` ports as default; **DD-020** **8090** proxy documented as optional; installer seeds `opencode.json` without clobber). **`python -m pytest -q`** passes orchestrator validation (55 tests with current tree). PowerShell orchestrator still uses Codex-only automated review; post-Codex PASS runs final test gate, commit, and optional push. Task-first mode gates Codex until the **implementer** produces a path-set delta or updates the result file on disk; `ai_loop_auto.ps1` skips Codex when the tree is clean before review (exits **6** / **7**) and clears stale `.ai-loop` runtime artifacts on non-resume starts. **Operational:** Companion edits (e.g. **D01** in `h2n-range-extractor`) should land directly in that repo’s `.ai-loop/` plus regenerated reviewer artifacts (`git_status.txt`, `last_diff.patch`, `diff_summary.txt`, `test_output.txt`); avoid keeping duplicate target Markdown stubs in this orchestrator `.ai-loop/`.
+## Current Stage
 
-## Last completed task
+Reviewable: PowerShell loop supports persisted implementer selection, dynamic STEP 1 labels (`CURSOR`, `QWEN`, `IMPLEMENTER`), OpenCode/Qwen wrapper execution, and implementer-neutral active artifacts. `python -m pytest -q` should pass before committing any further change.
 
-**O04 (doc companion sync):** `docs/decisions.md`, `docs/workflow.md`, and `README.md` aligned with `docs/architecture.md` (indexed DD-007..DD-021 with placeholders where §12 gaps exist; workflow current-vs-target pointer; README `AGENTS.md`, OpenCode/Qwen phase note, install-into-target list checked against `scripts/install_into_project.ps1`). README optional `-SafeAddPaths` example matches script default ordering (includes `AGENTS.md` after `README.md`).
+## Last Completed Task
 
-## Next likely steps
+OpenCode/Qwen integration and neutral implementer contract were introduced while preserving Cursor as the default production implementer through Phase 1.
 
-1. Stage root `ai_loop.py`, `pytest.ini`, `tests/`, `scripts/`, `docs/`, `templates/`, **`AGENTS.md`**, and other paths listed in orchestrator `SafeAddPaths` when committing.
-2. Re-run `ai_loop_task_first.ps1` or `ai_loop_auto.ps1` / Codex when ready for the next task or review round.
+## Next Likely Steps
 
-## Notes for future AI sessions
+1. Run `python -m pytest -q` and PowerShell parser checks after each script contract change.
+2. Use task-first for new work; use `continue_ai_loop.ps1` for interrupted review/fix loops so persisted implementer state can be reused.
 
-- Templates in `templates/` enforce `AGENTS.md` reading and anti-history-leak rules. See `tasks/context_audit/O05_update_templates.md` for rationale.
-- `docs/decisions.md` is the numbered index; `docs/architecture.md` §12 is the authoritative version with rationale.
-- Working rules for AI agents are in `AGENTS.md` at repo root.
-- Keep durable project-level context here; put per-iteration detail in **`.ai-loop/implementer_summary.md`** (mirror **`.ai-loop/cursor_summary.md`** for legacy compatibility).
-- Use **`.ai-loop/task.md`** as the task source of truth; do not reintroduce a duplicate root `task.md`.
-- Companion tasks that edit another repo’s `.ai-loop/` should apply changes directly in that repo when possible (short Python/Open helper acceptable). Regenerate target `.ai-loop/git_status.txt`, `last_diff.patch`, `diff_summary.txt`, and `test_output.txt` there for Codex. Do **not** keep pasted copies of the target Markdown in this orchestrator `.ai-loop/` unless the tooling contract explicitly requests a stub.
+## Notes For Future AI Sessions
+
+- Keep durable project-level context here; put per-iteration detail in `.ai-loop/implementer_summary.md`.
+- Use `.ai-loop/task.md` as the task source of truth.
+- Do not read or write `.ai-loop/_debug/` unless explicitly debugging raw agent output.

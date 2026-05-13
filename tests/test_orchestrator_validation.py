@@ -17,16 +17,16 @@ _SAFEADD_DEFAULT_RE = re.compile(
     re.MULTILINE,
 )
 
-RESULT_NORM = ".ai-loop/cursor_implementation_result.md"
+RESULT_NORM = ".ai-loop/implementer_result.md"
 
 # Mirrors `Extract-FixPromptFromFile` in scripts/ai_loop_auto.ps1 — keep alternation order in sync.
 _FIX_PROMPT_LABEL_RE = re.compile(
-    r"(?:FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR):\s*"
+    r"FIX_PROMPT_FOR_IMPLEMENTER:\s*"
     r"(?P<prompt>[\s\S]*?)FINAL_NOTE:",
     re.IGNORECASE,
 )
 _FIX_PROMPT_TAIL_RE = re.compile(
-    r"(?:FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR):\s*(?P<prompt>[\s\S]*)",
+    r"FIX_PROMPT_FOR_IMPLEMENTER:\s*(?P<prompt>[\s\S]*)",
     re.IGNORECASE,
 )
 
@@ -78,7 +78,7 @@ def test_auto_porcelain_uses_untracked_files_all_for_noop_guard() -> None:
 def test_ai_loop_auto_has_clean_tree_noop_guard_reasons() -> None:
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert "REVIEW_STARTED_ON_CLEAN_TREE" in text
-    assert "NO_CHANGES_AFTER_CURSOR_FIX" in text
+    assert "NO_CHANGES_AFTER_IMPLEMENTER_FIX" in text
 
 
 def test_claude_final_review_prompt_template_removed() -> None:
@@ -139,7 +139,7 @@ def _path_to_line_map(lines: list[str]) -> dict[str, str]:
     return mapping
 
 
-def cursor_produced_paths(before_lines: list[str], after_lines: list[str]) -> set[str]:
+def implementer_produced_paths(before_lines: list[str], after_lines: list[str]) -> set[str]:
     """Paths whose porcelain line differs between snapshots (legacy line-level delta)."""
     before_map = _path_to_line_map(before_lines)
     after_map = _path_to_line_map(after_lines)
@@ -156,19 +156,19 @@ def cursor_produced_paths(before_lines: list[str], after_lines: list[str]) -> se
 
 def test_porcelain_delta_ignores_unchanged_preexisting_dirty_paths() -> None:
     dirty_task = " M .ai-loop/task.md"
-    result_line = " M .ai-loop/cursor_implementation_result.md"
+    result_line = " M .ai-loop/implementer_result.md"
     before = [dirty_task]
     after = [dirty_task, result_line]
-    assert cursor_produced_paths(before, after) == {".ai-loop/cursor_implementation_result.md"}
+    assert implementer_produced_paths(before, after) == {".ai-loop/implementer_result.md"}
 
 
 def test_porcelain_delta_empty_when_no_line_change() -> None:
     dirty = " M README.md"
-    assert cursor_produced_paths([dirty], [dirty]) == set()
+    assert implementer_produced_paths([dirty], [dirty]) == set()
 
 
 def test_porcelain_delta_detects_modified_file_status_change() -> None:
-    assert cursor_produced_paths([" M README.md"], ["MM README.md"]) == {"README.md"}
+    assert implementer_produced_paths([" M README.md"], ["MM README.md"]) == {"README.md"}
 
 
 def path_set_delta(before_paths: set[str], after_paths: set[str], *, result_changed_during_pass: bool) -> set[str]:
@@ -249,7 +249,7 @@ def test_empty_before_nonempty_after_path_sets_has_delta() -> None:
     assert had_implementation_paths_delta([], ["README.md"]) is True
 
 
-def test_invoke_cursor_implementation_wraps_path_sets_for_compare_object() -> None:
+def test_invoke_implementer_implementation_wraps_path_sets_for_compare_object() -> None:
     text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
     assert "$beforePaths = @(Get-ImplementationDeltaPaths)" in text
     assert "$afterPaths = @(Get-ImplementationDeltaPaths)" in text
@@ -285,30 +285,28 @@ def test_ai_loop_auto_invokes_pytest_failure_filter() -> None:
 def test_default_safe_add_paths_includes_implementer_summary() -> None:
     lit = _default_safe_add_paths_literal(_SCRIPTS / "ai_loop_auto.ps1")
     assert ".ai-loop/implementer_summary.md" in lit
-    assert ".ai-loop/cursor_summary.md" in lit
+    assert ".ai-loop/cursor_summary.md" not in lit
 
 
-def test_fix_prompt_labels_supported_in_ai_loop_auto() -> None:
+def test_fix_prompt_label_is_implementer_only_in_ai_loop_auto() -> None:
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert "FIX_PROMPT_FOR_IMPLEMENTER" in text
-    assert "FIX_PROMPT_FOR_CURSOR" in text
-    assert "FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR" in text
+    assert "FIX_PROMPT_FOR_CURSOR" not in text
 
 
-def test_runtime_cleanup_includes_both_next_prompt_variants() -> None:
+def test_runtime_cleanup_uses_only_neutral_next_prompt() -> None:
     for name in ("ai_loop_auto.ps1", "ai_loop_task_first.ps1"):
         text = (_SCRIPTS / name).read_text(encoding="utf-8")
         assert ".ai-loop/next_implementer_prompt.md" in text
-        assert ".ai-loop/next_cursor_prompt.md" in text
+        assert ".ai-loop/next_cursor_prompt.md" not in text
 
 
-def test_resume_prefers_neutral_next_prompt_file() -> None:
+def test_resume_uses_neutral_next_prompt_file_only() -> None:
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     start = text.index("function Try-ResumeFromExistingReview")
     chunk = text[start:]
-    imp = chunk.index("Resuming from existing next_implementer_prompt.md")
-    leg = chunk.index("Resuming from existing next_cursor_prompt.md")
-    assert imp < leg
+    assert "Resuming from existing next_implementer_prompt.md" in chunk
+    assert "next_cursor_prompt.md" not in chunk
 
 
 def test_continue_ai_loop_forwards_implementer_parameters() -> None:
@@ -337,7 +335,8 @@ def test_ai_loop_auto_resume_merges_persisted_implementer_state() -> None:
     assert "implementer.json" in text
     assert "PSBoundParameters" in text
     assert "ContainsKey" in text
-    assert "implementer_command" in text and "cursor_command" in text
+    assert "implementer_command" in text
+    assert "cursor_command" not in text
 
 
 def test_ai_loop_auto_persisted_command_resolution_matches_invocation() -> None:
@@ -385,9 +384,10 @@ def test_safety_doc_documents_implementer_json_runtime_policy() -> None:
     assert "implementer.json" in t
 
 
-def test_codex_template_prioritizes_implementer_summary() -> None:
+def test_codex_template_uses_implementer_summary_only() -> None:
     t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
-    assert t.index("implementer_summary.md") < t.index("cursor_summary.md")
+    assert "implementer_summary.md" in t
+    assert "cursor_summary.md" not in t
 
 
 def test_codex_template_reads_test_failures_before_raw_pytest_output() -> None:
@@ -407,15 +407,9 @@ def test_extract_fix_prompt_for_implementer_label() -> None:
     assert extract_fix_prompt_from_review_text(review) == "Patch the widget."
 
 
-def test_extract_fix_prompt_for_cursor_legacy_label() -> None:
-    review = (
-        "VERDICT: FIX_REQUIRED\n\n"
-        "FIX_PROMPT_FOR_CURSOR:\n"
-        "Legacy-labelled fix body.\n\n"
-        "FINAL_NOTE:\n"
-        "done\n"
-    )
-    assert extract_fix_prompt_from_review_text(review) == "Legacy-labelled fix body."
+def test_extract_fix_prompt_rejects_cursor_legacy_label() -> None:
+    review = "FIX_PROMPT_FOR_CURSOR:\nLegacy-labelled fix body.\n\nFINAL_NOTE:\n"
+    assert extract_fix_prompt_from_review_text(review) is None
 
 
 def test_extract_fix_prompt_tail_match_without_final_note() -> None:
@@ -429,19 +423,17 @@ def test_extract_fix_prompt_returns_none_for_none_sentinel() -> None:
     assert extract_fix_prompt_from_review_text(review) is None
 
 
-def test_resume_branch_tests_neutral_next_prompt_before_legacy() -> None:
-    """Structural guard: Try-ResumeFromExistingReview must check next_implementer first."""
+def test_resume_branch_checks_neutral_next_prompt() -> None:
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    neutral_if = text.index("if (Test-Path $nextNeutral)")
-    legacy_if = text.index("if (Test-Path $nextLegacy)")
-    assert neutral_if < legacy_if
+    assert "if (Test-Path $nextNeutral)" in text
+    assert "$nextLegacy" not in text
 
 
-def test_cursor_agent_output_goes_to_debug_dir() -> None:
+def test_implementer_fix_output_goes_to_debug_dir() -> None:
     script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert ".ai-loop/cursor_agent_output.txt" not in script
     assert ".ai-loop\\cursor_agent_output.txt" not in script
-    assert "_debug" in script and "cursor_agent_output.txt" in script
+    assert "_debug" in script and "implementer_fix_output.txt" in script
 
 
 def test_install_into_project_copies_opencode_json_without_clobber() -> None:
@@ -451,6 +443,40 @@ def test_install_into_project_copies_opencode_json_without_clobber() -> None:
     assert "$OverwriteOpencodeConfig" in text
     assert "$opencodeExisted" in text
     assert "Left existing opencode.json unchanged" in text
+
+
+def test_install_into_project_copies_implementer_summary_template() -> None:
+    text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
+    assert "implementer_summary_template.md" in text
+    assert "cursor_summary_template.md" not in text
+    assert (_ROOT / "templates" / "implementer_summary_template.md").is_file()
+    assert not (_ROOT / "templates" / "cursor_summary_template.md").exists()
+
+
+def test_active_power_shell_contract_has_no_legacy_cursor_artifact_aliases() -> None:
+    legacy = (
+        "cursor_summary.md",
+        "next_cursor_prompt.md",
+        "FIX_PROMPT_FOR_CURSOR",
+        "cursor_implementation_result.md",
+        "cursor_implementation_prompt.md",
+        "cursor_implementation_output.txt",
+        "cursor_agent_output.txt",
+    )
+    active_files = [
+        *(_SCRIPTS.glob("*.ps1")),
+        _ROOT / "templates" / "codex_review_prompt.md",
+        _ROOT / "templates" / "task.md",
+        _ROOT / ".gitignore",
+        _ROOT / "AGENTS.md",
+        _ROOT / "docs" / "workflow.md",
+        _ROOT / "docs" / "safety.md",
+        _ROOT / "README.md",
+    ]
+    for path in active_files:
+        text = path.read_text(encoding="utf-8")
+        for item in legacy:
+            assert item not in text, f"{item} found in {path}"
 
 
 def test_task_first_has_implementer_step_display_label_helper() -> None:

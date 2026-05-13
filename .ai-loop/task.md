@@ -1,101 +1,48 @@
-# Task: Dynamic Implementer Step Headers
-
-## Project context
-
-Required reading before starting:
-
-1. `AGENTS.md` at repo root - working rules and safe paths.
-2. `.ai-loop/project_summary.md` - durable orientation.
-3. `docs/workflow.md` - current task-first and resume flow.
-4. `docs/architecture.md` - current Cursor/OpenCode/Qwen status.
-
-Do not read by default:
-
-- `docs/archive/`
-- `.ai-loop/_debug/`
+# Task: Remove Cursor-Named Legacy Artifacts From Active Loop
 
 ## Goal
 
-Make task-first console headers show the selected implementer family instead of the generic:
+Remove the legacy Cursor-named alias files and labels from the active PowerShell orchestration contract, while keeping Cursor Agent available as a real implementer wrapper.
 
-```text
-STEP 1: IMPLEMENTER PASS
-```
+This is a two-level cleanup:
 
-Expected examples:
+1. Public loop contract:
+   - use `.ai-loop/implementer_summary.md`;
+   - use `.ai-loop/next_implementer_prompt.md`;
+   - use `FIX_PROMPT_FOR_IMPLEMENTER`;
+   - remove the old summary/fix-prompt aliases.
 
-```text
-STEP 1: CURSOR IMPLEMENTATION
-```
-
-when the default Cursor wrapper is used, and:
-
-```text
-STEP 1: QWEN IMPLEMENTATION
-```
-
-when OpenCode/Qwen is selected through `-CursorCommand .\scripts\run_opencode_agent.ps1` and/or a Qwen `-CursorModel`.
-
-This is a UX/logging change only. It must not change execution behavior.
+2. Runtime/debug contract:
+   - use `.ai-loop/implementer_result.md`;
+   - use `.ai-loop/_debug/implementer_prompt.md`;
+   - use `.ai-loop/_debug/implementer_output.txt`;
+   - use `.ai-loop/_debug/implementer_fix_output.txt`;
+   - remove Cursor-named result/debug paths from the active scripts and docs.
 
 ## Scope
 
 Allowed:
 
-- Update `scripts/ai_loop_task_first.ps1`.
-- Update `scripts/ai_loop_auto.ps1` only if fix-pass logs need the same display label.
-- Update tests under `tests/`.
-- Update docs only if user-facing examples or wording currently mention the generic header.
+- Update `scripts/`, `templates/`, `tests/`, docs, README, AGENTS, `.gitignore`, and `.ai-loop/project_summary.md`.
+- Delete tracked legacy template/summary files that are no longer part of the contract.
 
 Not allowed:
 
-- Do not change the default implementer.
-- Do not remove `-CursorCommand` / `-CursorModel`.
-- Do not remove legacy filenames or aliases.
-- Do not implement or modify persistent implementer state unless that task has already landed and the display helper can reuse it safely.
-- Do not touch `docs/archive/` or `ai_loop.py`.
+- Do not remove `run_cursor_agent.ps1`; it is the actual Cursor wrapper.
+- Do not remove `-CursorCommand` / `-CursorModel` yet; they remain compatibility parameter names.
+- Do not edit `docs/archive/` or `.ai-loop/_debug/`.
+- Do not edit `ai_loop.py` in this task; it is the separate experimental orchestrator.
 
-## Required behavior
+## Required Behavior
 
-1. Add a small helper that derives a display label from the effective implementer command/model.
-
-   Suggested logic:
-
-   - If command path/name contains `run_opencode_agent.ps1`, `opencode`, or model contains `qwen`, display `QWEN`.
-   - If command path/name contains `run_cursor_agent.ps1`, `cursor`, or `agent`, display `CURSOR`.
-   - Otherwise display `IMPLEMENTER`.
-
-2. Use the label in task-first section heading:
-
-   ```text
-   STEP 1: <LABEL> IMPLEMENTATION
-   ```
-
-3. Keep fallback behavior stable:
-
-   - default command `.\scripts\run_cursor_agent.ps1` should print `STEP 1: CURSOR IMPLEMENTATION`;
-   - OpenCode/Qwen command/model should print `STEP 1: QWEN IMPLEMENTATION`;
-   - unknown custom wrapper should print `STEP 1: IMPLEMENTER IMPLEMENTATION` or a cleaner equivalent agreed by implementation.
-
-4. Update nearby console lines if useful, but avoid overengineering:
-
-   - `Running implementer via: ...` may remain generic;
-   - adding model display is acceptable, e.g. `Model: local-qwen-35b/...`, when non-empty.
-
-5. Preserve all current behavior around:
-
-   - initial implementer pass;
-   - retry pass;
-   - no-change marker gate;
-   - forwarding command/model into auto-loop;
-   - Codex review/fix loop.
-
-## Files likely to change
-
-- `scripts/ai_loop_task_first.ps1`
-- `scripts/ai_loop_auto.ps1` only if fix-pass logs are updated too
-- `tests/test_orchestrator_validation.py`
-- `README.md` / `docs/workflow.md` only if documentation mentions the exact header
+1. New task-first runs reset only `.ai-loop/implementer_summary.md`.
+2. Codex review reads `.ai-loop/implementer_summary.md` only.
+3. Codex fixes are extracted only from `FIX_PROMPT_FOR_IMPLEMENTER`.
+4. Resume/fix uses `.ai-loop/next_implementer_prompt.md` only.
+5. The no-code marker gate uses `.ai-loop/implementer_result.md`.
+6. Debug captures use implementer-neutral filenames under `.ai-loop/_debug/`.
+7. Safe paths include `.ai-loop/implementer_summary.md` but not removed legacy summary aliases.
+8. Documentation and tests describe the new contract.
 
 ## Tests
 
@@ -105,72 +52,15 @@ Run:
 python -m pytest -q
 ```
 
-Run parser checks:
+Run parser checks for:
 
 ```powershell
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"
+scripts\ai_loop_auto.ps1
+scripts\ai_loop_task_first.ps1
+scripts\continue_ai_loop.ps1
+scripts\run_opencode_agent.ps1
 ```
 
-Add or update tests that assert:
+## Implementer Summary Requirements
 
-1. The task-first script contains a display-label helper.
-2. Cursor wrapper maps to `CURSOR`.
-3. OpenCode/Qwen wrapper or model maps to `QWEN`.
-4. The section heading is built from the derived label, not hard-coded to `IMPLEMENTER PASS`.
-
-## Verification
-
-Manual smoke commands, if practical:
-
-```powershell
-.\scripts\ai_loop_task_first.ps1 -NoPush -SkipInitialCursor
-```
-
-should not require running the implementer but should keep parser/tests green.
-
-For real runs:
-
-```powershell
-.\scripts\ai_loop_task_first.ps1 -NoPush
-```
-
-should show:
-
-```text
-STEP 1: CURSOR IMPLEMENTATION
-```
-
-and:
-
-```powershell
-.\scripts\ai_loop_task_first.ps1 -NoPush `
-  -CursorCommand .\scripts\run_opencode_agent.ps1 `
-  -CursorModel local-qwen-35b/qwen3-6-35b-a3b
-```
-
-should show:
-
-```text
-STEP 1: QWEN IMPLEMENTATION
-```
-
-## Implementer summary requirements
-
-When implemented through the loop, update `.ai-loop/implementer_summary.md` and mirror `.ai-loop/cursor_summary.md` with:
-
-- changed files;
-- test result;
-- display-label mapping rules;
-- any fallback behavior for unknown wrappers;
-- remaining risks.
-
-## Project summary update
-
-Update `.ai-loop/project_summary.md` only if this becomes durable behavior worth remembering:
-
-- dynamic step headers;
-- label mapping rules;
-- no execution behavior change.
-
-Keep it short.
+Update `.ai-loop/implementer_summary.md` with changed files, tests, implementation summary, and remaining risks.

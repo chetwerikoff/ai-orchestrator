@@ -29,9 +29,9 @@ Only configured safe paths are staged.
 
 Review logs, diffs, test outputs, final status, temp files, input data, and output data are not staged by default.
 
-## DD-006: Task-first mode skips Codex on Cursor no-op
+## DD-006: Task-first mode skips Codex on implementer no-op
 
-`scripts/ai_loop_task_first.ps1` clears stale `.ai-loop` runtime files (except `task.md`), runs Cursor first, and calls `ai_loop_auto.ps1` only after detecting meaningful git changes (or an explicit `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED` in `cursor_implementation_result.md` when only that file changed). Two Cursor passes with no detectable changes skips Codex and exits non-zero with `NO_CHANGES_AFTER_CURSOR`.
+`scripts/ai_loop_task_first.ps1` clears stale `.ai-loop` runtime files (except `task.md`), runs the configured implementer first, and calls `ai_loop_auto.ps1` only after detecting meaningful git changes (or an explicit `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED` in `implementer_result.md` when only that file changed). Two implementer passes with no detectable changes skips Codex and exits non-zero with `NO_CHANGES_AFTER_IMPLEMENTER`.
 
 ## DD-007: (reserved / not yet defined)
 

@@ -1,43 +1,24 @@
-﻿# Implementer summary — Dynamic STEP 1 headers
+# Implementer summary
 
 ## Changed files
 
-- `scripts/ai_loop_task_first.ps1` — added `Get-ImplementerStepDisplayLabel`; STEP 1 uses `STEP 1: <label> IMPLEMENTATION`; optional `Model: …` line when `-CursorModel` non-empty.
-- `tests/test_orchestrator_validation.py` — asserts helper presence, Qwen-before-Cursor ordering, Cursor cues, and no legacy `STEP 1: IMPLEMENTER PASS`.
-- `.ai-loop/project_summary.md` — noted UX-only STEP 1 label mapping; test count 55.
+- `scripts/ai_loop_task_first.ps1` - active result/debug paths renamed to `implementer_*`; task-first now resets only `implementer_summary.md`.
+- `scripts/ai_loop_auto.ps1` - fix prompt extraction uses only `FIX_PROMPT_FOR_IMPLEMENTER`; resume uses only `next_implementer_prompt.md`; fix output writes to `_debug/implementer_fix_output.txt`.
+- `scripts/continue_ai_loop.ps1`, `scripts/install_into_project.ps1`, `.gitignore`, templates, docs, README, AGENTS, and tests - safe paths and public contract updated to implementer-neutral artifact names.
+- Removed the tracked legacy summary alias and replaced the legacy summary template with `templates/implementer_summary_template.md`.
 
 ## Tests
 
-`python -m pytest -q`: **55 passed**.
+- `python -m pytest -q` -> 57 passed, 1 pytest cache warning.
+- PowerShell parser checks passed for `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, `continue_ai_loop.ps1`, and `run_opencode_agent.ps1`.
 
-Recommended locally per AGENTS.md:
+## Implementation summary
 
-```powershell
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"
-```
-
-(Not re-invoked in this session.)
-
-## Display label mapping (`Get-ImplementerStepDisplayLabel`)
-
-Case-insensitive checks on wrapper path + leaf plus `-CursorModel`:
-
-1. **QWEN** if wrapper/path/name matches `run_opencode_agent.ps1` substring or contains `opencode`, or model contains `qwen`.
-2. Else **CURSOR** if wrapper/path/name matches `run_cursor_agent.ps1` or contains `cursor` or `agent`.
-3. Else **IMPLEMENTER**.
-
-OpenCode/Qwen is evaluated before the generic `agent` substring so `run_opencode_agent.ps1` stays **QWEN**.
-
-## Fallback
-
-Unknown wrappers with none of the above substrings → **STEP 1: IMPLEMENTER IMPLEMENTATION**.
-
-## Skipped
-
-- `scripts/ai_loop_auto.ps1` unchanged — no `STEP 1: IMPLEMENTER PASS`-style header there; fix-pass messaging already generic.
+- Removed legacy Cursor alias files from the active PowerShell loop contract: summary alias, next-prompt alias, legacy fix label, result marker path, and debug capture paths.
+- Kept real Cursor support through `run_cursor_agent.ps1` and compatibility parameters `-CursorCommand` / `-CursorModel`.
+- Added/updated tests to reject legacy active artifact names in scripts/templates/docs and to validate the new neutral contract.
 
 ## Remaining risks
 
-- Heuristic labels: any path containing `cursor`/`agent`/`opencode`/`qwen` follows the rules above; unrelated filenames could show **CURSOR** incorrectly.
-- Empty `-CursorCommand` defaults are not passed into the helper from task-first (param default is always non-empty in normal use).
+- `ai_loop.py` still contains older experimental Cursor-centric terminology; it was intentionally left unchanged because this task targets the active PowerShell loop and AGENTS requires explicit authorization for `ai_loop.py`.
+- Historical queued specs under `tasks/context_audit/` and ignored `.ai-loop/_debug/` may still mention old names; they are not part of the active contract.

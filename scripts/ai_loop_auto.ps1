@@ -5,7 +5,7 @@ param(
     [switch]$NoPush,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md",
+    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md",
     [string]$CursorCommand = "",
     [string]$CursorModel = ""
 )
@@ -49,10 +49,8 @@ function Normalize-ImplementerStateFields {
     $names = @($StateObj.PSObject.Properties.Name)
     $cmd = ""
     if ($names -contains "implementer_command") { $cmd = [string]$StateObj.implementer_command }
-    elseif ($names -contains "cursor_command") { $cmd = [string]$StateObj.cursor_command }
     $model = ""
     if ($names -contains "implementer_model") { $model = [string]$StateObj.implementer_model }
-    elseif ($names -contains "cursor_model") { $model = [string]$StateObj.cursor_model }
     return @{ Command = $cmd.Trim(); Model = $model.Trim() }
 }
 
@@ -93,8 +91,6 @@ function Save-ImplementerState {
         schema_version        = 1
         implementer_command   = $Command
         implementer_model     = $m
-        cursor_command        = $Command
-        cursor_model          = $m
         selected_at           = (Get-Date).ToUniversalTime().ToString("o")
         source                = $Source
     }
@@ -163,11 +159,10 @@ $env:PYTEST_DEBUG_TEMPROOT = $Tmp
 function Clear-AiLoopRuntimeState {
     # Duplicated from ai_loop_task_first.ps1 (no shared module). When ai_loop_auto.ps1 is spawned
     # from task-first right after the implementer pass, $env:AI_LOOP_CHAIN_FROM_TASK_FIRST skips deleting
-    # cursor_implementation_result.md so the implementer handoff stays intact.
+    # implementer_result.md so the implementer handoff stays intact.
     $files = @(
         ".ai-loop/codex_review.md",
         ".ai-loop/next_implementer_prompt.md",
-        ".ai-loop/next_cursor_prompt.md",
         ".ai-loop/test_output.txt",
         ".ai-loop/test_output_before_commit.txt",
         ".ai-loop/test_failures_summary.md",
@@ -177,13 +172,13 @@ function Clear-AiLoopRuntimeState {
         ".ai-loop/git_status.txt",
         ".ai-loop/post_fix_output.txt",
         ".ai-loop/claude_final_review.md",
-        ".ai-loop/cursor_implementation_result.md",
-        ".ai-loop/_debug/cursor_agent_output.txt",
-        ".ai-loop/_debug/cursor_implementation_prompt.md",
-        ".ai-loop/_debug/cursor_implementation_output.txt"
+        ".ai-loop/implementer_result.md",
+        ".ai-loop/_debug/implementer_prompt.md",
+        ".ai-loop/_debug/implementer_output.txt",
+        ".ai-loop/_debug/implementer_fix_output.txt"
     )
     if ($env:AI_LOOP_CHAIN_FROM_TASK_FIRST -eq "1") {
-        $files = $files | Where-Object { $_ -notmatch 'cursor_implementation_result\.md' }
+        $files = $files | Where-Object { $_ -notmatch 'implementer_result\.md' }
     }
     foreach ($rel in $files) {
         Remove-Item (Join-Path $ProjectRoot $rel) -Force -ErrorAction SilentlyContinue
@@ -208,7 +203,6 @@ function Write-FinalStatus {
 function Ensure-AiLoopFiles {
     $projectSummary = Join-Path $AiLoop "project_summary.md"
     $implementerSummary = Join-Path $AiLoop "implementer_summary.md"
-    $cursorSummary = Join-Path $AiLoop "cursor_summary.md"
     $taskFile = Join-Path $AiLoop "task.md"
     $summaryStub = "# Implementer summary`n`nNo task has been completed yet."
 
@@ -254,17 +248,8 @@ TODO
 "@ | Set-Content $projectSummary -Encoding UTF8
     }
 
-    $hasImp = Test-Path $implementerSummary
-    $hasLeg = Test-Path $cursorSummary
-    if (-not $hasImp -and -not $hasLeg) {
+    if (-not (Test-Path $implementerSummary)) {
         $summaryStub | Set-Content $implementerSummary -Encoding UTF8
-        $summaryStub | Set-Content $cursorSummary -Encoding UTF8
-    }
-    elseif (-not $hasImp -and $hasLeg) {
-        Copy-Item -LiteralPath $cursorSummary -Destination $implementerSummary
-    }
-    elseif ($hasImp -and -not $hasLeg) {
-        Copy-Item -LiteralPath $implementerSummary -Destination $cursorSummary
     }
 
     if (!(Test-Path $taskFile)) {
@@ -346,7 +331,7 @@ You are the reviewer in an authenticated development loop.
 Read:
 - .ai-loop/project_summary.md
 - .ai-loop/task.md
-- .ai-loop/implementer_summary.md (primary; if missing, read .ai-loop/cursor_summary.md — legacy alias for the same role)
+- .ai-loop/implementer_summary.md
 - .ai-loop/last_diff.patch (with .ai-loop/diff_summary.txt — git diff --stat for the same change set)
 - If .ai-loop/test_failures_summary.md exists, read it first for structured pytest failure context; otherwise read .ai-loop/test_output.txt
 - .ai-loop/git_status.txt
@@ -384,7 +369,6 @@ MEDIUM:
 FIX_PROMPT_FOR_IMPLEMENTER:
 If fixes are required, write a concrete prompt for the implementer (Cursor, OpenCode/Qwen via your configured wrapper, etc.).
 If no fixes are required, write: none
-(Legacy alias still accepted by the orchestrator: FIX_PROMPT_FOR_CURSOR:)
 
 FINAL_NOTE:
 Brief summary.
@@ -433,10 +417,9 @@ function Extract-FixPromptFromFile {
     $review = Get-Content $ReviewFile -Raw
 
     # Codex sometimes omits or renames FINAL_NOTE; still recover the fix prompt when the delimiter exists.
-    $labelRx = "(?:FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR)"
     $match = [regex]::Match(
         $review,
-        "${labelRx}:\s*(?<prompt>[\s\S]*?)FINAL_NOTE:",
+        "FIX_PROMPT_FOR_IMPLEMENTER:\s*(?<prompt>[\s\S]*?)FINAL_NOTE:",
         [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
     )
 
@@ -447,7 +430,7 @@ function Extract-FixPromptFromFile {
     else {
         $matchTail = [regex]::Match(
             $review,
-            "${labelRx}:\s*(?<prompt>[\s\S]*)",
+            "FIX_PROMPT_FOR_IMPLEMENTER:\s*(?<prompt>[\s\S]*)",
             [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
         )
 
@@ -467,12 +450,10 @@ function Extract-FixPromptFromFile {
     return $true
 }
 
-function Write-NextImplementerPromptMirrors {
+function Write-NextImplementerPrompt {
     param([string]$PromptText)
     $neutral = Join-Path $AiLoop "next_implementer_prompt.md"
-    $legacy = Join-Path $AiLoop "next_cursor_prompt.md"
     $PromptText | Set-Content $neutral -Encoding UTF8
-    $PromptText | Set-Content $legacy -Encoding UTF8
 }
 
 function Extract-FixPrompt {
@@ -481,7 +462,7 @@ function Extract-FixPrompt {
     $ok = Extract-FixPromptFromFile -ReviewFile $codexReview -OutputPromptFile $tmp
     if ($ok) {
         $body = Get-Content $tmp -Raw
-        Write-NextImplementerPromptMirrors -PromptText $body.TrimEnd()
+        Write-NextImplementerPrompt -PromptText $body.TrimEnd()
     }
     return $ok
 }
@@ -489,10 +470,10 @@ function Extract-FixPrompt {
 function Run-ImplementerFix {
     Ensure-AiLoopFiles
 
-    $cursorPrompt = @"
+    $implementerPrompt = @"
 Read:
 - .ai-loop/project_summary.md
-- .ai-loop/next_implementer_prompt.md (primary; if your tooling only has the legacy file, use .ai-loop/next_cursor_prompt.md — same content)
+- .ai-loop/next_implementer_prompt.md
 - .ai-loop/task.md if needed
 
 Fix only the issues described in the next-implementer prompt file above.
@@ -509,7 +490,7 @@ Important rules:
 After changes:
 1. Run the configured test command if applicable.
 2. If task-specific CLI command is described in .ai-loop/task.md, run it when inputs exist; otherwise document why it was skipped.
-3. Update .ai-loop/implementer_summary.md and keep .ai-loop/cursor_summary.md in sync with the same content (legacy alias for older prompts/docs).
+3. Update .ai-loop/implementer_summary.md.
    - changed files
    - test result
    - implementation summary
@@ -532,11 +513,11 @@ After changes:
     # or run_opencode_agent.ps1 when -CursorCommand is set).
     $debugDir = Join-Path $AiLoop "_debug"
     New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
-    $cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
+    $implementerArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
     if (-not [string]::IsNullOrWhiteSpace($CursorModel)) {
-        $cursorArgs += @("--model", $CursorModel)
+        $implementerArgs += @("--model", $CursorModel)
     }
-    $cursorPrompt | & $runWrapper @cursorArgs *> (Join-Path $debugDir "cursor_agent_output.txt")
+    $implementerPrompt | & $runWrapper @implementerArgs *> (Join-Path $debugDir "implementer_fix_output.txt")
     return $LASTEXITCODE
 }
 
@@ -555,7 +536,6 @@ function Stage-SafeProjectFiles {
     # .ai-loop/test_output.txt
     # .ai-loop/test_output_before_commit.txt
     # .ai-loop/next_implementer_prompt.md
-    # .ai-loop/next_cursor_prompt.md
     # .ai-loop/final_status.md
     # .tmp/
     # input/
@@ -634,16 +614,9 @@ function Try-ResumeFromExistingReview {
     Write-Host "Resume mode enabled."
 
     $nextNeutral = Join-Path $AiLoop "next_implementer_prompt.md"
-    $nextLegacy = Join-Path $AiLoop "next_cursor_prompt.md"
 
     if (Test-Path $nextNeutral) {
         Write-Host "Resuming from existing next_implementer_prompt.md..."
-        Run-ImplementerFix | Out-Null
-        return $true
-    }
-
-    if (Test-Path $nextLegacy) {
-        Write-Host "Resuming from existing next_cursor_prompt.md..."
         Run-ImplementerFix | Out-Null
         return $true
     }
@@ -714,7 +687,7 @@ DETAIL: Working tree is clean before Codex review. Use scripts/ai_loop_task_firs
         }
         Write-FinalStatus @"
 STATUS: FAILED
-REASON: NO_CHANGES_AFTER_CURSOR_FIX
+REASON: NO_CHANGES_AFTER_IMPLEMENTER_FIX
 DETAIL: No working-tree changes before Codex review on iteration $i after the implementer fix pass.
 "@
         Write-Host ""
@@ -740,7 +713,6 @@ DETAIL: No working-tree changes before Codex review on iteration $i after the im
         Write-Host ".ai-loop\final_status.md"
         Write-Host ".ai-loop\codex_review.md"
         Write-Host ".ai-loop\implementer_summary.md"
-        Write-Host ".ai-loop\cursor_summary.md"
         Write-Host ".ai-loop\project_summary.md"
 
         exit 0
@@ -768,7 +740,6 @@ Write-Host "See:"
 Write-Host ".ai-loop\final_status.md"
 Write-Host ".ai-loop\codex_review.md"
 Write-Host ".ai-loop\implementer_summary.md"
-Write-Host ".ai-loop\cursor_summary.md"
 Write-Host ".ai-loop\project_summary.md"
 
 exit 2

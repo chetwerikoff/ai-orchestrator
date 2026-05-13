@@ -26,12 +26,11 @@ truth; target is aspirational.
 ```text
 .ai-loop/task.md
   -> Implementer (Cursor Agent `agent` CLI by default, or `-CursorCommand`)
-  -> .ai-loop/implementer_summary.md (+ legacy mirror cursor_summary.md)
+  -> .ai-loop/implementer_summary.md
   -> Save-TestAndDiff (pytest, git diff, git status)
   -> Codex CLI reviews
   -> if PASS: final test gate + git commit + push (unless -NoPush)
-  -> if FIX_REQUIRED: extract FIX_PROMPT_FOR_IMPLEMENTER (or legacy
-     FIX_PROMPT_FOR_CURSOR), re-run implementer
+  -> if FIX_REQUIRED: extract FIX_PROMPT_FOR_IMPLEMENTER, re-run implementer
   -> cap: MaxIterations (default 10; DD-011 calls for 3 — pending
      separate task)
 ```
@@ -162,7 +161,7 @@ Compare **§0.1** for the pipeline that actually runs in this repo (Cursor-cente
 
 ### §5.1 Orchestrator file contract
 
-The PowerShell drivers (`ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, `continue_ai_loop.ps1`) consume and emit the same durable files described in `docs/workflow.md`: `task.md`, `implementer_summary.md` (primary) / `cursor_summary.md` (legacy alias), `codex_review.md`, patches, and test logs. **`.ai-loop/implementer.json`** (not committed by default) stores the last effective implementer wrapper and model for resume.
+The PowerShell drivers (`ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, `continue_ai_loop.ps1`) consume and emit the same durable files described in `docs/workflow.md`: `task.md`, `implementer_summary.md`, `codex_review.md`, patches, and test logs. **`.ai-loop/implementer.json`** (not committed by default) stores the last effective implementer wrapper and model for resume.
 
 ### §5.2 External CLIs
 
@@ -456,14 +455,14 @@ h2n-range-extractor/
     diff_guard_report.md
 
     final_status.md
-    next_cursor_prompt.md
+    next_implementer_prompt.md
     next_opencode_prompt.md
     failure_report.md
     implementer.json
     loop_state.json
 ```
 
-The live Cursor-centric loop keeps a narrower subset (**`task.md`**, **`cursor_summary.md`**, **`codex_review.md`**, diffs/logs per **`docs/workflow.md`**); the table above is the **expanded** symmetric factory target.
+The live PowerShell loop keeps a narrower subset (**`task.md`**, **`implementer_summary.md`**, **`codex_review.md`**, diffs/logs per **`docs/workflow.md`**); the table above is the **expanded** symmetric factory target.
 
 ### §9.3 Artifact roles (contract summary)
 
@@ -479,7 +478,7 @@ Shared **planning** inputs (from Claude planner in the target design): **`contex
 
 **Diff safety:** **`git_status_*`**, **`changed_files.txt`**, **`last_diff.patch`**, **`diff_guard_report.md`** (PASS/WARN/BLOCK semantics for too many files, deleted tests, schema drift, etc.).
 
-**Control / resume:** **`implementer.json`** (narrow, shipping today in the PowerShell drivers — runtime, gitignored) stores the effective implementer wrapper and model for `ai_loop_auto.ps1 -Resume`; target **`loop_state.json`** records iteration, last stage, verdict flags, next action; **`final_status.md`**, **`failure_report.md`**, **`next_opencode_prompt.md`**, **`next_cursor_prompt.md`** close or branch the loop (Cursor fallback path remains named for compatibility).
+**Control / resume:** **`implementer.json`** (narrow, shipping today in the PowerShell drivers — runtime, gitignored) stores the effective implementer wrapper and model for `ai_loop_auto.ps1 -Resume`; target **`loop_state.json`** records iteration, last stage, verdict flags, next action; **`final_status.md`**, **`failure_report.md`**, **`next_opencode_prompt.md`**, **`next_implementer_prompt.md`** close or branch the loop.
 
 ### §9.4 Target `src/orchestrator/` module responsibilities
 
@@ -534,7 +533,7 @@ Full factory sequence (endorsed harness design — not fully automated yet):
 13. Claude business/domain review -> claude_business_review.md
 14. On full PASS -> final_status.md
 15. On bounded retry -> next_opencode_prompt.md
-16. On local model exhaustion -> next_cursor_prompt.md (escalate to Cursor / richer stack)
+16. On local model exhaustion -> next_implementer_prompt.md (escalate to Cursor / richer stack)
 ```
 
 ### §9.7 Expert-suggested MVP subset (still target, not today's default)

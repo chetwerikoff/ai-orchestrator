@@ -7,7 +7,7 @@ Required reading before starting (in order; stop when you have enough):
 1. `AGENTS.md` at repo root — working rules and forbidden paths
 2. `.ai-loop/task.md` — this task
 3. `.ai-loop/project_summary.md` — durable project orientation
-4. `.ai-loop/implementer_summary.md` — primary; if missing, `.ai-loop/cursor_summary.md` (legacy alias) — only if this is iteration 2+
+4. `.ai-loop/implementer_summary.md` — only if this is iteration 2+
 
 Do not read by default:
 
@@ -68,7 +68,7 @@ Optional project-specific command:
 
 ## Implementer summary requirements
 
-Update `.ai-loop/implementer_summary.md` and mirror the same content to `.ai-loop/cursor_summary.md` (legacy alias) with:
+Update `.ai-loop/implementer_summary.md` with:
 
 1. Changed files.
 2. Test result.
@@ -97,7 +97,7 @@ Do not turn it into a verbose task log.
 
 The implementer must not:
 
-- duplicate this task description into `.ai-loop/implementer_summary.md` / `.ai-loop/cursor_summary.md`
+- duplicate this task description into `.ai-loop/implementer_summary.md`
 - include earlier task narrative in `.ai-loop/project_summary.md`
 - write to `.ai-loop/_debug/` or `docs/archive/`
 - commit or push (the orchestrator handles git)
