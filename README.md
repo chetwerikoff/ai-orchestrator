@@ -4,7 +4,7 @@ See `AGENTS.md` for AI-agent working rules.
 
 A local PowerShell-based AI development loop for coordinating:
 
-- Cursor Agent as implementer
+- an **implementer** (Cursor Agent by default; override with `-CursorCommand`, e.g. `.\scripts\run_opencode_agent.ps1`)
 - Codex as reviewer
 - project tests
 - safe git commit and push
@@ -13,20 +13,20 @@ The orchestrator is designed to be installed into any git project that uses a fi
 
 ## What it does
 
-For a new task, `ai_loop_task_first.ps1` clears stale `.ai-loop` runtime artifacts (except `task.md`), runs Cursor Agent as implementer, then hands off to `ai_loop_auto.ps1`.
+For a new task, `ai_loop_task_first.ps1` clears stale `.ai-loop` runtime artifacts (except `task.md`), runs the configured implementer, then hands off to `ai_loop_auto.ps1`.
 
 Flow:
 
 ```text
-task.md -> Cursor implementation -> if relevant git changes exist -> ai_loop_auto.ps1 (tests + Codex review/fix loop)
+task.md -> implementer pass -> if relevant git changes exist -> ai_loop_auto.ps1 (tests + Codex review/fix loop)
 ```
 
 > Local OpenCode + Qwen integration is in Phase 0/1 (see
 > `docs/architecture.md` §0.3); production implementer today is Cursor.
 
-If Cursor produces no relevant working tree changes twice (excluding orchestrator scratch files), Codex is skipped, `.ai-loop/final_status.md` records `NO_CHANGES_AFTER_CURSOR`, and the script exits non-zero.
+If the implementer produces no relevant working tree changes twice (excluding orchestrator scratch files), Codex is skipped, `.ai-loop/final_status.md` records `NO_CHANGES_AFTER_CURSOR`, and the script exits non-zero.
 
-If Cursor only adds `.ai-loop/cursor_implementation_result.md` without editing code, that file must contain `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED`, or the script exits before Codex. That check uses the git delta for the Cursor pass (not unrelated pre-existing dirt), so a stale dirty `.ai-loop/task.md` alone does not bypass the marker requirement.
+If the implementer only adds `.ai-loop/cursor_implementation_result.md` without editing code, that file must contain `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED`, or the script exits before Codex. That check uses the git delta for the implementer pass (not unrelated pre-existing dirt), so a stale dirty `.ai-loop/task.md` alone does not bypass the marker requirement.
 
 For already existing changes, `ai_loop_auto.ps1` starts directly from tests + Codex review (not for brand-new tasks with no implementation yet).
 
@@ -64,7 +64,7 @@ This file is not a detailed task log. It should contain durable context:
 - known risks;
 - next likely steps.
 
-Cursor updates it after each task. Codex reads it during review.
+The implementer updates it after each task when durable context changes. Codex reads it during review.
 
 ## Install into a target project
 
@@ -81,13 +81,17 @@ This copies:
 scripts/ai_loop_auto.ps1
 scripts/ai_loop_task_first.ps1
 scripts/continue_ai_loop.ps1
+scripts/run_cursor_agent.ps1
+scripts/run_opencode_agent.ps1
+scripts/filter_pytest_failures.py
 .ai-loop/task.md
 .ai-loop/project_summary.md
 .ai-loop/codex_review_prompt.md
 .ai-loop/cursor_summary_template.md
+opencode.json   (Phase 1 direct llama-server wiring; see docs/architecture.md §5.3)
 ```
 
-Existing `.ai-loop/task.md` and `.ai-loop/project_summary.md` are not overwritten unless you pass `-OverwriteTask` or `-OverwriteProjectSummary`.
+Existing `.ai-loop/task.md` and `.ai-loop/project_summary.md` are not overwritten unless you pass `-OverwriteTask` or `-OverwriteProjectSummary`. An existing root `opencode.json` is left unchanged unless you pass `-OverwriteOpencodeConfig`.
 
 ## Start a new task in the target project
 
@@ -99,7 +103,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 `
   -CommitMessage "Implement feature"
 ```
 
-This starts with Cursor implementation before Codex review. Pass `-NoPush`, `-TestCommand`, `-PostFixCommand`, or `-SafeAddPaths` here the same way as for `ai_loop_auto.ps1` (see **Optional parameters** below).
+This starts with an implementer pass before Codex review. Pass `-NoPush`, `-TestCommand`, `-PostFixCommand`, or `-SafeAddPaths` here the same way as for `ai_loop_auto.ps1` (see **Optional parameters** below).
 
 ## Review/fix already existing changes
 
@@ -136,10 +140,12 @@ or, if scripts are unblocked:
 -NoPush
 -TestCommand "python -m pytest"
 -PostFixCommand "python src/main.py some-command"
--SafeAddPaths "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
+-SafeAddPaths "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
 ```
 
-`ai_loop_task_first.ps1` accepts the Cursor-related switches above plus forwarding to the embedded auto loop: `-NoPush`, `-TestCommand`, `-PostFixCommand`, and `-SafeAddPaths` (same meanings as `ai_loop_auto.ps1`).
+`ai_loop_task_first.ps1` accepts the same implementer-related switches (`-CursorCommand`, `-CursorModel`) plus forwarding to the embedded auto loop: `-NoPush`, `-TestCommand`, `-PostFixCommand`, and `-SafeAddPaths` (same meanings as `ai_loop_auto.ps1`).
+
+`continue_ai_loop.ps1` forwards `-CursorCommand` and `-CursorModel` to `ai_loop_auto.ps1` so resume/fix passes can use the same wrapper as task-first.
 
 ## Safety model
 
@@ -157,6 +163,7 @@ It stages only `SafeAddPaths`. Runtime artifacts are intentionally excluded:
 .ai-loop/last_diff.patch
 .ai-loop/test_output.txt
 .ai-loop/test_output_before_commit.txt
+.ai-loop/next_implementer_prompt.md
 .ai-loop/next_cursor_prompt.md
 .ai-loop/final_status.md
 .ai-loop/git_status.txt
@@ -187,5 +194,5 @@ Before publishing this project publicly, make sure you have not committed:
 4. Wait for `final_status.md`.
 5. If stopped, inspect:
    - `.ai-loop/codex_review.md`
-   - `.ai-loop/cursor_summary.md`
+   - `.ai-loop/implementer_summary.md` (and `.ai-loop/cursor_summary.md` if you rely on the legacy mirror)
 6. Continue with `continue_ai_loop.ps1`.

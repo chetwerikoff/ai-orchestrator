@@ -5,7 +5,9 @@ param(
     [switch]$NoPush,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
+    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md",
+    [string]$CursorCommand = "",
+    [string]$CursorModel = ""
 )
 
 $ErrorActionPreference = "Continue"
@@ -24,10 +26,11 @@ $env:PYTEST_DEBUG_TEMPROOT = $Tmp
 
 function Clear-AiLoopRuntimeState {
     # Duplicated from ai_loop_task_first.ps1 (no shared module). When ai_loop_auto.ps1 is spawned
-    # from task-first right after Cursor, $env:AI_LOOP_CHAIN_FROM_TASK_FIRST skips deleting
+    # from task-first right after the implementer pass, $env:AI_LOOP_CHAIN_FROM_TASK_FIRST skips deleting
     # cursor_implementation_result.md so the implementer handoff stays intact.
     $files = @(
         ".ai-loop/codex_review.md",
+        ".ai-loop/next_implementer_prompt.md",
         ".ai-loop/next_cursor_prompt.md",
         ".ai-loop/test_output.txt",
         ".ai-loop/test_output_before_commit.txt",
@@ -68,8 +71,10 @@ function Write-FinalStatus {
 
 function Ensure-AiLoopFiles {
     $projectSummary = Join-Path $AiLoop "project_summary.md"
+    $implementerSummary = Join-Path $AiLoop "implementer_summary.md"
     $cursorSummary = Join-Path $AiLoop "cursor_summary.md"
     $taskFile = Join-Path $AiLoop "task.md"
+    $summaryStub = "# Implementer summary`n`nNo task has been completed yet."
 
     if (!(Test-Path $projectSummary)) {
         @"
@@ -113,8 +118,17 @@ TODO
 "@ | Set-Content $projectSummary -Encoding UTF8
     }
 
-    if (!(Test-Path $cursorSummary)) {
-        "# Cursor Summary`n`nNo task has been completed yet." | Set-Content $cursorSummary -Encoding UTF8
+    $hasImp = Test-Path $implementerSummary
+    $hasLeg = Test-Path $cursorSummary
+    if (-not $hasImp -and -not $hasLeg) {
+        $summaryStub | Set-Content $implementerSummary -Encoding UTF8
+        $summaryStub | Set-Content $cursorSummary -Encoding UTF8
+    }
+    elseif (-not $hasImp -and $hasLeg) {
+        Copy-Item -LiteralPath $cursorSummary -Destination $implementerSummary
+    }
+    elseif ($hasImp -and -not $hasLeg) {
+        Copy-Item -LiteralPath $implementerSummary -Destination $cursorSummary
     }
 
     if (!(Test-Path $taskFile)) {
@@ -196,7 +210,7 @@ You are the reviewer in an authenticated development loop.
 Read:
 - .ai-loop/project_summary.md
 - .ai-loop/task.md
-- .ai-loop/cursor_summary.md
+- .ai-loop/implementer_summary.md (primary; if missing, read .ai-loop/cursor_summary.md — legacy alias for the same role)
 - .ai-loop/last_diff.patch (with .ai-loop/diff_summary.txt — git diff --stat for the same change set)
 - If .ai-loop/test_failures_summary.md exists, read it first for structured pytest failure context; otherwise read .ai-loop/test_output.txt
 - .ai-loop/git_status.txt
@@ -207,7 +221,7 @@ Important:
 - project_summary.md is durable project context.
 - task.md is the current task contract.
 - The user explicitly authorized the scope described in .ai-loop/task.md.
-- If Cursor deferred the task instead of implementing it, mark FIX_REQUIRED and provide a concrete fix prompt.
+- If the implementer deferred the task instead of implementing it, mark FIX_REQUIRED and provide a concrete fix prompt.
 - If new files are required by the task, make sure they are present in the diff/status.
 - Do not ask for manual steps unless absolutely required.
 
@@ -231,9 +245,10 @@ HIGH:
 MEDIUM:
 - ...
 
-FIX_PROMPT_FOR_CURSOR:
-If fixes are required, write a concrete prompt for Cursor.
+FIX_PROMPT_FOR_IMPLEMENTER:
+If fixes are required, write a concrete prompt for the implementer (Cursor, OpenCode/Qwen via your configured wrapper, etc.).
 If no fixes are required, write: none
+(Legacy alias still accepted by the orchestrator: FIX_PROMPT_FOR_CURSOR:)
 
 FINAL_NOTE:
 Brief summary.
@@ -282,9 +297,10 @@ function Extract-FixPromptFromFile {
     $review = Get-Content $ReviewFile -Raw
 
     # Codex sometimes omits or renames FINAL_NOTE; still recover the fix prompt when the delimiter exists.
+    $labelRx = "(?:FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR)"
     $match = [regex]::Match(
         $review,
-        "FIX_PROMPT_FOR_CURSOR:\s*(?<prompt>[\s\S]*?)FINAL_NOTE:",
+        "${labelRx}:\s*(?<prompt>[\s\S]*?)FINAL_NOTE:",
         [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
     )
 
@@ -295,7 +311,7 @@ function Extract-FixPromptFromFile {
     else {
         $matchTail = [regex]::Match(
             $review,
-            "FIX_PROMPT_FOR_CURSOR:\s*(?<prompt>[\s\S]*)",
+            "${labelRx}:\s*(?<prompt>[\s\S]*)",
             [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
         )
 
@@ -315,27 +331,40 @@ function Extract-FixPromptFromFile {
     return $true
 }
 
-function Extract-FixPrompt {
-    $nextPromptFile = Join-Path $AiLoop "next_cursor_prompt.md"
-    $codexReview = Join-Path $AiLoop "codex_review.md"
-    return Extract-FixPromptFromFile -ReviewFile $codexReview -OutputPromptFile $nextPromptFile
+function Write-NextImplementerPromptMirrors {
+    param([string]$PromptText)
+    $neutral = Join-Path $AiLoop "next_implementer_prompt.md"
+    $legacy = Join-Path $AiLoop "next_cursor_prompt.md"
+    $PromptText | Set-Content $neutral -Encoding UTF8
+    $PromptText | Set-Content $legacy -Encoding UTF8
 }
 
-function Run-CursorFix {
+function Extract-FixPrompt {
+    $codexReview = Join-Path $AiLoop "codex_review.md"
+    $tmp = Join-Path $AiLoop "next_implementer_prompt.md"
+    $ok = Extract-FixPromptFromFile -ReviewFile $codexReview -OutputPromptFile $tmp
+    if ($ok) {
+        $body = Get-Content $tmp -Raw
+        Write-NextImplementerPromptMirrors -PromptText $body.TrimEnd()
+    }
+    return $ok
+}
+
+function Run-ImplementerFix {
     Ensure-AiLoopFiles
 
     $cursorPrompt = @"
 Read:
 - .ai-loop/project_summary.md
-- .ai-loop/next_cursor_prompt.md
+- .ai-loop/next_implementer_prompt.md (primary; if your tooling only has the legacy file, use .ai-loop/next_cursor_prompt.md — same content)
 - .ai-loop/task.md if needed
 
-Fix only the issues described in .ai-loop/next_cursor_prompt.md.
+Fix only the issues described in the next-implementer prompt file above.
 
 Important rules:
 - project_summary.md is durable project-level memory.
 - The user explicitly authorized the task and the fix prompt.
-- If .ai-loop/next_cursor_prompt.md asks to implement the full task from .ai-loop/task.md, do it. Do not refuse because of scope.
+- If the fix prompt asks to implement the full task from .ai-loop/task.md, do it. Do not refuse because of scope.
 - Do not start unrelated features.
 - Do not make unrelated refactors.
 - Preserve existing behavior unless the fix prompt explicitly asks to change it.
@@ -344,7 +373,7 @@ Important rules:
 After changes:
 1. Run the configured test command if applicable.
 2. If task-specific CLI command is described in .ai-loop/task.md, run it when inputs exist; otherwise document why it was skipped.
-3. Update .ai-loop/cursor_summary.md with:
+3. Update .ai-loop/implementer_summary.md and keep .ai-loop/cursor_summary.md in sync with the same content (legacy alias for older prompts/docs).
    - changed files
    - test result
    - implementation summary
@@ -359,14 +388,18 @@ After changes:
 "@
 
     Write-Host ""
-    Write-Host "Running Cursor agent in non-interactive mode..."
+    $runWrapper = if (-not [string]::IsNullOrWhiteSpace($CursorCommand)) { $CursorCommand } else { Join-Path $PSScriptRoot "run_cursor_agent.ps1" }
+    Write-Host "Running implementer (non-interactive) via: $runWrapper"
+    Write-Host "(Parameters -CursorCommand / -CursorModel select the implementer wrapper and model; default wrapper is the Cursor Agent CLI driver.)"
 
-    # Prompt via stdin to run_cursor_agent.ps1, which calls node.exe directly so stdin
-    # is never dropped by the cmd.exe -> powershell.exe chain in cursor-agent.cmd.
+    # Prompt via stdin to the implementer wrapper (run_cursor_agent.ps1 by default,
+    # or run_opencode_agent.ps1 when -CursorCommand is set).
     $debugDir = Join-Path $AiLoop "_debug"
     New-Item -ItemType Directory -Force -Path $debugDir | Out-Null
     $cursorArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
-    $runWrapper = Join-Path $PSScriptRoot "run_cursor_agent.ps1"
+    if (-not [string]::IsNullOrWhiteSpace($CursorModel)) {
+        $cursorArgs += @("--model", $CursorModel)
+    }
     $cursorPrompt | & $runWrapper @cursorArgs *> (Join-Path $debugDir "cursor_agent_output.txt")
     return $LASTEXITCODE
 }
@@ -385,6 +418,7 @@ function Stage-SafeProjectFiles {
     # .ai-loop/last_diff.patch
     # .ai-loop/test_output.txt
     # .ai-loop/test_output_before_commit.txt
+    # .ai-loop/next_implementer_prompt.md
     # .ai-loop/next_cursor_prompt.md
     # .ai-loop/final_status.md
     # .tmp/
@@ -463,11 +497,18 @@ function Try-ResumeFromExistingReview {
     Write-Host ""
     Write-Host "Resume mode enabled."
 
-    $nextPromptFile = Join-Path $AiLoop "next_cursor_prompt.md"
+    $nextNeutral = Join-Path $AiLoop "next_implementer_prompt.md"
+    $nextLegacy = Join-Path $AiLoop "next_cursor_prompt.md"
 
-    if (Test-Path $nextPromptFile) {
+    if (Test-Path $nextNeutral) {
+        Write-Host "Resuming from existing next_implementer_prompt.md..."
+        Run-ImplementerFix | Out-Null
+        return $true
+    }
+
+    if (Test-Path $nextLegacy) {
         Write-Host "Resuming from existing next_cursor_prompt.md..."
-        Run-CursorFix | Out-Null
+        Run-ImplementerFix | Out-Null
         return $true
     }
 
@@ -485,7 +526,7 @@ function Try-ResumeFromExistingReview {
 
         if (Extract-FixPrompt) {
             Write-Host "Extracted fix prompt from existing Codex review."
-            Run-CursorFix | Out-Null
+            Run-ImplementerFix | Out-Null
             return $true
         }
     }
@@ -529,7 +570,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
             Write-FinalStatus @"
 STATUS: FAILED
 REASON: REVIEW_STARTED_ON_CLEAN_TREE
-DETAIL: Working tree is clean before Codex review. Use scripts/ai_loop_task_first.ps1 when starting from scratch with Cursor, or make changes before calling REVIEW-only mode.
+DETAIL: Working tree is clean before Codex review. Use scripts/ai_loop_task_first.ps1 when starting from scratch with an implementer pass, or make changes before calling REVIEW-only mode.
 "@
             Write-Host ""
             Write-Host "Clean tree on iteration 1: skipping Codex. Prefer task-first (ai_loop_task_first.ps1) when the working tree has no changes yet." -ForegroundColor Yellow
@@ -538,10 +579,10 @@ DETAIL: Working tree is clean before Codex review. Use scripts/ai_loop_task_firs
         Write-FinalStatus @"
 STATUS: FAILED
 REASON: NO_CHANGES_AFTER_CURSOR_FIX
-DETAIL: No working-tree changes before Codex review on iteration $i after the Cursor fix pass.
+DETAIL: No working-tree changes before Codex review on iteration $i after the implementer fix pass.
 "@
         Write-Host ""
-        Write-Host "Iteration $i`: working tree clean before Codex (Cursor fix produced no git-visible changes). See .ai-loop\final_status.md" -ForegroundColor Yellow
+        Write-Host "Iteration $i`: working tree clean before Codex (implementer fix produced no git-visible changes). See .ai-loop\final_status.md" -ForegroundColor Yellow
         exit 7
     }
 
@@ -562,6 +603,7 @@ DETAIL: No working-tree changes before Codex review on iteration $i after the Cu
         Write-Host "See:"
         Write-Host ".ai-loop\final_status.md"
         Write-Host ".ai-loop\codex_review.md"
+        Write-Host ".ai-loop\implementer_summary.md"
         Write-Host ".ai-loop\cursor_summary.md"
         Write-Host ".ai-loop\project_summary.md"
 
@@ -579,7 +621,7 @@ DETAIL: No working-tree changes before Codex review on iteration $i after the Cu
         exit 1
     }
 
-    Run-CursorFix | Out-Null
+    Run-ImplementerFix | Out-Null
 }
 
 Write-FinalStatus "STOPPED: max iterations reached. Manual review required."
@@ -589,6 +631,7 @@ Write-Host "Stopped: max iterations reached. Manual review required."
 Write-Host "See:"
 Write-Host ".ai-loop\final_status.md"
 Write-Host ".ai-loop\codex_review.md"
+Write-Host ".ai-loop\implementer_summary.md"
 Write-Host ".ai-loop\cursor_summary.md"
 Write-Host ".ai-loop\project_summary.md"
 

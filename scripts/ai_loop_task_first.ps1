@@ -9,7 +9,7 @@ param(
     [switch]$NoPush,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
+    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/cursor_summary.md,.ai-loop/project_summary.md"
 )
 $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path ".").Path
@@ -40,15 +40,16 @@ function Assert-FileExists {
 function Assert-CommandExists {
     param([string]$CommandName)
     if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
-        throw "Command '$CommandName' not found. Install Cursor Agent CLI or pass -CursorCommand `"YOUR_COMMAND_NAME`"."
+        throw "Command '$CommandName' not found. Install the implementer's CLI (e.g. Cursor Agent) or pass -CursorCommand `"YOUR_SCRIPT_OR_EXE`"."
     }
 }
 
 function Clear-AiLoopRuntimeState {
     # Same file list as ai_loop_auto.ps1. Task-first always removes all listed files (no env guard).
-    # Auto applies the AI_LOOP_CHAIN_FROM_TASK_FIRST omission only when spawned from this script after Cursor.
+    # Auto applies the AI_LOOP_CHAIN_FROM_TASK_FIRST omission only when spawned from this script after the implementer pass.
     $files = @(
         ".ai-loop/codex_review.md",
+        ".ai-loop/next_implementer_prompt.md",
         ".ai-loop/next_cursor_prompt.md",
         ".ai-loop/test_output.txt",
         ".ai-loop/test_output_before_commit.txt",
@@ -70,21 +71,23 @@ function Clear-AiLoopRuntimeState {
 }
 
 function Initialize-CursorSummaryForImplementation {
+    $implementerSummaryPath = Join-Path $AiLoop "implementer_summary.md"
     $cursorSummaryPath = Join-Path $AiLoop "cursor_summary.md"
     $body = @(
-        "# Cursor summary", "",
-        "This file was reset at the start of the task-first Cursor pass so automated review does not see stale context.",
+        "# Implementer summary", "",
+        "This pair of files (.ai-loop/implementer_summary.md and legacy alias .ai-loop/cursor_summary.md) was reset at the start of the task-first implementer pass so automated review does not see stale context.",
         "",
-        "The implementer must update this file before finishing: what changed, tests run, task-specific command output or skip reason, and remaining risks."
+        "The implementer must update both files with the same content before finishing: what changed, tests run, task-specific command output or skip reason, and remaining risks."
     ) -join "`n"
     New-Item -ItemType Directory -Force $AiLoop | Out-Null
+    Set-Content -Path $implementerSummaryPath -Value $body -Encoding UTF8
     Set-Content -Path $cursorSummaryPath -Value $body -Encoding UTF8
 }
 
 function Get-ImplementationDeltaPaths {
     $lines = @(git status --porcelain --untracked-files=all 2>$null)
     if ($LASTEXITCODE -ne 0) { return }
-    $skip = @(".ai-loop/cursor_summary.md", ".ai-loop/cursor_implementation_prompt.md", ".ai-loop/cursor_implementation_output.txt")
+    $skip = @(".ai-loop/implementer_summary.md", ".ai-loop/cursor_summary.md", ".ai-loop/cursor_implementation_prompt.md", ".ai-loop/cursor_implementation_output.txt")
     $seen = New-Object "System.Collections.Generic.HashSet[string]"
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
@@ -120,7 +123,7 @@ function Write-NoChangesFinalStatus {
     $body = @"
 STATUS: FAILED
 REASON: NO_CHANGES_AFTER_CURSOR
-DETAIL: Cursor implementation ran twice with no working-tree path delta (after excluding orchestrator scratch paths) and no update to .ai-loop/cursor_implementation_result.md on disk. Codex review was skipped.
+DETAIL: Implementer ran twice with no working-tree path delta (after excluding orchestrator scratch paths) and no update to .ai-loop/cursor_implementation_result.md on disk. Codex review was skipped.
 "@
     New-Item -ItemType Directory -Force $AiLoop | Out-Null
     $body | Set-Content -Path (Join-Path $AiLoop "final_status.md") -Encoding UTF8
@@ -146,7 +149,7 @@ Important:
 - The review/fix loop will be started after you finish.
 - If something is impossible, write a clear note into .ai-loop/cursor_implementation_result.md.
 - Otherwise, edit the codebase directly.
-- You MUST update .ai-loop/cursor_summary.md (a fresh stub was written at run start): list changed files, test results, implementation summary, task-specific command output or why it was skipped, and remaining risks.
+- You MUST update .ai-loop/implementer_summary.md and .ai-loop/cursor_summary.md with the same content (a fresh stub was written at run start): list changed files, test results, implementation summary, task-specific command output or why it was skipped, and remaining risks.
 
 TASK:
 $taskText
@@ -160,9 +163,9 @@ $taskText
     $promptPath = Join-Path $debugDir "cursor_implementation_prompt.md"
     $outputPath = Join-Path $debugDir "cursor_implementation_output.txt"
     Set-Content -Path $promptPath -Value $prompt -Encoding UTF8
-    Write-Host "Cursor implementation prompt saved to: $promptPath"
-    Write-Host "Cursor implementation output will be saved to: $outputPath"
-    Write-Host "Running Cursor implementer..."
+    Write-Host "Implementer prompt saved to: $promptPath"
+    Write-Host "Implementer output will be saved to: $outputPath"
+    Write-Host "Running implementer via: $CommandName ..."
     $resultFull = Join-Path $ProjectRoot ".ai-loop\cursor_implementation_result.md"
     $beforeMeta = Get-ResultFileMeta -FullPath $resultFull
     $beforePaths = @(Get-ImplementationDeltaPaths)
@@ -172,9 +175,9 @@ $taskText
     # run_cursor_agent.ps1 calls node.exe directly so stdin is never dropped mid-chain.
     $prompt | & $CommandName @agentArgs *> $outputPath
     if ($LASTEXITCODE -ne 0) {
-        throw "Cursor implementation failed with exit code $LASTEXITCODE. See: $outputPath"
+        throw "Implementer run failed with exit code $LASTEXITCODE. See: $outputPath"
     }
-    Write-Host "Cursor implementation finished. See: $outputPath"
+    Write-Host "Implementer finished. See: $outputPath"
     $afterPaths = @(Get-ImplementationDeltaPaths)
     $afterMeta = Get-ResultFileMeta -FullPath $resultFull
     $resultChanged = ($beforeMeta.Exists -ne $afterMeta.Exists)
@@ -199,12 +202,16 @@ function Invoke-AutoReviewLoop {
         [string]$TestCommand,
         [string]$PostFixCommand,
         [string]$SafeAddPaths,
-        [switch]$ChainHandoffFromCursor
+        [switch]$ChainHandoffFromCursor,
+        [string]$FixerCommand = "",
+        [string]$FixerModel = ""
     )
     Assert-FileExists -Path $ScriptPath -Message "Auto loop script was not found."
     Write-Host "Running existing Codex review/fix loop..."
     $psArgs = @("-ExecutionPolicy", "Bypass", "-File", $ScriptPath, "-MaxIterations", "$Iterations", "-CommitMessage", $Message, "-TestCommand", $TestCommand, "-SafeAddPaths", $SafeAddPaths)
     if (-not [string]::IsNullOrWhiteSpace($PostFixCommand)) { $psArgs += @("-PostFixCommand", $PostFixCommand) }
+    if (-not [string]::IsNullOrWhiteSpace($FixerCommand)) { $psArgs += @("-CursorCommand", $FixerCommand) }
+    if (-not [string]::IsNullOrWhiteSpace($FixerModel)) { $psArgs += @("-CursorModel", $FixerModel) }
     if ($NoPush) { $psArgs += "-NoPush" }
     if ($ChainHandoffFromCursor) {
         $env:AI_LOOP_CHAIN_FROM_TASK_FIRST = "1"
@@ -221,15 +228,15 @@ function Invoke-AutoReviewLoop {
 Write-Section "AI LOOP TASK-FIRST START"
 Assert-FileExists -Path $TaskPath -Message "Task file was not found."
 Assert-FileExists -Path $AutoLoopScript -Message "Existing auto loop script was not found."
-Write-Host "Project root: $ProjectRoot  Task: $TaskPath  Cursor: $CursorCommand  Iterations: $MaxIterations  NoPush: $NoPush  Tests: $TestCommand  SafeAdd: $SafeAddPaths"
+Write-Host "Project root: $ProjectRoot  Task: $TaskPath  Implementer (-CursorCommand): $CursorCommand  Iterations: $MaxIterations  NoPush: $NoPush  Tests: $TestCommand  SafeAdd: $SafeAddPaths"
 
 if (-not $SkipInitialCursor) {
     Clear-AiLoopRuntimeState
     Initialize-CursorSummaryForImplementation
-    Write-Section "STEP 1: CURSOR IMPLEMENTATION"
+    Write-Section "STEP 1: IMPLEMENTER PASS"
     Assert-CommandExists -CommandName $CursorCommand
     $retryBody = @"
-The previous Cursor implementation pass produced no meaningful implementation delta in the working tree.
+The previous implementer pass produced no meaningful implementation delta in the working tree.
 
 You MUST either:
 1. edit repository files to implement the task, or
@@ -242,16 +249,16 @@ Do not stop without changing a file unless you write the blocked/no-change expla
 If no code changes are truly required, include this exact line in .ai-loop/cursor_implementation_result.md:
 IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED
 
-Also update .ai-loop/cursor_summary.md (see initial instructions): changed files, tests, summary, task-specific command or skip reason, risks.
+Also update .ai-loop/implementer_summary.md and .ai-loop/cursor_summary.md with the same content (see initial instructions): changed files, tests, summary, task-specific command or skip reason, risks.
 "@
     $implOutcome = Invoke-CursorImplementation -TaskFile $TaskPath -CommandName $CursorCommand -Model $CursorModel -ExtraInstructions ""
     if (-not $implOutcome.HadAgentSideEffects) {
-        Write-Host "No relevant working tree changes after first Cursor pass; retrying with stricter instructions..." -ForegroundColor Yellow
+        Write-Host "No relevant working tree changes after first implementer pass; retrying with stricter instructions..." -ForegroundColor Yellow
         $implOutcome = Invoke-CursorImplementation -TaskFile $TaskPath -CommandName $CursorCommand -Model $CursorModel -ExtraInstructions $retryBody
     }
     if (-not $implOutcome.HadAgentSideEffects) {
         Write-NoChangesFinalStatus
-        Write-Host "NO_CHANGES_AFTER_CURSOR: Cursor produced no repo changes after two attempts. Codex review was skipped. See .ai-loop\final_status.md" -ForegroundColor Red
+        Write-Host "NO_CHANGES_AFTER_CURSOR: Implementer produced no repo changes after two attempts. Codex review was skipped. See .ai-loop\final_status.md" -ForegroundColor Red
         exit 1
     }
     $resultFull = Join-Path $ProjectRoot ".ai-loop\cursor_implementation_result.md"
@@ -264,11 +271,11 @@ Also update .ai-loop/cursor_summary.md (see initial instructions): changed files
     if ($delta.Count -gt 0) {
         $onlyResult = ($delta.Count -eq 1) -and $delta.Contains($resultNorm)
         if ($onlyResult -and -not (Test-CursorResultAllowsNoCodeChanges -ResultFullPath $resultFull)) {
-            $msg = "Blocked: After this Cursor pass, the only working-tree delta (excluding orchestrator scratch files) was .ai-loop/cursor_implementation_result.md, but IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED was not present.`n`nPre-existing edits in other files do not bypass this rule. Add that status line (exact label) if no new repo edits are needed, or implement the task in tracked project files."
+            $msg = "Blocked: After this implementer pass, the only working-tree delta (excluding orchestrator scratch files) was .ai-loop/cursor_implementation_result.md, but IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED was not present.`n`nPre-existing edits in other files do not bypass this rule. Add that status line (exact label) if no new repo edits are needed, or implement the task in tracked project files."
             $detail = @"
 STATUS: FAILED
 REASON: RESULT_ONLY_WITHOUT_DONE_NO_CODE_MARKER
-DETAIL: Only .ai-loop/cursor_implementation_result.md changed in the Cursor pass delta and IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED was not found.
+DETAIL: Only .ai-loop/cursor_implementation_result.md changed in the implementer pass delta and IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED was not found.
 "@
             New-Item -ItemType Directory -Force $AiLoop | Out-Null
             $detail | Set-Content -Path (Join-Path $AiLoop "final_status.md") -Encoding UTF8
@@ -279,9 +286,9 @@ DETAIL: Only .ai-loop/cursor_implementation_result.md changed in the Cursor pass
     }
 }
 else {
-    Write-Host "Skipping initial Cursor implementation because -SkipInitialCursor was provided." -ForegroundColor Yellow
+    Write-Host "Skipping initial implementer pass because -SkipInitialCursor was provided." -ForegroundColor Yellow
 }
 
 Write-Section "STEP 2: CODEX REVIEW / FIX LOOP"
-Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromCursor:$(-not $SkipInitialCursor)
+Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromCursor:$(-not $SkipInitialCursor) -FixerCommand $CursorCommand -FixerModel $CursorModel
 Write-Section "AI LOOP TASK-FIRST DONE"

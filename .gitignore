@@ -23,6 +23,7 @@ __pycache__/
 .ai-loop/test_output_before_commit.txt
 .ai-loop/last_diff.patch
 .ai-loop/final_status.md
+.ai-loop/next_implementer_prompt.md
 .ai-loop/next_cursor_prompt.md
 .ai-loop/codex_review.md
 .ai-loop/git_status.txt

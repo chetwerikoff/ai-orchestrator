@@ -11,13 +11,39 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS = _ROOT / "scripts"
-_PS1_TARGETS = ("ai_loop_auto.ps1", "ai_loop_task_first.ps1")
+_PS1_TARGETS = ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1")
 _SAFEADD_DEFAULT_RE = re.compile(
     r"\[string\]\$SafeAddPaths\s*=\s*\"([^\"]+)\"",
     re.MULTILINE,
 )
 
 RESULT_NORM = ".ai-loop/cursor_implementation_result.md"
+
+# Mirrors `Extract-FixPromptFromFile` in scripts/ai_loop_auto.ps1 — keep alternation order in sync.
+_FIX_PROMPT_LABEL_RE = re.compile(
+    r"(?:FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR):\s*"
+    r"(?P<prompt>[\s\S]*?)FINAL_NOTE:",
+    re.IGNORECASE,
+)
+_FIX_PROMPT_TAIL_RE = re.compile(
+    r"(?:FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR):\s*(?P<prompt>[\s\S]*)",
+    re.IGNORECASE,
+)
+
+
+def extract_fix_prompt_from_review_text(review: str) -> str | None:
+    """Same contract as PowerShell `Extract-FixPromptFromFile` (primary match then tail fallback)."""
+    m = _FIX_PROMPT_LABEL_RE.search(review)
+    if m:
+        body = m.group("prompt").strip()
+    else:
+        tail = _FIX_PROMPT_TAIL_RE.search(review)
+        if not tail:
+            return None
+        body = tail.group("prompt").strip()
+    if not body or body.lower() == "none":
+        return None
+    return body
 
 
 def _default_safe_add_paths_literal(script: Path) -> str:
@@ -256,8 +282,105 @@ def test_ai_loop_auto_invokes_pytest_failure_filter() -> None:
     assert "filter_pytest_failures.py" in script
 
 
+def test_default_safe_add_paths_includes_implementer_summary() -> None:
+    lit = _default_safe_add_paths_literal(_SCRIPTS / "ai_loop_auto.ps1")
+    assert ".ai-loop/implementer_summary.md" in lit
+    assert ".ai-loop/cursor_summary.md" in lit
+
+
+def test_fix_prompt_labels_supported_in_ai_loop_auto() -> None:
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "FIX_PROMPT_FOR_IMPLEMENTER" in text
+    assert "FIX_PROMPT_FOR_CURSOR" in text
+    assert "FIX_PROMPT_FOR_IMPLEMENTER|FIX_PROMPT_FOR_CURSOR" in text
+
+
+def test_runtime_cleanup_includes_both_next_prompt_variants() -> None:
+    for name in ("ai_loop_auto.ps1", "ai_loop_task_first.ps1"):
+        text = (_SCRIPTS / name).read_text(encoding="utf-8")
+        assert ".ai-loop/next_implementer_prompt.md" in text
+        assert ".ai-loop/next_cursor_prompt.md" in text
+
+
+def test_resume_prefers_neutral_next_prompt_file() -> None:
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    start = text.index("function Try-ResumeFromExistingReview")
+    chunk = text[start:]
+    imp = chunk.index("Resuming from existing next_implementer_prompt.md")
+    leg = chunk.index("Resuming from existing next_cursor_prompt.md")
+    assert imp < leg
+
+
+def test_continue_ai_loop_forwards_implementer_parameters() -> None:
+    text = (_SCRIPTS / "continue_ai_loop.ps1").read_text(encoding="utf-8")
+    assert "$CursorCommand" in text
+    assert '"-CursorCommand"' in text or "'-CursorCommand'" in text
+    assert "-CursorModel" in text
+
+
+def test_codex_template_prioritizes_implementer_summary() -> None:
+    t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
+    assert t.index("implementer_summary.md") < t.index("cursor_summary.md")
+
+
+def test_codex_template_reads_test_failures_before_raw_pytest_output() -> None:
+    """Filtered failures are denser signal; template must list them before test_output.txt."""
+    t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
+    assert t.index("test_failures_summary.md") < t.index("test_output.txt")
+
+
+def test_extract_fix_prompt_for_implementer_label() -> None:
+    review = (
+        "VERDICT: FIX_REQUIRED\n\n"
+        "FIX_PROMPT_FOR_IMPLEMENTER:\n"
+        "Patch the widget.\n\n"
+        "FINAL_NOTE:\n"
+        "ok\n"
+    )
+    assert extract_fix_prompt_from_review_text(review) == "Patch the widget."
+
+
+def test_extract_fix_prompt_for_cursor_legacy_label() -> None:
+    review = (
+        "VERDICT: FIX_REQUIRED\n\n"
+        "FIX_PROMPT_FOR_CURSOR:\n"
+        "Legacy-labelled fix body.\n\n"
+        "FINAL_NOTE:\n"
+        "done\n"
+    )
+    assert extract_fix_prompt_from_review_text(review) == "Legacy-labelled fix body."
+
+
+def test_extract_fix_prompt_tail_match_without_final_note() -> None:
+    """PowerShell falls back to greedy tail capture when FINAL_NOTE is absent."""
+    review = "FIX_PROMPT_FOR_IMPLEMENTER:\nStop after newline follows here\n"
+    assert extract_fix_prompt_from_review_text(review) == "Stop after newline follows here"
+
+
+def test_extract_fix_prompt_returns_none_for_none_sentinel() -> None:
+    review = "FIX_PROMPT_FOR_IMPLEMENTER:\nnone\n\nFINAL_NOTE:\n"
+    assert extract_fix_prompt_from_review_text(review) is None
+
+
+def test_resume_branch_tests_neutral_next_prompt_before_legacy() -> None:
+    """Structural guard: Try-ResumeFromExistingReview must check next_implementer first."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    neutral_if = text.index("if (Test-Path $nextNeutral)")
+    legacy_if = text.index("if (Test-Path $nextLegacy)")
+    assert neutral_if < legacy_if
+
+
 def test_cursor_agent_output_goes_to_debug_dir() -> None:
     script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert ".ai-loop/cursor_agent_output.txt" not in script
     assert ".ai-loop\\cursor_agent_output.txt" not in script
     assert "_debug" in script and "cursor_agent_output.txt" in script
+
+
+def test_install_into_project_copies_opencode_json_without_clobber() -> None:
+    """Installer seeds opencode.json only when missing, unless -OverwriteOpencodeConfig."""
+    text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
+    assert "templates\\opencode.json" in text or "templates/opencode.json" in text
+    assert "$OverwriteOpencodeConfig" in text
+    assert "$opencodeExisted" in text
+    assert "Left existing opencode.json unchanged" in text

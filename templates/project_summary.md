@@ -37,7 +37,7 @@ Example:
 
 ```text
 task.md
-→ Cursor implementation
+→ implementer pass (default: Cursor Agent; alternate wrappers e.g. OpenCode via project scripts)
 → Codex review
 → final test gate (after Codex PASS)
 → commit/push
@@ -73,6 +73,6 @@ Summary:
 
 ## Notes for future AI sessions
 
-Things Cursor and Codex should remember before making changes:
+Things the **implementer** and **Codex** should remember before making changes (your install may use Cursor Agent, OpenCode/Qwen, or another wrapper for the implementer step):
 
 - ...

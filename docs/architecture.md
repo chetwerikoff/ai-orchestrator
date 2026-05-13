@@ -1,7 +1,7 @@
 ---
 doc_type: architecture
 status: living_document
-as_of: 2026-05-12
+as_of: 2026-05-13
 ---
 
 # Architecture — AI Git Orchestrator
@@ -11,7 +11,7 @@ as_of: 2026-05-12
 - **§0** is ground truth for what runs today (Cursor implementer, Codex reviewer, file-based `.ai-loop/` contract).
 - **§1 onward** describe the *target* asymmetric multi-model factory: Claude planner → OpenCode + local Qwen coder → deterministic guards → Codex → Claude business gate. That pipeline is aspirational until phased rollout completes.
 - **§9–§11** spell out deferred harness layouts, deterministic safety expectations, companion-doc roles, plus archive paths for verbatim expert critique (**§9 carries the substantive blueprint internally** — not summarized away).
-- **Phase 0 (2026-05-11)** validated OpenCode + `llama-server` on Windows with a canonical trivial task; a **local HTTP proxy** on port **8090** normalizes text-format tool calls — see **DD-020** and **§5.3**.
+- **Phase 0 (2026-05-11)** validated OpenCode + `llama-server` on Windows with a canonical trivial task. **Phase 1 A/B is IN PROGRESS (2026-05-13)** with three Qwen models at ports 8081/8082/8083 — direct connections, no proxy required (all emit native `tool_calls[]`). Proxy at **:8090** remains available as fallback — see **DD-020** and **§5.3**.
 - Full numbered decisions live in **§12**; open questions in **§13**.
 
 ## §0 Current state (as of 2026-05-12)
@@ -25,12 +25,13 @@ truth; target is aspirational.
 
 ```text
 .ai-loop/task.md
-  -> Cursor Agent (`agent` CLI) implements
-  -> .ai-loop/cursor_summary.md
+  -> Implementer (Cursor Agent `agent` CLI by default, or `-CursorCommand`)
+  -> .ai-loop/implementer_summary.md (+ legacy mirror cursor_summary.md)
   -> Save-TestAndDiff (pytest, git diff, git status)
   -> Codex CLI reviews
   -> if PASS: final test gate + git commit + push (unless -NoPush)
-  -> if FIX_REQUIRED: extract FIX_PROMPT_FOR_CURSOR, re-run Cursor
+  -> if FIX_REQUIRED: extract FIX_PROMPT_FOR_IMPLEMENTER (or legacy
+     FIX_PROMPT_FOR_CURSOR), re-run implementer
   -> cap: MaxIterations (default 10; DD-011 calls for 3 — pending
      separate task)
 ```
@@ -66,23 +67,28 @@ Integration stack chosen by P0 result:
 
 ```text
 OpenCode (non-interactive)
-  -> proxy :8090   (C:\AI\scripts\opencode_proxy.py — see DD-020)
-       converts <tool_call> / <function=name> text -> tool_calls[]
-       forces stream=False
-  -> llama-server :8081
-       Qwen3-Coder-30B-A3B-Instruct-Q3_K_M.gguf
-       -ngl 999 -c 16384 --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0
-       --jinja enabled (default; do NOT use --no-jinja)
+  -> llama-server :8081  (Qwen3-Coder-30B-A3B)
+       -ngl 999 --n-cpu-moe 999 -c 131072 --parallel 1
+       --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0
 ```
 
-In `opencode.json` in the target project:
+**Phase 1 A/B stack** (as of 2026-05-13) — three direct providers, no proxy:
 
-```json
-"baseURL": "http://127.0.0.1:8090/v1"
+```text
+:8081  Qwen3-Coder-30B-A3B-Instruct-Q3_K_M  (MoE, -c 131072, --n-cpu-moe 999)
+:8082  Qwen3.6-27B-IQ4_XS                   (dense, -c 32768, --cache-type-k/v q4_0)
+:8083  Qwen3.6-35B-A3B-UD-Q4_K_M            (MoE, -c 131072, --n-cpu-moe 999)
 ```
 
-(Currently the file points at `:8080` for some experiments; see DD-020
-on canonical setup.)
+The proxy at `:8090` is **not used** in the Phase 1 A/B setup — all three models
+emit native `tool_calls[]` with llama.cpp `--jinja` (default). `opencode.json`
+in the target project defines each model as a separate provider pointing directly
+to its port. Proxy remains available as a fallback for text-format tool emitters
+(see DD-020 / §5.3).
+
+Orchestrator integration: pass `-CursorCommand .\scripts\run_opencode_agent.ps1
+-CursorModel <provider/model-id>` to `ai_loop_task_first.ps1` to substitute
+OpenCode for Cursor as the implementer in the loop.
 
 ### §0.4 Gap between current state and target
 
@@ -94,6 +100,9 @@ on canonical setup.)
 - `MaxIterations` is 10 in the scripts; DD-011 says 3. Pending change.
 - `opencode_proxy.py` is a critical new component not yet in this repo
   (lives in `C:\AI\scripts\`). See DD-020, Q-10.
+- `scripts/run_opencode_agent.ps1` **exists** — PowerShell wrapper that
+  bridges `ai_loop_auto.ps1` to `opencode run`; activated via
+  `-CursorCommand` flag. Also copied to target projects' `scripts/`.
 
 The phase plan in §8 is the path from "current state" to "target state".
 
@@ -104,7 +113,7 @@ The phase plan in §8 is the path from "current state" to "target state".
 Build a **local-first** development loop that combines:
 
 1. A **planning** stage (Claude-class) producing a durable `task.md` contract.
-2. A **coding agent** executing against a real repo (target: **OpenCode** driving **local Qwen** via `llama-server`, with a **proxy** normalization layer per **DD-020**).
+2. A **coding agent** executing against a real repo (target: **OpenCode** driving **local Qwen** via `llama-server` — **direct** `/v1` per provider for Phase 1 when models emit native `tool_calls[]`; optional **proxy** normalization per **DD-020** when a model emits text-format tool blocks).
 3. **Deterministic guards** (forbidden paths, tests, optional domain checks) so LLM output cannot violate repo policy silently.
 4. **Independent technical review** (Codex — different model family from the coder).
 5. An optional **business / product** review pass (Claude) before merge.
@@ -124,7 +133,7 @@ The orchestrator in this repository implements the **file protocol**, **task-fir
 | Role | Target model / runtime | Notes |
 |------|-------------------------|--------|
 | Planner | Claude Sonnet (API) | Writes / refines `task.md`, scope, acceptance criteria. Not in the automated loop yet (§0). |
-| Implementer (target) | OpenCode + **Qwen3-Coder-30B-A3B** via `llama-server` + **opencode_proxy** :8090 | Phase 0 validated **challenger A**; baseline **14B FAIL**. Production today: **Cursor** (**DD-021**). |
+| Implementer (target) | OpenCode + **Qwen3-Coder-30B-A3B** via `llama-server` :8081 | Phase 0 validated **challenger A**; baseline **14B FAIL**. Phase 1 also tests **Qwen3.6-27B** (:8082) and **Qwen3.6-35B-A3B** (:8083, MoE). Production today: **Cursor** (**DD-021**). |
 | Technical reviewer | Codex CLI | Gates commit/push after **VERDICT: PASS** (**DD-003**). |
 | Business reviewer (target) | Claude (manual / separate repo today) | Human-in-the-loop in `h2n-claude-review`; future automation TBD. |
 
@@ -135,7 +144,7 @@ High-level data flow (aspirational — not all stages automated today):
 ```text
 Claude planner
   -> .ai-loop/task.md
-OpenCode + local Qwen (via proxy :8090 -> llama-server :8081)
+OpenCode + local Qwen (direct llama-server :8081..:8083, or proxy :8090 -> :8081 when needed)
   -> branch / diff
 Deterministic guards (pytest, path policy, optional domain scripts)
   -> Codex technical review -> codex_review.md
@@ -149,7 +158,7 @@ Compare **§0.1** for the pipeline that actually runs in this repo (Cursor-cente
 
 ### §5.1 Orchestrator file contract
 
-The PowerShell drivers (`ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, `continue_ai_loop.ps1`) consume and emit the same durable files described in `docs/workflow.md`: `task.md`, `cursor_summary.md`, `codex_review.md`, patches, and test logs.
+The PowerShell drivers (`ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, `continue_ai_loop.ps1`) consume and emit the same durable files described in `docs/workflow.md`: `task.md`, `implementer_summary.md` (primary) / `cursor_summary.md` (legacy alias), `codex_review.md`, patches, and test logs.
 
 ### §5.2 External CLIs
 
@@ -159,15 +168,43 @@ The PowerShell drivers (`ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, `continue_
 
 ### §5.3 OpenCode invocation contract
 
-Target projects carry **`opencode.json`** with a provider pointing at the local OpenAI-compatible stack. The OpenAI adapter must expose `/v1/chat/completions` with tool schemas so OpenCode can schedule read/edit/bash style tools.
+Target projects carry **`opencode.json`** with one or more providers pointing at local OpenAI-compatible endpoints. The adapter must expose `/v1/chat/completions` with tool schemas so OpenCode can schedule read/edit/bash style tools.
+
+**Phase 1 (current A/B) — direct providers:** The canonical wiring matches the
+installer-shipped template `templates/opencode.json`: each Qwen stack is a
+separate provider whose `options.baseURL` is **`http://127.0.0.1:8081/v1`**,
+**`…8082/v1`**, or **`…8083/v1`** (one port per running `llama-server`). No
+proxy is required while every model in use emits native `tool_calls[]` — see
+**§0.3**.
+
+**Proxy path (optional):** When a model emits tool invocations as plain text
+instead of structured `tool_calls[]`, point the relevant provider at
+**`http://127.0.0.1:8090/v1`** and run **`opencode_proxy.py`** (DD-020) so
+OpenCode still sees a normalized response. This is the integration path used
+for the Phase 0 baseline failure (14B); it remains a **fallback**, not a
+mandatory hop for Qwen3-native models.
 
 Minimal expectations:
 
-- Model ID matches the configured GGUF stack.
-- **Canonical base URL for the multi-model / proxy setup**: `http://127.0.0.1:8090/v1` — see **§0.3** and the proxy subsection below.
+- Model / provider ID matches the configured GGUF stack and `-CursorModel` passed to the loop.
+- `baseURL` is either **`http://127.0.0.1:808x/v1`** (direct) or **`http://127.0.0.1:8090/v1`** (proxy front-end) — never both for the same logical model without a reason documented in the target project.
 - Permissions blocks should allow the tool surface required for the canonical task harness (subject to project policy).
 
-Example shape (illustrative; real `opencode.json` lives in the project under test):
+Example — **direct** provider (Phase 1 default; same order of ideas as `templates/opencode.json`):
+
+```json
+{
+  "provider": {
+    "local-qwen": {
+      "options": {
+        "baseURL": "http://127.0.0.1:8081/v1"
+      }
+    }
+  }
+}
+```
+
+Example — **proxy** provider (when DD-020 normalization is required):
 
 ```json
 {
@@ -212,14 +249,10 @@ Proxy location (as of 2026-05-12): `C:\AI\scripts\opencode_proxy.py`.
 This is outside this repository. Relocation into `scripts/` here is
 tracked as Q-10 / DD-020.
 
-`opencode.json` in the target project must set:
-
-```json
-"baseURL": "http://127.0.0.1:8090/v1"
-```
-
-even when only `Qwen3-Coder-30B-A3B` is in use, so the proxy remains the
-single integration point.
+When this proxy is in use, the provider in `opencode.json` for that model must
+set **`baseURL`** to **`http://127.0.0.1:8090/v1`**. For Phase 1 Qwen3 stacks
+that already emit structured `tool_calls[]`, **`baseURL`** should point
+**directly** at the matching `llama-server` port (§0.3 / `templates/opencode.json`).
 
 ## §6 Deterministic gates (target)
 
@@ -263,8 +296,9 @@ actual_deliverables:
   - llama-server CUDA build confirmed working on Windows 11
   - 2 of 3 candidate GGUFs downloaded and tested (baseline, challenger A)
   - challenger B (Qwen3.6-27B) deferred per VRAM headroom concern
-  - opencode.json template established (currently points :8080 for
-    legacy tests, P1 will pin :8090 once proxy is in repo)
+  - opencode.json template in this repo (`templates/opencode.json`) documents
+    Phase 1 direct ports :8081/:8082/:8083; optional :8090 proxy path retained
+    per DD-020 for text-format tool emitters
   - proxy `opencode_proxy.py` developed at C:\AI\scripts\ (outside repo;
     DD-020)
   - Canonical task ("create qwen_test.txt") run end-to-end:
@@ -278,9 +312,23 @@ p1_default_coder: Qwen3-Coder-30B-A3B-Instruct Q3_K_M
 p1_integration_stack: see §0.3 above
 ```
 
-### §8.2 Phase 1 (next)
+### §8.2 Phase 1 — IN PROGRESS (started 2026-05-13)
 
-Run A/B harness tasks comparing **Cursor** vs **OpenCode+Qwen** on real H2N-sized workloads under the proxy stack (**DD-021**) before switching the default implementer.
+Run A/B harness tasks comparing **Cursor** vs **OpenCode+Qwen** on real H2N-sized workloads (**DD-021**) before switching the default implementer.
+
+```yaml
+status: IN PROGRESS
+started: 2026-05-13
+models_under_test:
+  run_A: Cursor (baseline)
+  run_B: Qwen3-Coder-30B-A3B Q3_K_M  (:8081, -c 131072, MoE)
+  run_C: Qwen3.6-27B IQ4_XS          (:8082, -c 32768, dense, q4_0 KV)
+  run_D: Qwen3.6-35B-A3B Q4_K_M      (:8083, -c 131072, MoE, --n-cpu-moe)
+preliminary_notes:
+  - run_D: hit context overflow on first task (partial stash saved); second model run started
+  - proxy :8090 not used — all three Qwen3 models emit native tool_calls[]
+  - loop activated via: ai_loop_task_first.ps1 -CursorCommand .\scripts\run_opencode_agent.ps1 -CursorModel <provider/id>
+```
 
 ## §9 Target component map and deferred factory layout (target)
 
@@ -435,7 +483,7 @@ Shared **planning** inputs (from Claude planner in the target design): **`contex
 | `loop_controller.py` | State machine — next stage, max iterations, **`loop_state.json`**, retries vs escalate vs success |
 | `context_builder.py` | Build **`context_bundle.md`** — task ask, git/diff/tree, snippets, failures (H2N keyword hooks such as **`color_ranges`**, **`catalog`**, **`school`**) |
 | `prompt_builder.py` | Materialize planner/coder/fix/reviewer prompts from templates + task bundles |
-| `opencode_runner.py` | Invoke OpenCode CLI/client with WD, provider/model, logs, failure detection (`stream`/`tool` behavior mediated by **`§5.3`** proxy stack) |
+| `opencode_runner.py` | Invoke OpenCode CLI/client with WD, provider/model, logs, failure detection (`stream`/`tool` behavior per **`§5.3`**: direct llama-server or proxy when needed) |
 | `test_runner.py` | Full + targeted pytest, capture **`test_output*.txt`** |
 | `diff_guard.py` | Enforce diff budgets and forbidden edit classes into **`diff_guard_report.md`** |
 | `domain_gate.py` | Run deterministic project checks → **`domain_check_report.md`** |
@@ -469,7 +517,7 @@ Full factory sequence (endorsed harness design — not fully automated yet):
  2. context_builder.py -> .ai-loop/context_bundle.md
  3. Claude planner writes task.md / agent_brief.md / domain_risks.md
  4. prompt_builder.py -> opencode_qwen_prompt.md
- 5. opencode_runner.py runs OpenCode + local Qwen with proxy-backed endpoint (DD-020)
+ 5. opencode_runner.py runs OpenCode + local Qwen (direct endpoint or proxy per §5.3 / DD-020)
         -> repo edits + opencode_qwen_result.md + opencode_session_log.md
  6. Capture git status / changed files / diff snapshots
  7. test_runner.py -> test_output*.txt
@@ -603,30 +651,39 @@ Decision: Orchestrator entrypoints default `-MaxIterations` to **10**; architect
 Status: open (scripts still use 10).
 Date noted: 2026-05-12.
 
-### DD-020 — OpenCode proxy as required Phase-0/Phase-1 integration component
+### DD-020 — OpenCode↔llama text-tool normalization proxy (optional)
 
-Decision: Use a local HTTP proxy (`opencode_proxy.py` on port 8090) between
-OpenCode and llama.cpp `llama-server` to convert text-format tool calls
-(`<tool_call>`, `<function=name>`, `<tools>`) into structured `tool_calls[]`
-responses. The proxy is part of the canonical local stack.
+Decision: Maintain a local HTTP proxy (`opencode_proxy.py` on port **8090**)
+that can sit between OpenCode and `llama-server` to convert **text-format** tool
+calls (`<tool_call>`, `<function=name>`, `<tools>`) into structured
+`tool_calls[]` on the wire response. **Phase 1 A/B** uses **direct**
+connections from `opencode.json` to `llama-server` ports **8081 / 8082 / 8083**
+(see **`templates/opencode.json`**, **§0.3**, **§5.3**) because the Qwen3
+candidates emit native `tool_calls[]`; the proxy remains the supported path
+for models that do not.
 
-Status: in production for P0 / P1; relocation into VCS pending (see Q-10).
-Date: 2026-05-11.
+Status: proxy script outside VCS; Phase 1 default wiring does not require it.
+Date: 2026-05-11 (clarified 2026-05-13).
 
-Rationale: Qwen2.5-Coder-14B does not emit structured tool calls; some
-future local models may also emit text-format. A single proxy normalizes
-the integration contract and absorbs that variance.
+Rationale: Phase 0 showed baseline **14B** could not satisfy OpenCode without
+normalization; Qwen3 stacks used in Phase 1 do not need the hop. Keeping the
+proxy as an **optional** component preserves one integration contract for
+future text-format emitters without contradicting direct `baseURL` in
+production A/B.
 
 Risk: proxy currently lives outside this repository at
-`C:\AI\scripts\opencode_proxy.py`. If that machine is rebuilt or the script
-is lost, P0/P1 integration breaks. Mitigation: relocate to `scripts/` (Q-10).
+`C:\AI\scripts\opencode_proxy.py`. Workflows that still depend on **8090**
+break if that script is lost; direct-port Phase 1 runs are unaffected.
+Mitigation: relocate to `scripts/` (Q-10).
 
 ### DD-021 — Cursor as transitional implementer through Phase 1
 
 Decision: keep Cursor Agent as the production implementer until OpenCode +
 Qwen3-Coder-30B-A3B has demonstrated stable behavior across at least 5
-real-world H2N tasks under the canonical proxy stack from DD-020. Until
-then, OpenCode runs only on Phase-1 A/B comparison tasks against Cursor.
+real-world H2N tasks under the **Phase 1 OpenCode wiring** (direct
+`llama-server` per **§5.3** / **`templates/opencode.json`**; proxy **DD-020**
+only when a chosen model requires normalization). Until then, OpenCode runs
+only on Phase-1 A/B comparison tasks against Cursor.
 
 Status: active.
 Date: 2026-05-12.
@@ -651,5 +708,6 @@ Currently `C:\AI\scripts\opencode_proxy.py`. Options:
   startup (poll `http://127.0.0.1:8090/health` before running OpenCode).
 - C: extract to a separate dedicated `opencode-llama-proxy` repository.
 
-Pending user decision (see audit Q3). Blocks DD-020 relocation; until
-resolved, P0/P1 integration depends on out-of-VCS code.
+Pending user decision (see audit Q3). Blocks DD-020 relocation; **8090**-dependent
+workflows remain tied to out-of-VCS code until then. Phase 1 **direct** `llama-server`
+configs (§0.3, `templates/opencode.json`) do not require the proxy.

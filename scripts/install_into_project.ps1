@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory=$true)]
     [string]$TargetProject,
     [switch]$OverwriteTask,
-    [switch]$OverwriteProjectSummary
+    [switch]$OverwriteProjectSummary,
+    [switch]$OverwriteOpencodeConfig
 )
 
 $Root = Resolve-Path "."
@@ -18,6 +19,7 @@ Copy-Item (Join-Path $Root "scripts\ai_loop_auto.ps1") (Join-Path $TargetScripts
 Copy-Item (Join-Path $Root "scripts\ai_loop_task_first.ps1") (Join-Path $TargetScripts "ai_loop_task_first.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\continue_ai_loop.ps1") (Join-Path $TargetScripts "continue_ai_loop.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\run_cursor_agent.ps1") (Join-Path $TargetScripts "run_cursor_agent.ps1") -Force
+Copy-Item (Join-Path $Root "scripts\run_opencode_agent.ps1") (Join-Path $TargetScripts "run_opencode_agent.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\filter_pytest_failures.py") (Join-Path $TargetScripts "filter_pytest_failures.py") -Force
 
 $TaskTarget = Join-Path $TargetAiLoop "task.md"
@@ -33,7 +35,18 @@ if ($OverwriteProjectSummary -or !(Test-Path $ProjectSummaryTarget)) {
 Copy-Item (Join-Path $Root "templates\codex_review_prompt.md") (Join-Path $TargetAiLoop "codex_review_prompt.md") -Force
 Copy-Item (Join-Path $Root "templates\cursor_summary_template.md") (Join-Path $TargetAiLoop "cursor_summary_template.md") -Force
 
+$OpencodeTarget = Join-Path $Target "opencode.json"
+$opencodeExisted = Test-Path $OpencodeTarget
+if ($OverwriteOpencodeConfig) {
+    Copy-Item (Join-Path $Root "templates\opencode.json") $OpencodeTarget -Force
+} elseif (!$opencodeExisted) {
+    Copy-Item (Join-Path $Root "templates\opencode.json") $OpencodeTarget -Force
+}
+
 Write-Host "AI git orchestrator installed into: $Target"
+if ($opencodeExisted -and -not $OverwriteOpencodeConfig) {
+    Write-Host "Left existing opencode.json unchanged (pass -OverwriteOpencodeConfig to replace)."
+}
 Write-Host "Next:"
 Write-Host "1. Create AGENTS.md at the target project root (working rules for agents in that project)."
 Write-Host "2. Edit .ai-loop\task.md in the target project."

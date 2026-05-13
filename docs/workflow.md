@@ -13,11 +13,11 @@ The orchestrator uses a file-based protocol:
 ```text
 .ai-loop/project_summary.md
 .ai-loop/task.md
-  -> Cursor implements
-  -> .ai-loop/cursor_summary.md
+  -> Implementer implements (Cursor Agent by default, or `-CursorCommand` e.g. OpenCode wrapper)
+  -> .ai-loop/implementer_summary.md (+ legacy mirror `.ai-loop/cursor_summary.md`)
   -> tests + diff
   -> Codex review
-  -> Cursor fixes if needed
+  -> Implementer fixes if needed
   -> final test gate (after Codex PASS)
   -> git commit/push
 ```
@@ -26,7 +26,8 @@ The orchestrator uses a file-based protocol:
 
 - `.ai-loop/project_summary.md` — durable project-level context.
 - `.ai-loop/task.md` — current task contract.
-- `.ai-loop/cursor_summary.md` — latest implementation summary.
+- `.ai-loop/implementer_summary.md` — latest implementation summary (primary).
+- `.ai-loop/cursor_summary.md` — legacy alias for the same summary role (kept in sync with `implementer_summary.md` when the orchestrator writes stubs).
 - `.ai-loop/codex_review.md` — primary review output.
 - `.ai-loop/last_diff.patch` — current diff.
 - `.ai-loop/test_output.txt` — current test output.
@@ -43,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 `
   -TestCommand "python -m pytest -q"
 ```
 
-This clears stale `.ai-loop` runtime files (except `task.md`), runs Cursor Agent first, resets `.ai-loop/cursor_summary.md` to a stub (the implementer must fill it), then hands off to `ai_loop_auto.ps1` only if Cursor produced relevant git changes (or a documented no-code completion via `cursor_implementation_result.md`). If Cursor makes no effective changes twice, Codex is skipped and the script fails with `NO_CHANGES_AFTER_CURSOR`.
+This clears stale `.ai-loop` runtime files (except `task.md`), runs the configured implementer first (Cursor Agent by default; override with `-CursorCommand`), resets `.ai-loop/implementer_summary.md` and `.ai-loop/cursor_summary.md` to matching stubs (the implementer must fill them), then hands off to `ai_loop_auto.ps1` only if the implementer produced relevant git changes (or a documented no-code completion via `cursor_implementation_result.md`). If the implementer makes no effective changes twice, Codex is skipped and the script fails with `NO_CHANGES_AFTER_CURSOR`.
 
 ### `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED`
 
@@ -83,6 +84,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_auto.ps1 `
 ```
 
 ## Continue
+
+Resume forwarding uses `scripts/continue_ai_loop.ps1`, which calls `ai_loop_auto.ps1 -Resume`. Optional `-CursorCommand` / `-CursorModel` are forwarded so the same implementer wrapper as in task-first can run fix passes after a manual stop.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\continue_ai_loop.ps1 `
