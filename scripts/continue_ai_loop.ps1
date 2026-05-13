@@ -1,3 +1,5 @@
+# Resumes ai_loop_auto.ps1 -Resume. Optional -CursorCommand / -CursorModel override
+# .ai-loop/implementer.json (runtime); when omitted, auto-loop reloads persisted effective values.
 param(
     [string]$CommitMessage = "Continue AI loop",
     [int]$MaxIterations = 10,

@@ -43,6 +43,8 @@ task.md
 → commit/push
 ```
 
+If this repo uses the shipped PowerShell drivers, **`.ai-loop/implementer.json`** (runtime; should stay gitignored) holds the last effective implementer wrapper and model so **`continue_ai_loop.ps1`** can resume OpenCode/Qwen runs without repeating `-CursorCommand` / `-CursorModel`. Explicit switches still override that file.
+
 ## Important design decisions
 
 - ...

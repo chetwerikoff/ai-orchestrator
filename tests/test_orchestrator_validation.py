@@ -318,6 +318,73 @@ def test_continue_ai_loop_forwards_implementer_parameters() -> None:
     assert "-CursorModel" in text
 
 
+def test_gitignore_excludes_implementer_json_runtime_state() -> None:
+    text = (_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".ai-loop/implementer.json" in text
+
+
+def test_task_first_writes_implementer_state_file() -> None:
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "Save-ImplementerStateAt" in text
+    assert "implementer.json" in text
+    assert "ai_loop_task_first.ps1" in text
+
+
+def test_ai_loop_auto_resume_merges_persisted_implementer_state() -> None:
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "Apply-ResumeImplementerState" in text
+    assert "Save-ImplementerState" in text
+    assert "implementer.json" in text
+    assert "PSBoundParameters" in text
+    assert "ContainsKey" in text
+    assert "implementer_command" in text and "cursor_command" in text
+
+
+def test_ai_loop_auto_persisted_command_resolution_matches_invocation() -> None:
+    """Resume accepts rooted paths, project-relative paths, and Get-Command-discoverable names."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "function Test-ImplementerCommandResolvable" in text
+    assert "IsPathRooted" in text
+    assert "Join-Path $ProjectRoot $rel" in text
+    assert "Get-Command -Name $t -ErrorAction SilentlyContinue" in text
+
+
+def test_ai_loop_auto_resume_warns_on_missing_or_unusable_persisted_state() -> None:
+    """Resume must surface clear fallbacks when implementer.json is missing or unusable."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "Implementer state not found at $jsonPath" in text
+    assert "has no non-empty command" in text
+    assert "persisted model will not be applied" in text
+    assert "not discoverable via Get-Command" in text
+
+
+def test_ai_loop_auto_resume_cli_override_precedence_documented_in_state_logic() -> None:
+    """Explicit -CursorCommand / -CursorModel must win; PSBoundParameters gates loads."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    start = text.index("function Apply-ResumeImplementerState")
+    end = text.index("$script:defaultImplementerWrapper", start)
+    chunk = text[start:end]
+    assert 'ContainsKey("CursorCommand")' in chunk
+    assert 'ContainsKey("CursorModel")' in chunk
+    assert "$persistedCommandRejected" in chunk
+
+
+def test_ai_loop_auto_resume_explicit_cursor_command_skips_persisted_implementer_json() -> None:
+    """Explicit -CursorCommand must not read implementer.json or merge a stale persisted model (OpenCode resume)."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    start = text.index("function Apply-ResumeImplementerState")
+    end = text.index("$script:defaultImplementerWrapper", start)
+    chunk = text[start:end]
+    cmd_gate = chunk.index('ContainsKey("CursorCommand")')
+    assert cmd_gate < chunk.index("Implementer state not found at $jsonPath")
+    assert cmd_gate < chunk.index("Read-ImplementerStateObject")
+
+
+def test_safety_doc_documents_implementer_json_runtime_policy() -> None:
+    t = (_ROOT / "docs" / "safety.md").read_text(encoding="utf-8")
+    assert "implementer.json" in t
+
+
 def test_codex_template_prioritizes_implementer_summary() -> None:
     t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
     assert t.index("implementer_summary.md") < t.index("cursor_summary.md")

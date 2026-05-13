@@ -117,7 +117,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_auto.ps1 `
 
 ## Continue after stop
 
-From the target project root:
+From the target project root, **`continue_ai_loop.ps1`** resumes with `ai_loop_auto.ps1 -Resume`.
+
+**Default:** If you previously ran task-first or auto with a non-default implementer (for example OpenCode via `-CursorCommand`), the effective wrapper and model are stored in **`.ai-loop/implementer.json`** (runtime, gitignored). You can continue **without** repeating `-CursorCommand` / `-CursorModel`; the resume run reloads them.
+
+**Override:** Pass `-CursorCommand` and/or `-CursorModel` again when you want to change the implementer for this session; those parameters always override the persisted file.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\continue_ai_loop.ps1 `
@@ -128,6 +132,14 @@ or, if scripts are unblocked:
 
 ```powershell
 .\scripts\continue_ai_loop.ps1 -CommitMessage "Continue feature"
+```
+
+Explicit OpenCode example:
+
+```powershell
+.\scripts\continue_ai_loop.ps1 -CommitMessage "Continue" `
+  -CursorCommand ".\scripts\run_opencode_agent.ps1" `
+  -CursorModel "local-qwen-35b/qwen3-6-35b-a3b"
 ```
 
 ## Optional parameters
@@ -145,7 +157,7 @@ or, if scripts are unblocked:
 
 `ai_loop_task_first.ps1` accepts the same implementer-related switches (`-CursorCommand`, `-CursorModel`) plus forwarding to the embedded auto loop: `-NoPush`, `-TestCommand`, `-PostFixCommand`, and `-SafeAddPaths` (same meanings as `ai_loop_auto.ps1`).
 
-`continue_ai_loop.ps1` forwards `-CursorCommand` and `-CursorModel` to `ai_loop_auto.ps1` so resume/fix passes can use the same wrapper as task-first.
+`continue_ai_loop.ps1` forwards `-CursorCommand` and `-CursorModel` when you pass them (they override **`.ai-loop/implementer.json`**). If you omit them, resume uses the persisted effective implementer when that file exists and is valid.
 
 ## Safety model
 
@@ -154,6 +166,7 @@ The orchestrator does **not** stage everything by default.
 It stages only `SafeAddPaths`. Runtime artifacts are intentionally excluded:
 
 ```text
+.ai-loop/implementer.json
 .ai-loop/codex_review.md
 .ai-loop/cursor_agent_output.txt
 .ai-loop/cursor_implementation_prompt.md

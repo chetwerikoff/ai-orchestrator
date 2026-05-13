@@ -2,24 +2,24 @@
 
 ## Changed files
 
-- `templates/project_summary.md` — pipeline example and “Notes for future AI sessions” use **implementer**-neutral wording; Cursor Agent called out as the default example where relevant.
-- `templates/codex_review_prompt.md` — read order: **`test_failures_summary.md` before `test_output.txt`** when both exist; clarified roles of items 7–8.
-- `tests/test_orchestrator_validation.py` — behavioral tests for Codex fix extraction (mirror of `Extract-FixPromptFromFile`: `FIX_PROMPT_FOR_IMPLEMENTER`, legacy `FIX_PROMPT_FOR_CURSOR`, tail match, `none` sentinel); codex template ordering checks; **resume** guarded by **`Test-Path $nextNeutral` before `$nextLegacy`** in `Try-ResumeFromExistingReview`.
+- `scripts/ai_loop_auto.ps1` — **`Apply-ResumeImplementerState`**: if `-Resume` and `-CursorCommand` is explicitly passed (`$PSBoundParameters`), return immediately (no `implementer.json` read, no persisted model merge, no missing-file warning). Persisted command/model loading unchanged when `-CursorCommand` is omitted (model from file only when `-CursorModel` is not explicit and command bundle is usable).
+- `tests/test_orchestrator_validation.py` — `test_ai_loop_auto_resume_explicit_cursor_command_skips_persisted_implementer_json` guards ordering so explicit command gates before missing-file warning and before `Read-ImplementerStateObject`.
+- `.ai-loop/project_summary.md` — durable resume / `implementer.json` precedence notes; pytest count 51.
 
-## Test result
+## Tests
 
-- `python -m pytest -q` → **43 passed**.
+- `python -m pytest -q` — **51 passed**.
+- Task `ParseFile` one-liners from `.ai-loop/task.md` — not run separately here; **`test_powershell_orchestrator_scripts_parse_cleanly`** exercises the same `Parser::ParseFile` path during pytest.
 
 ## Implementation summary
 
-- Install seed `templates/project_summary.md` no longer implies “Cursor-only” in the workflow stub; operators using OpenCode or other wrappers get accurate orientation text.
-- Codex review instructions match the orchestrator’s intent: prefer filtered failure summaries over raw pytest logs when present.
-- Tests exercise the fix-prompt regex contract and resume branching order instead of relying on unrelated substrings alone.
+- Fixes stale OpenCode/Qwen model being applied when resuming with a **new** explicit wrapper but no `-CursorModel`: persisted model is no longer merged on that path, and `Save-ImplementerState` writes the effective empty model with the new command instead of re-saving the old model.
+- Suppresses misleading **WARNING** about missing `implementer.json` when the operator already supplied `-CursorCommand` (state file irrelevant for selection).
 
-## Task-specific outputs / skipped live-run
+## Task-specific live runs
 
-- PowerShell `[Parser]::ParseFile` for `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, and `continue_ai_loop.ps1`: **passed** via a short Python `subprocess` harness (direct `powershell -Command …` in this tool shell was blocked).
+- Full `ai_loop_auto.ps1` / Codex loop not executed (requires live repo state and CLIs).
 
 ## Remaining risks
 
-- Python `extract_fix_prompt_from_review_text` must stay aligned with `scripts/ai_loop_auto.ps1` if the PowerShell regex changes.
+- `-CursorCommand` with an explicit **empty** string still counts as bound and skips persisted merge (same as other explicit passes); operators normally use `continue_ai_loop.ps1`, which omits the argument when blank.

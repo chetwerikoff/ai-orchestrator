@@ -32,6 +32,8 @@ setup.cfg
 
 Runtime artifacts are not staged.
 
+`.ai-loop/implementer.json` records the last **effective** implementer wrapper and model used by the drivers (including OpenCode/Qwen selections) so `continue_ai_loop.ps1` / `ai_loop_auto.ps1 -Resume` can load them when you omit `-CursorCommand` / `-CursorModel`. It is **runtime-only** (gitignored): paths and model IDs may be machine-specific — do not rely on it for durable documentation.
+
 ## Private data
 
 Before making a repository public, verify that it does not include:

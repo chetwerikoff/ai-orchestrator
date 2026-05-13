@@ -19,6 +19,142 @@ $Tmp = Join-Path $ProjectRoot ".tmp"
 New-Item -ItemType Directory -Force -Path $AiLoop | Out-Null
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
+function Get-ImplementerStatePath {
+    param([string]$AiLoopRoot)
+    return (Join-Path $AiLoopRoot "implementer.json")
+}
+
+function Read-ImplementerStateObject {
+    param([string]$JsonPath)
+    if (-not (Test-Path -LiteralPath $JsonPath)) {
+        return $null
+    }
+    try {
+        $raw = Get-Content -LiteralPath $JsonPath -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($raw)) {
+            Write-Host "WARNING: Implementer state file is empty: $JsonPath - ignoring." -ForegroundColor Yellow
+            return $null
+        }
+        return ($raw | ConvertFrom-Json)
+    }
+    catch {
+        Write-Host "WARNING: Invalid implementer state JSON at $JsonPath - ignoring. $_" -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Normalize-ImplementerStateFields {
+    param($StateObj)
+    if (-not $StateObj) { return $null }
+    $names = @($StateObj.PSObject.Properties.Name)
+    $cmd = ""
+    if ($names -contains "implementer_command") { $cmd = [string]$StateObj.implementer_command }
+    elseif ($names -contains "cursor_command") { $cmd = [string]$StateObj.cursor_command }
+    $model = ""
+    if ($names -contains "implementer_model") { $model = [string]$StateObj.implementer_model }
+    elseif ($names -contains "cursor_model") { $model = [string]$StateObj.cursor_model }
+    return @{ Command = $cmd.Trim(); Model = $model.Trim() }
+}
+
+function Test-ImplementerCommandResolvable {
+    param(
+        [string]$Raw,
+        [string]$ProjectRoot
+    )
+    if ([string]::IsNullOrWhiteSpace($Raw)) { return $false }
+    $t = $Raw.Trim()
+    if ([System.IO.Path]::IsPathRooted($t)) {
+        return (Test-Path -LiteralPath $t)
+    }
+    $rel = $t -replace '^\.(\\|/)', ''
+    $underRoot = Join-Path $ProjectRoot $rel
+    if (Test-Path -LiteralPath $underRoot) {
+        return $true
+    }
+    if (Test-Path -LiteralPath $t) {
+        return $true
+    }
+    if (Get-Command -Name $t -ErrorAction SilentlyContinue) {
+        return $true
+    }
+    return $false
+}
+
+function Save-ImplementerState {
+    param(
+        [string]$AiLoopRoot,
+        [string]$Command,
+        [string]$Model,
+        [string]$Source
+    )
+    $path = Get-ImplementerStatePath -AiLoopRoot $AiLoopRoot
+    $m = if ($null -eq $Model) { "" } else { [string]$Model }
+    $ordered = [ordered]@{
+        schema_version        = 1
+        implementer_command   = $Command
+        implementer_model     = $m
+        cursor_command        = $Command
+        cursor_model          = $m
+        selected_at           = (Get-Date).ToUniversalTime().ToString("o")
+        source                = $Source
+    }
+    $json = ($ordered | ConvertTo-Json -Depth 6)
+    $enc = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($path, $json + "`n", $enc)
+}
+
+function Apply-ResumeImplementerState {
+    param(
+        [string]$ProjectRoot,
+        [string]$AiLoopRoot,
+        [bool]$IsResume,
+        $BoundParameters
+    )
+    if (-not $IsResume) {
+        return
+    }
+    # Explicit -CursorCommand wins entirely: do not read implementer.json, merge a persisted model,
+    # or warn about missing state when the operator is not using persisted command selection.
+    if ($BoundParameters.ContainsKey("CursorCommand")) {
+        return
+    }
+    $jsonPath = Get-ImplementerStatePath -AiLoopRoot $AiLoopRoot
+    if (-not (Test-Path -LiteralPath $jsonPath)) {
+        Write-Host "WARNING: Implementer state not found at $jsonPath - resume uses the default Cursor implementer wrapper; persisted model will not be applied." -ForegroundColor Yellow
+        return
+    }
+    $state = Read-ImplementerStateObject -JsonPath $jsonPath
+    $norm = Normalize-ImplementerStateFields -StateObj $state
+    $persistedCommandRejected = $false
+
+    if ($norm -and -not [string]::IsNullOrWhiteSpace($norm.Command)) {
+        if (Test-ImplementerCommandResolvable -Raw $norm.Command -ProjectRoot $ProjectRoot) {
+            $script:CursorCommand = $norm.Command
+        }
+        else {
+            Write-Host "WARNING: Persisted implementer command is not reachable as a path and is not discoverable via Get-Command: $($norm.Command). Falling back to the default Cursor wrapper; persisted model will not be applied." -ForegroundColor Yellow
+            $persistedCommandRejected = $true
+        }
+    }
+    elseif ($state) {
+        Write-Host "WARNING: Implementer state at $jsonPath has no non-empty command - using default Cursor wrapper; persisted model will not be applied." -ForegroundColor Yellow
+        $persistedCommandRejected = $true
+    }
+
+    if (-not $BoundParameters.ContainsKey("CursorModel") -and -not $persistedCommandRejected) {
+        if ($norm -and -not [string]::IsNullOrWhiteSpace($norm.Model)) {
+            $script:CursorModel = $norm.Model
+        }
+    }
+}
+
+$script:defaultImplementerWrapper = Join-Path $PSScriptRoot "run_cursor_agent.ps1"
+Apply-ResumeImplementerState -ProjectRoot $ProjectRoot -AiLoopRoot $AiLoop -IsResume $Resume.IsPresent -BoundParameters $PSBoundParameters
+
+$effectiveImplementerCmd = if (-not [string]::IsNullOrWhiteSpace($CursorCommand)) { $CursorCommand } else { $script:defaultImplementerWrapper }
+$effectiveImplementerModel = if ($null -eq $CursorModel) { "" } else { [string]$CursorModel }
+Save-ImplementerState -AiLoopRoot $AiLoop -Command $effectiveImplementerCmd -Model $effectiveImplementerModel -Source "ai_loop_auto.ps1"
+
 # Keep pytest/temp files local to avoid Windows Temp PermissionError issues.
 $env:TEMP = $Tmp
 $env:TMP = $Tmp

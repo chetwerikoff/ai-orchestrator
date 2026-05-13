@@ -40,3 +40,4 @@ __pycache__/
 # Filtered review artefacts (regenerated each iteration)
 .ai-loop/test_failures_summary.md
 .ai-loop/diff_summary.txt
+.ai-loop/implementer.json

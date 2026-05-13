@@ -88,7 +88,11 @@ to its port. Proxy remains available as a fallback for text-format tool emitters
 
 Orchestrator integration: pass `-CursorCommand .\scripts\run_opencode_agent.ps1
 -CursorModel <provider/model-id>` to `ai_loop_task_first.ps1` to substitute
-OpenCode for Cursor as the implementer in the loop.
+OpenCode for Cursor as the implementer in the loop. The effective wrapper and
+model are written to **`.ai-loop/implementer.json`** (runtime, gitignored) so
+`continue_ai_loop.ps1` or `ai_loop_auto.ps1 -Resume` can reload them without
+repeating those switches; explicit `-CursorCommand` / `-CursorModel` still
+override the file.
 
 ### §0.4 Gap between current state and target
 
@@ -158,7 +162,7 @@ Compare **§0.1** for the pipeline that actually runs in this repo (Cursor-cente
 
 ### §5.1 Orchestrator file contract
 
-The PowerShell drivers (`ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, `continue_ai_loop.ps1`) consume and emit the same durable files described in `docs/workflow.md`: `task.md`, `implementer_summary.md` (primary) / `cursor_summary.md` (legacy alias), `codex_review.md`, patches, and test logs.
+The PowerShell drivers (`ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, `continue_ai_loop.ps1`) consume and emit the same durable files described in `docs/workflow.md`: `task.md`, `implementer_summary.md` (primary) / `cursor_summary.md` (legacy alias), `codex_review.md`, patches, and test logs. **`.ai-loop/implementer.json`** (not committed by default) stores the last effective implementer wrapper and model for resume.
 
 ### §5.2 External CLIs
 
@@ -455,6 +459,7 @@ h2n-range-extractor/
     next_cursor_prompt.md
     next_opencode_prompt.md
     failure_report.md
+    implementer.json
     loop_state.json
 ```
 
@@ -474,7 +479,7 @@ Shared **planning** inputs (from Claude planner in the target design): **`contex
 
 **Diff safety:** **`git_status_*`**, **`changed_files.txt`**, **`last_diff.patch`**, **`diff_guard_report.md`** (PASS/WARN/BLOCK semantics for too many files, deleted tests, schema drift, etc.).
 
-**Control / resume:** **`loop_state.json`** records iteration, last stage, verdict flags, next action; **`final_status.md`**, **`failure_report.md`**, **`next_opencode_prompt.md`**, **`next_cursor_prompt.md`** close or branch the loop (Cursor fallback path remains named for compatibility).
+**Control / resume:** **`implementer.json`** (narrow, shipping today in the PowerShell drivers — runtime, gitignored) stores the effective implementer wrapper and model for `ai_loop_auto.ps1 -Resume`; target **`loop_state.json`** records iteration, last stage, verdict flags, next action; **`final_status.md`**, **`failure_report.md`**, **`next_opencode_prompt.md`**, **`next_cursor_prompt.md`** close or branch the loop (Cursor fallback path remains named for compatibility).
 
 ### §9.4 Target `src/orchestrator/` module responsibilities
 

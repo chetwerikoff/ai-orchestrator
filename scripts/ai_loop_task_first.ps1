@@ -26,6 +26,30 @@ function ConvertTo-CrtSafeArg {
     return [regex]::Replace($Value, '(\\*)"', { param($m) ($m.Groups[1].Value * 2) + '\"' })
 }
 
+function Save-ImplementerStateAt {
+    param(
+        [string]$AiLoopRoot,
+        [string]$Command,
+        [string]$Model,
+        [string]$Source
+    )
+    New-Item -ItemType Directory -Force -Path $AiLoopRoot | Out-Null
+    $path = Join-Path $AiLoopRoot "implementer.json"
+    $m = if ($null -eq $Model) { "" } else { [string]$Model }
+    $ordered = [ordered]@{
+        schema_version        = 1
+        implementer_command   = $Command
+        implementer_model     = $m
+        cursor_command        = $Command
+        cursor_model          = $m
+        selected_at           = (Get-Date).ToUniversalTime().ToString("o")
+        source                = $Source
+    }
+    $json = ($ordered | ConvertTo-Json -Depth 6)
+    $enc = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($path, $json + "`n", $enc)
+}
+
 function Write-Section {
     param([string]$Text)
     Write-Host ""
@@ -233,6 +257,7 @@ Write-Host "Project root: $ProjectRoot  Task: $TaskPath  Implementer (-CursorCom
 if (-not $SkipInitialCursor) {
     Clear-AiLoopRuntimeState
     Initialize-CursorSummaryForImplementation
+    Save-ImplementerStateAt -AiLoopRoot $AiLoop -Command $CursorCommand -Model $CursorModel -Source "ai_loop_task_first.ps1"
     Write-Section "STEP 1: IMPLEMENTER PASS"
     Assert-CommandExists -CommandName $CursorCommand
     $retryBody = @"

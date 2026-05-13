@@ -74,6 +74,7 @@ Do **not** include prior-roll history, full diffs, or multi-page narratives. Tar
 ## Git hygiene
 - Do not commit `.ai-loop/_debug/` content, `.tmp/`, `input/`, or `output/`. Use `git mv` for renames.
 - Do not commit secrets — see `docs/safety.md` for the recommended scan.
+- **`.ai-loop/implementer.json`** is runtime-only (gitignored): local wrapper paths and model IDs for resume — not durable project documentation.
 
 ## When in doubt
 Ask the user. Do not invent commands, paths, or behaviors not documented here or in the linked docs.

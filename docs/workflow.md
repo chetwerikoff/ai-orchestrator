@@ -85,11 +85,24 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_auto.ps1 `
 
 ## Continue
 
-Resume forwarding uses `scripts/continue_ai_loop.ps1`, which calls `ai_loop_auto.ps1 -Resume`. Optional `-CursorCommand` / `-CursorModel` are forwarded so the same implementer wrapper as in task-first can run fix passes after a manual stop.
+Resume forwarding uses `scripts/continue_ai_loop.ps1`, which calls `ai_loop_auto.ps1 -Resume`.
+
+**Persisted implementer:** After task-first or any auto loop run, the drivers write **`.ai-loop/implementer.json`** (runtime; gitignored) with the effective wrapper path and model. On resume, if you **omit** `-CursorCommand` / `-CursorModel`, `ai_loop_auto.ps1 -Resume` reloads those values so an OpenCode/Qwen task does not silently fall back to the default Cursor wrapper.
+
+**Explicit overrides:** Optional `-CursorCommand` / `-CursorModel` on `continue_ai_loop.ps1` are forwarded and always win over the persisted file; the file is then updated to match the effective selection.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\continue_ai_loop.ps1 `
   -CommitMessage "Continue feature"
+```
+
+Override example (same as task-first):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\continue_ai_loop.ps1 `
+  -CommitMessage "Continue feature" `
+  -CursorCommand ".\scripts\run_opencode_agent.ps1" `
+  -CursorModel "local-qwen-35b/qwen3-6-35b-a3b"
 ```
 
 ## Disable push
