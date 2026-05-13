@@ -56,6 +56,35 @@ function Write-Section {
     Write-Host "==============================`n$Text`n==============================" -ForegroundColor Cyan
 }
 
+function Get-ImplementerStepDisplayLabel {
+    <#
+    UX-only label for STEP 1 section headers from effective -CursorCommand / -CursorModel.
+    Qwen/OpenCode cues are evaluated before generic "agent" substring on the wrapper path.
+    #>
+    param(
+        [string]$Command,
+        [string]$Model
+    )
+    $cmdRaw = if ([string]::IsNullOrWhiteSpace($Command)) { "" } else { $Command.Trim() }
+    $modRaw = if ($null -eq $Model) { "" } else { [string]$Model }
+    $tail = if ([string]::IsNullOrWhiteSpace($cmdRaw)) { "" } else { Split-Path $cmdRaw -Leaf }
+    $hay = (($cmdRaw + "`n" + $tail).ToLowerInvariant())
+    $mod = $modRaw.ToLowerInvariant()
+    $qwenCue = (
+        $hay.Contains("run_opencode_agent.ps1") -or
+        $hay.Contains("opencode") -or
+        $mod.Contains("qwen")
+    )
+    if ($qwenCue) { return "QWEN" }
+    $cursorCue = (
+        $hay.Contains("run_cursor_agent.ps1") -or
+        $hay.Contains("cursor") -or
+        $hay.Contains("agent")
+    )
+    if ($cursorCue) { return "CURSOR" }
+    return "IMPLEMENTER"
+}
+
 function Assert-FileExists {
     param([string]$Path, [string]$Message)
     if (-not (Test-Path $Path)) { throw "$Message Path: $Path" }
@@ -258,7 +287,11 @@ if (-not $SkipInitialCursor) {
     Clear-AiLoopRuntimeState
     Initialize-CursorSummaryForImplementation
     Save-ImplementerStateAt -AiLoopRoot $AiLoop -Command $CursorCommand -Model $CursorModel -Source "ai_loop_task_first.ps1"
-    Write-Section "STEP 1: IMPLEMENTER PASS"
+    $step1Label = Get-ImplementerStepDisplayLabel -Command $CursorCommand -Model $CursorModel
+    Write-Section "STEP 1: $step1Label IMPLEMENTATION"
+    if (-not [string]::IsNullOrWhiteSpace([string]$CursorModel)) {
+        Write-Host "Model: $CursorModel"
+    }
     Assert-CommandExists -CommandName $CursorCommand
     $retryBody = @"
 The previous implementer pass produced no meaningful implementation delta in the working tree.

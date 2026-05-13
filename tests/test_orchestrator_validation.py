@@ -451,3 +451,38 @@ def test_install_into_project_copies_opencode_json_without_clobber() -> None:
     assert "$OverwriteOpencodeConfig" in text
     assert "$opencodeExisted" in text
     assert "Left existing opencode.json unchanged" in text
+
+
+def test_task_first_has_implementer_step_display_label_helper() -> None:
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "function Get-ImplementerStepDisplayLabel" in text
+
+
+def test_task_first_implementer_label_prefers_qwen_when_opencode_or_model() -> None:
+    """Qwen cues must precede generic 'agent' substring on wrappers like run_opencode_agent.ps1."""
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    fn = text.index("function Get-ImplementerStepDisplayLabel")
+    end = text.index("function ", fn + 1)
+    blob = text[fn:end]
+    assert "run_opencode_agent.ps1" in blob
+    assert '.Contains("opencode")' in blob
+    assert "qwen" in blob.lower()
+    q_sig = blob.index("return \"QWEN\"")
+    c_sig = blob.index("return \"CURSOR\"")
+    assert q_sig < c_sig
+
+
+def test_task_first_implementer_label_maps_cursor_wrapper_cues() -> None:
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    fn = text.index("function Get-ImplementerStepDisplayLabel")
+    end = text.index("function ", fn + 1)
+    blob = text[fn:end]
+    assert "run_cursor_agent.ps1" in blob
+    assert "cursor" in blob.lower()
+
+
+def test_task_first_step_one_heading_derives_label_not_implementer_pass() -> None:
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "STEP 1: IMPLEMENTER PASS" not in text
+    assert "Get-ImplementerStepDisplayLabel" in text
+    assert 'Write-Section "STEP 1: $step1Label IMPLEMENTATION"' in text

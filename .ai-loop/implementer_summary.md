@@ -1,25 +1,43 @@
-﻿# Implementer summary
+﻿# Implementer summary — Dynamic STEP 1 headers
 
 ## Changed files
 
-- `scripts/ai_loop_auto.ps1` — **`Apply-ResumeImplementerState`**: if `-Resume` and `-CursorCommand` is explicitly passed (`$PSBoundParameters`), return immediately (no `implementer.json` read, no persisted model merge, no missing-file warning). Persisted command/model loading unchanged when `-CursorCommand` is omitted (model from file only when `-CursorModel` is not explicit and command bundle is usable).
-- `tests/test_orchestrator_validation.py` — `test_ai_loop_auto_resume_explicit_cursor_command_skips_persisted_implementer_json` guards ordering so explicit command gates before missing-file warning and before `Read-ImplementerStateObject`.
-- `.ai-loop/project_summary.md` — durable resume / `implementer.json` precedence notes; pytest count 51.
+- `scripts/ai_loop_task_first.ps1` — added `Get-ImplementerStepDisplayLabel`; STEP 1 uses `STEP 1: <label> IMPLEMENTATION`; optional `Model: …` line when `-CursorModel` non-empty.
+- `tests/test_orchestrator_validation.py` — asserts helper presence, Qwen-before-Cursor ordering, Cursor cues, and no legacy `STEP 1: IMPLEMENTER PASS`.
+- `.ai-loop/project_summary.md` — noted UX-only STEP 1 label mapping; test count 55.
 
 ## Tests
 
-- `python -m pytest -q` — **51 passed**.
-- Task `ParseFile` one-liners from `.ai-loop/task.md` — not run separately here; **`test_powershell_orchestrator_scripts_parse_cleanly`** exercises the same `Parser::ParseFile` path during pytest.
+`python -m pytest -q`: **55 passed**.
 
-## Implementation summary
+Recommended locally per AGENTS.md:
 
-- Fixes stale OpenCode/Qwen model being applied when resuming with a **new** explicit wrapper but no `-CursorModel`: persisted model is no longer merged on that path, and `Save-ImplementerState` writes the effective empty model with the new command instead of re-saving the old model.
-- Suppresses misleading **WARNING** about missing `implementer.json` when the operator already supplied `-CursorCommand` (state file irrelevant for selection).
+```powershell
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"
+```
 
-## Task-specific live runs
+(Not re-invoked in this session.)
 
-- Full `ai_loop_auto.ps1` / Codex loop not executed (requires live repo state and CLIs).
+## Display label mapping (`Get-ImplementerStepDisplayLabel`)
+
+Case-insensitive checks on wrapper path + leaf plus `-CursorModel`:
+
+1. **QWEN** if wrapper/path/name matches `run_opencode_agent.ps1` substring or contains `opencode`, or model contains `qwen`.
+2. Else **CURSOR** if wrapper/path/name matches `run_cursor_agent.ps1` or contains `cursor` or `agent`.
+3. Else **IMPLEMENTER**.
+
+OpenCode/Qwen is evaluated before the generic `agent` substring so `run_opencode_agent.ps1` stays **QWEN**.
+
+## Fallback
+
+Unknown wrappers with none of the above substrings → **STEP 1: IMPLEMENTER IMPLEMENTATION**.
+
+## Skipped
+
+- `scripts/ai_loop_auto.ps1` unchanged — no `STEP 1: IMPLEMENTER PASS`-style header there; fix-pass messaging already generic.
 
 ## Remaining risks
 
-- `-CursorCommand` with an explicit **empty** string still counts as bound and skips persisted merge (same as other explicit passes); operators normally use `continue_ai_loop.ps1`, which omits the argument when blank.
+- Heuristic labels: any path containing `cursor`/`agent`/`opencode`/`qwen` follows the rules above; unrelated filenames could show **CURSOR** incorrectly.
+- Empty `-CursorCommand` defaults are not passed into the helper from task-first (param default is always non-empty in normal use).
