@@ -11,7 +11,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS = _ROOT / "scripts"
-_PS1_TARGETS = ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1")
+_PS1_TARGETS = ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1", "build_repo_map.ps1")
 _SAFEADD_DEFAULT_RE = re.compile(
     r"\[string\]\$SafeAddPaths\s*=\s*\"([^\"]+)\"",
     re.MULTILINE,
@@ -512,3 +512,37 @@ def test_task_first_step_one_heading_derives_label_not_implementer_pass() -> Non
     assert "STEP 1: IMPLEMENTER PASS" not in text
     assert "Get-ImplementerStepDisplayLabel" in text
     assert 'Write-Section "STEP 1: $step1Label IMPLEMENTATION"' in text
+
+
+def test_build_repo_map_is_deterministic() -> None:
+    """C01: build_repo_map.ps1 must produce byte-identical output on a fixed tree."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    script = _SCRIPTS / "build_repo_map.ps1"
+    assert script.is_file()
+    out = _ROOT / ".ai-loop" / "repo_map.md"
+
+    def _run() -> int:
+        return subprocess.run(
+            [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script.resolve())],
+            cwd=str(_ROOT),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        ).returncode
+
+    assert _run() == 0, "build_repo_map.ps1 failed on first run"
+    first = out.read_bytes()
+    assert _run() == 0, "build_repo_map.ps1 failed on second run"
+    second = out.read_bytes()
+    assert first == second
+
+
+def test_repo_map_excludes_archive_and_debug() -> None:
+    """C01: generated repo_map.md must not list docs/archive/ or .ai-loop/_debug/ entries."""
+    text = (_ROOT / ".ai-loop" / "repo_map.md").read_text(encoding="utf-8")
+    assert "docs/archive/" not in text
+    assert ".ai-loop/_debug/" not in text

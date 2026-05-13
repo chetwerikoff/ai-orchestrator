@@ -1,22 +1,33 @@
-# Implementer summary
+# Implementer summary (C01 review fix)
 
 ## Changed files
 
-- `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/workflow.md`, `.ai-loop/project_summary.md` - active docs now use `ai-orchestrator`.
-- `scripts/install_into_project.ps1` - install banner now says `AI orchestrator`.
-- `C:\Users\che\Documents\Projects\H2N_parser\h2n-range-extractor` - installed script copy refreshed; parser `AGENTS.md` updated to `ai-orchestrator`.
+- **`scripts/build_repo_map.ps1`:** bullet lines now use single backticks around paths (`path`) instead of doubled backticks.
+- **`.ai-loop/repo_map.md`:** regenerated after the formatter change (43 lines); **staged** with `git add` so it is captured for commit (not untracked-only).
+- **`tasks/context_audit/README.md`:** reverted to `HEAD` — out of scope for C01; removed from this change set.
+- **`.ai-loop/implementer_summary.md`:** UTF-8 **without BOM** (BOM stripped); this summary updated.
+
+## Task-specific commands
+
+- `powershell -ExecutionPolicy Bypass -File .\scripts\build_repo_map.ps1` — success.
+- PowerShell AST parse on `scripts\build_repo_map.ps1` — success (`ParseFile` exit 0).
+- `Select-String -Path scripts\ai_loop_auto.ps1,scripts\ai_loop_task_first.ps1,scripts\continue_ai_loop.ps1,docs\safety.md -Pattern "\.ai-loop/repo_map\.md"` — **4** matches.
+- `Select-String -Path AGENTS.md -Pattern "^## (Retrieval policy|Task size policy)$"` — **2** matches.
 
 ## Tests
 
-- `python -m pytest -q` -> 57 passed, 1 pytest cache warning.
-- PowerShell parser checks passed for `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, `continue_ai_loop.ps1`, and `run_opencode_agent.ps1` in both orchestrator and parser worktrees.
+- `python -m pytest -q` — **59 passed**, no regressions.
 
-## Implementation summary
+## Implementation (short)
 
-- Replaced active repo-name references with `ai-orchestrator` / `AI Orchestrator`.
-- Left `docs/archive/` untouched as historical material.
-- Verified active orchestrator docs/scripts/templates no longer contain the old project name.
+- Codex C01 review: path column in repo map uses standard Markdown inline code (single backticks); regenerated artifact and staged `repo_map`/generator for commit alongside SafeAddPaths parity already in drivers.
+- Dropped unrelated `tasks/context_audit/README.md` edits via `git checkout HEAD --` that file.
+
+## Skipped
+
+- None.
 
 ## Remaining risks
 
-- Historical `docs/archive/` and old `.ai-loop/test_output*.txt` still mention the previous path/name by design; they are not active docs.
+- If a task-first run still held an older `SafeAddPaths` in memory, confirm the four-driver `Select-String` check on the saved files (done this run: 4 matches).
+- Long `.ps1` fallbacks to the first `#` line and 250-line warning behavior are unchanged from prior C01 work.

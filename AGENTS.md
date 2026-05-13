@@ -13,7 +13,7 @@ You may edit:
 - `templates/` — files copied into target projects by `install_into_project.ps1`
 - `docs/` — architecture, decisions, safety, workflow (**not** `docs/archive/`)
 - `README.md`, `AGENTS.md`, `.gitignore`, `pytest.ini`, `requirements.txt`
-- `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, `.ai-loop/project_summary.md`
+- `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, `.ai-loop/project_summary.md`, `.ai-loop/repo_map.md`
 - `tasks/` — queued task specs
 
 Never edit:
@@ -28,10 +28,11 @@ When loading context, read in this order and stop when you have enough:
 
 1. `.ai-loop/task.md` — current task contract (always)
 2. `.ai-loop/project_summary.md` — durable orientation (always)
-3. `AGENTS.md` — this file (always, once)
-4. `.ai-loop/implementer_summary.md` — previous iteration only (if N > 1)
-5. `docs/architecture.md` — only if the task is architecture-related
-6. `docs/decisions.md`, `docs/workflow.md`, `docs/safety.md` — only when directly relevant
+3. `.ai-loop/repo_map.md` — deterministic file index (always)
+4. `AGENTS.md` — this file (always, once)
+5. `.ai-loop/implementer_summary.md` — previous iteration only (if N > 1)
+6. `docs/architecture.md` — only if the task is architecture-related
+7. `docs/decisions.md`, `docs/workflow.md`, `docs/safety.md` — only when directly relevant
 
 Do not read by default:
 
@@ -48,10 +49,11 @@ PowerShell parse check:
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\continue_ai_loop.ps1', [ref]$null, [ref]$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\build_repo_map.ps1', [ref]$null, [ref]$null)"
 ```
 
 ## Safe paths (committed by orchestrator)
-The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
+The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
 
 ## Templates contract
 When you add or remove a file in `templates/`, also check `scripts/install_into_project.ps1` so auto-copied target files stay correct.
@@ -75,6 +77,17 @@ Do **not** include prior-roll history, full diffs, or multi-page narratives. Tar
 - Do not commit `.ai-loop/_debug/` content, `.tmp/`, `input/`, or `output/`. Use `git mv` for renames.
 - Do not commit secrets — see `docs/safety.md` for the recommended scan.
 - **`.ai-loop/implementer.json`** is runtime-only (gitignored): local wrapper paths and model IDs for resume — not durable project documentation.
+
+## Retrieval policy
+
+- Prefer `rg` (ripgrep) and `Read` for code navigation. Use `.ai-loop/repo_map.md` for layout.
+- Do not propose a vector index, embedding store, or AST symbol index for code in this repo. They have been evaluated and declined (see `tasks/claude_ai_orcestrator_context_plan_report.md` §6, §13).
+- For narrative history (`docs/archive/`, future `.ai-loop/archive/rolls/`), RAG may earn its place later—not now.
+
+## Task size policy
+
+- Prefer tasks that touch ≤80 lines. Split larger work into ordered subtasks (see `tasks/context_audit/` for examples).
+- If a task naturally exceeds that budget, flag it in the task spec rather than silently growing the diff.
 
 ## When in doubt
 Ask the user. Do not invent commands, paths, or behaviors not documented here or in the linked docs.

@@ -27,6 +27,7 @@ setup.cfg
 .ai-loop/task.md
 .ai-loop/implementer_summary.md
 .ai-loop/project_summary.md
+.ai-loop/repo_map.md
 ```
 
 Runtime artifacts are not staged.
