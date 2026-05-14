@@ -12,6 +12,25 @@ param(
     [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md"
 )
 $ErrorActionPreference = "Stop"
+$STABLE_PREAMBLE = @"
+You are the IMPLEMENTER in a local AI development loop.
+
+Your job:
+- Read and execute the task below.
+- Modify the repository files as needed.
+- Do NOT do a review-only pass.
+- Do NOT hand the task to Codex.
+- Implement the task directly.
+- Prefer small, focused changes.
+- Run relevant tests if practical.
+- Leave the repository in a state ready for Codex review.
+
+Important:
+- The review/fix loop will be started after you finish.
+- If something is impossible, write a clear note into .ai-loop/implementer_result.md.
+- Otherwise, edit the codebase directly.
+- You MUST update .ai-loop/implementer_summary.md (a fresh stub was written at run start): list changed files, test results, implementation summary, task-specific command output or why it was skipped, and remaining risks.
+"@
 $ProjectRoot = (Resolve-Path ".").Path
 $AiLoop = Join-Path $ProjectRoot ".ai-loop"
 $ResultPathRelative = ".ai-loop/implementer_result.md"
@@ -177,31 +196,39 @@ DETAIL: Implementer ran twice with no working-tree path delta (after excluding o
     $body | Set-Content -Path (Join-Path $AiLoop "final_status.md") -Encoding UTF8
 }
 
+function Get-TaskScopeBlocks {
+    param([string]$TaskFile)
+    $text = Get-Content -LiteralPath $TaskFile -Raw -Encoding UTF8
+    function _section($name) {
+        $pattern = "(?ms)^##\s+$([regex]::Escape($name))\s*$\r?\n(.*?)(?=^##\s+|\z)"
+        $m = [regex]::Match($text, $pattern)
+        if ($m.Success) { return $m.Groups[1].Value.Trim() }
+        return $null
+    }
+    return [PSCustomObject]@{
+        InScope    = _section "Files in scope"
+        OutOfScope = _section "Files out of scope"
+    }
+}
+
 function Invoke-ImplementerImplementation {
     param([string]$TaskFile, [string]$CommandName, [string]$Model, [string]$ExtraInstructions = "")
-    $taskText = Get-Content $TaskFile -Raw
-    $prompt = @"
-You are the IMPLEMENTER in a local AI development loop.
+    $scope = Get-TaskScopeBlocks -TaskFile $TaskFile
+    $taskText = Get-Content -LiteralPath $TaskFile -Raw -Encoding UTF8
 
-Your job:
-- Read and execute the task below.
-- Modify the repository files as needed.
-- Do NOT do a review-only pass.
-- Do NOT hand the task to Codex.
-- Implement the task directly.
-- Prefer small, focused changes.
-- Run relevant tests if practical.
-- Leave the repository in a state ready for Codex review.
+    $scopeBlock = ""
+    if ($scope.InScope) {
+        $scopeBlock += "FILES IN SCOPE:`n$($scope.InScope)`n`n"
+    } else {
+        Write-Warning "task.md is missing '## Files in scope' section. Continuing without scope contract."
+    }
+    if ($scope.OutOfScope) {
+        $scopeBlock += "FILES OUT OF SCOPE:`n$($scope.OutOfScope)`n`n"
+    } else {
+        Write-Warning "task.md is missing '## Files out of scope' section. Continuing without scope contract."
+    }
 
-Important:
-- The review/fix loop will be started after you finish.
-- If something is impossible, write a clear note into .ai-loop/implementer_result.md.
-- Otherwise, edit the codebase directly.
-- You MUST update .ai-loop/implementer_summary.md (a fresh stub was written at run start): list changed files, test results, implementation summary, task-specific command output or why it was skipped, and remaining risks.
-
-TASK:
-$taskText
-"@
+    $prompt = $STABLE_PREAMBLE + "`n`n" + $scopeBlock + "TASK:`n" + $taskText
     if (-not [string]::IsNullOrWhiteSpace($ExtraInstructions)) {
         $prompt += "`n`n$($ExtraInstructions.Trim())`n"
     }

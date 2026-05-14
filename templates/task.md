@@ -1,3 +1,14 @@
+<!--
+HARD RULES for authors filling this template:
+1. Follow AGENTS.md working scope and task size policy.
+2. Do not ask the implementer to commit/push; the orchestrator handles git.
+3. The implementer must update `.ai-loop/implementer_summary.md`; do not paste this full task there.
+4. List concrete verification commands (tests, parser checks).
+5. Use `.ai-loop/project_summary.md` only for durable project-level deltas, not a task log.
+6. ## Files in scope and ## Files out of scope are REQUIRED sections.
+   List concrete relative paths or directory globs. Do not leave them empty
+   and do not write "the whole repo".
+-->
 # Task: <task name>
 
 ## Project context
@@ -27,11 +38,20 @@ Allowed:
 Not allowed:
 - ...
 
-## Files likely to change
+## Files in scope
+
+Paths the implementer MAY edit. List concrete relative paths or directory globs.
 
 - `src/...`
 - `tests/...`
-- `README.md`
+
+## Files out of scope
+
+Paths the implementer MUST NOT edit (in addition to AGENTS.md "Never edit").
+
+- `docs/archive/**`
+- `.ai-loop/_debug/**`
+- `ai_loop.py` (unless task explicitly authorizes)
 
 ## Required behavior
 

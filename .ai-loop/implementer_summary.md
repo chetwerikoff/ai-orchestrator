@@ -1,33 +1,42 @@
-# Implementer summary (C01 review fix)
+﻿# Implementer summary — C02
 
-## Changed files
+## Changed files (C02)
 
-- **`scripts/build_repo_map.ps1`:** bullet lines now use single backticks around paths (`path`) instead of doubled backticks.
-- **`.ai-loop/repo_map.md`:** regenerated after the formatter change (43 lines); **staged** with `git add` so it is captured for commit (not untracked-only).
-- **`tasks/context_audit/README.md`:** reverted to `HEAD` — out of scope for C01; removed from this change set.
-- **`.ai-loop/implementer_summary.md`:** UTF-8 **without BOM** (BOM stripped); this summary updated.
+- `scripts/ai_loop_task_first.ps1` — `$STABLE_PREAMBLE`, `Get-TaskScopeBlocks`, prompt = preamble + `FILES IN SCOPE:` / `FILES OUT OF SCOPE:` + full `task.md` after `TASK:`.
+- `templates/task.md` — required `## Files in scope` / `## Files out of scope` sections and hard-rules note.
+- `tests/test_orchestrator_validation.py` — C02 coverage (scope blocks in implementer prompt; existing harness dot-sources task-first helpers / ParseFile checks).
+- `.ai-loop/project_summary.md` — design note for implementer prompt assembly.
+- `.ai-loop/task.md` — working task spec under the C02 contract.
 
-## Task-specific commands
+## This pass (next-implementer prompt)
 
-- `powershell -ExecutionPolicy Bypass -File .\scripts\build_repo_map.ps1` — success.
-- PowerShell AST parse on `scripts\build_repo_map.ps1` — success (`ParseFile` exit 0).
-- `Select-String -Path scripts\ai_loop_auto.ps1,scripts\ai_loop_task_first.ps1,scripts\continue_ai_loop.ps1,docs\safety.md -Pattern "\.ai-loop/repo_map\.md"` — **4** matches.
-- `Select-String -Path AGENTS.md -Pattern "^## (Retrieval policy|Task size policy)$"` — **2** matches.
+- `.ai-loop/implementer_summary.md` — replaced stale cleanup/repo_map narrative with this C02-focused summary.
+- `.ai-loop/repo_map.md` — `git restore --source=HEAD --staged --worktree` so it is no longer dirty; **no** committed change to map content.
 
 ## Tests
 
-- `python -m pytest -q` — **59 passed**, no regressions.
+- `python -m pytest -q` → **60 passed** (~1.4s).
 
-## Implementation (short)
+## PowerShell parser check (`scripts\ai_loop_task_first.ps1`)
 
-- Codex C01 review: path column in repo map uses standard Markdown inline code (single backticks); regenerated artifact and staged `repo_map`/generator for commit alongside SafeAddPaths parity already in drivers.
-- Dropped unrelated `tasks/context_audit/README.md` edits via `git checkout HEAD --` that file.
+- Covered by `tests/test_orchestrator_validation.py` (ParseFile / parse-cleanly tests); passes with the suite above. Manual check per `AGENTS.md`:
+
+  `powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"`
+
+## Implementer prompt ordering
+
+- As built in `Invoke-ImplementerImplementation`: **`$STABLE_PREAMBLE`**, then **`FILES IN SCOPE:`** (when present in `task.md`), then **`FILES OUT OF SCOPE:`**, then **`TASK:`** plus full `task.md` body; written to `.ai-loop/_debug/implementer_prompt.md` when task-first runs the implementer.
+
+## Task-specific command
+
+- `powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPush` — **not run** on this pass (would invoke the live implementer/review chain; scope here was documentation + repo_map hygiene only). Behavior is exercised by unit tests.
 
 ## Skipped
 
-- None.
+- Live task-first / implementer run — see above.
+- Regenerating `.ai-loop/repo_map.md` — out of scope for C02; file reset to `HEAD` only.
 
 ## Remaining risks
 
-- If a task-first run still held an older `SafeAddPaths` in memory, confirm the four-driver `Select-String` check on the saved files (done this run: 4 matches).
-- Long `.ps1` fallbacks to the first `#` line and 250-line warning behavior are unchanged from prior C01 work.
+- Legacy `task.md` files without scope sections still run with `Write-Warning` only (soft contract).
+- Prompt byte-stability for KV-cache applies to the static preamble; the scope blocks and full `task.md` body still vary per task.

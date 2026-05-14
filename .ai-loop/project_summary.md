@@ -12,7 +12,7 @@
 - `scripts/continue_ai_loop.ps1` -- resume wrapper for `ai_loop_auto.ps1 -Resume`; forwards explicit `-CursorCommand` / `-CursorModel` overrides.
 - `scripts/run_cursor_agent.ps1` and `scripts/run_opencode_agent.ps1` -- implementer wrappers; parameter names remain `-CursorCommand` / `-CursorModel` for compatibility.
 - `scripts/install_into_project.ps1` -- copies drivers, wrappers, templates, and `opencode.json` into target projects without clobbering existing task/project summary unless requested.
-- `tests/test_orchestrator_validation.py` -- parser smoke tests, safe-path parity, task-first delta semantics, implementer-state resume behavior, prompt parsing, dynamic step-label checks, and repo map determinism checks.
+- `tests/test_orchestrator_validation.py` -- parser smoke tests, safe-path parity, task-first delta semantics, implementer-state resume behavior, prompt parsing (C02 uses a dot-sourced PowerShell harness so `$STABLE_PREAMBLE` / `Get-TaskScopeBlocks` are not reimplemented in Python), dynamic step-label checks, and repo map determinism checks.
 - `.ai-loop/repo_map.md` is a committed, script-generated file index. Regenerate via `scripts/build_repo_map.ps1` after structural changes; deterministic output is pinned by tests.
 - `templates/` -- target-project scaffolds, including `implementer_summary_template.md`, `codex_review_prompt.md`, `project_summary.md`, `task.md`, and `opencode.json`.
 
@@ -24,6 +24,7 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 
 ## Important Design Decisions
 
+- Implementer prompt = `$STABLE_PREAMBLE` + `FILES IN SCOPE:` / `FILES OUT OF SCOPE:` blocks parsed from `task.md` + `TASK:` body. Required sections in `templates/task.md`; missing sections produce a warning, not a failure.
 - Active PowerShell artifacts are implementer-neutral: `implementer_summary.md`, `next_implementer_prompt.md`, `implementer_result.md`, `FIX_PROMPT_FOR_IMPLEMENTER`, and `_debug/implementer_*`.
 - Legacy Cursor-named alias artifacts are removed from the active PowerShell contract; summary, next-fix prompt, fix label, result marker, and debug outputs use implementer-neutral names.
 - `run_cursor_agent.ps1` remains because it is the real Cursor wrapper, not a legacy alias. `-CursorCommand` / `-CursorModel` remain as compatibility parameter names.
@@ -39,16 +40,17 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 
 ## Current Stage
 
-Reviewable: PowerShell loop supports persisted implementer selection, dynamic STEP 1 labels (`CURSOR`, `QWEN`, `IMPLEMENTER`), OpenCode/Qwen wrapper execution, and implementer-neutral active artifacts. `python -m pytest -q` should pass before committing any further change.
+Reviewable: C02 lands file-scope blocks in `templates/task.md` and injects them into the task-first implementer prompt after `$STABLE_PREAMBLE` and before `TASK:`. PowerShell loop still supports persisted implementer selection, dynamic STEP 1 labels (`CURSOR`, `QWEN`, `IMPLEMENTER`), OpenCode/Qwen wrapper execution, and implementer-neutral artifacts. `python -m pytest -q` should pass before committing any further change.
 
 ## Last Completed Task
 
-OpenCode/Qwen integration and neutral implementer contract were introduced while preserving Cursor as the default production implementer through Phase 1.
+C02 — required `## Files in scope` / `## Files out of scope` in the task template, `$STABLE_PREAMBLE` + scope blocks + `TASK:` prompt assembly in `ai_loop_task_first.ps1`, and tests/harness updates. Previously: OpenCode/Qwen integration and neutral implementer contract (Phase 1).
 
 ## Next Likely Steps
 
 1. Run `python -m pytest -q` and PowerShell parser checks after each script contract change.
 2. Use task-first for new work; use `continue_ai_loop.ps1` for interrupted review/fix loops so persisted implementer state can be reused.
+3. Optional: C03/C04 follow-ups (Codex prompt, Qwen scout) per queued task specs.
 
 ## Notes For Future AI Sessions
 

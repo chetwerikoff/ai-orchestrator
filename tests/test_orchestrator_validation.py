@@ -19,6 +19,23 @@ _SAFEADD_DEFAULT_RE = re.compile(
 
 RESULT_NORM = ".ai-loop/implementer_result.md"
 
+
+def _extract_implementer_prompt_assembly_from_task_first(ps1_text: str) -> str:
+    """Exact `Invoke-ImplementerImplementation` slice that builds `$prompt` (C02 contract)."""
+    lines = ps1_text.splitlines()
+    start = next(
+        i
+        for i, line in enumerate(lines)
+        if "$scope = Get-TaskScopeBlocks -TaskFile $TaskFile" in line
+    )
+    end = next(
+        i
+        for i, line in enumerate(lines)
+        if "$prompt = $STABLE_PREAMBLE +" in line and "$taskText" in line
+    )
+    return "\n".join(lines[start : end + 1])
+
+
 # Mirrors `Extract-FixPromptFromFile` in scripts/ai_loop_auto.ps1 — keep alternation order in sync.
 _FIX_PROMPT_LABEL_RE = re.compile(
     r"FIX_PROMPT_FOR_IMPLEMENTER:\s*"
@@ -87,6 +104,61 @@ def test_claude_final_review_prompt_template_removed() -> None:
 
 def _powershell_exe() -> str | None:
     return shutil.which("pwsh") or shutil.which("powershell")
+
+
+def _powershell_build_implementer_prompt_from_task_first_script(
+    repo_root: Path, work_dir: Path, task_md_body: str
+) -> str:
+    """Load the real `$STABLE_PREAMBLE` / `Get-TaskScopeBlocks` and run the same assembly lines as the script."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    script_text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    marker = 'Write-Section "AI LOOP TASK-FIRST START"'
+    assert marker in script_text, "ai_loop_task_first.ps1 must keep the task-first entry marker for harness loading"
+    assembly = _extract_implementer_prompt_assembly_from_task_first(script_text)
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    ai_loop = work_dir / ".ai-loop"
+    ai_loop.mkdir(parents=True, exist_ok=True)
+    task_file = ai_loop / "task.md"
+    task_file.write_text(task_md_body, encoding="utf-8")
+
+    assembly_path = work_dir / "_orch_prompt_assembly.ps1"
+    assembly_path.write_text(assembly + "\n", encoding="utf-8")
+
+    out_path = work_dir / "_orch_prompt_out.txt"
+    harness_path = work_dir / "_orch_harness_build_prompt.ps1"
+    harness_body = rf"""
+$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath $PSScriptRoot
+$src = [System.IO.File]::ReadAllText([System.IO.Path]::Combine($args[0], 'scripts', 'ai_loop_task_first.ps1'))
+$marker = 'Write-Section "AI LOOP TASK-FIRST START"'
+$idx = $src.IndexOf($marker)
+if ($idx -lt 0) {{ throw "Marker not found: $marker" }}
+$head = $src.Substring(0, $idx)
+. ([scriptblock]::Create($head))
+$TaskFile = [System.IO.Path]::Combine($ProjectRoot, '.ai-loop', 'task.md')
+. (Join-Path $PSScriptRoot '_orch_prompt_assembly.ps1')
+$enc = New-Object System.Text.UTF8Encoding $false
+[System.IO.File]::WriteAllText([System.IO.Path]::Combine($PSScriptRoot, '_orch_prompt_out.txt'), $prompt, $enc)
+"""
+    harness_path.write_text(harness_body.strip() + "\n", encoding="utf-8")
+
+    proc = subprocess.run(
+        [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness_path), str(repo_root.resolve())],
+        cwd=str(work_dir),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+    )
+    detail = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, f"PowerShell harness failed ({proc.returncode}):\n{detail}"
+
+    return out_path.read_text(encoding="utf-8")
 
 
 def test_powershell_orchestrator_scripts_parse_cleanly() -> None:
@@ -326,6 +398,50 @@ def test_task_first_writes_implementer_state_file() -> None:
     assert "Save-ImplementerStateAt" in text
     assert "implementer.json" in text
     assert "ai_loop_task_first.ps1" in text
+
+
+def test_implementer_prompt_surfaces_scope_blocks(tmp_path: Path) -> None:
+    """C02: Real PowerShell prelude plus the same `$prompt` assembly as `Invoke-ImplementerImplementation`."""
+    script_text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert script_text.count("STABLE_PREAMBLE") + script_text.count("Get-TaskScopeBlocks") >= 4
+
+    impl_start = script_text.index("function Invoke-ImplementerImplementation")
+    impl_end = script_text.index("function Invoke-AutoReviewLoop")
+    impl_body = script_text[impl_start:impl_end]
+    assert "Set-Content -Path $promptPath -Value $prompt" in impl_body
+    assert (
+        '$prompt = $STABLE_PREAMBLE + "`n`n" + $scopeBlock + "TASK:`n" + $taskText' in impl_body
+    )
+
+    assembly_src = _extract_implementer_prompt_assembly_from_task_first(script_text)
+    assert "$scope = Get-TaskScopeBlocks -TaskFile $TaskFile" in assembly_src
+    assert "$prompt = $STABLE_PREAMBLE +" in assembly_src
+
+    task_body = (
+        "## Files in scope\n\n- `scripts/example.ps1`\n\n"
+        "## Files out of scope\n\n- `docs/archive/**`\n\n"
+        "## Goal\n\nExample.\n"
+    )
+    prompt = _powershell_build_implementer_prompt_from_task_first_script(_ROOT, tmp_path / "synth", task_body)
+
+    idx_in = prompt.index("FILES IN SCOPE:")
+    idx_out = prompt.index("FILES OUT OF SCOPE:")
+    idx_task = prompt.index("TASK:\n")
+    assert idx_in < idx_out < idx_task
+
+    m_pre = re.search(r"\$STABLE_PREAMBLE\s*=\s*@\"\r?\n([\s\S]*?)\r?\n\"@", script_text)
+    assert m_pre is not None
+    preamble_body = m_pre.group(1)
+    assert prompt.lstrip("\ufeff").startswith(preamble_body + "\n\n")
+
+    real_task = (_ROOT / ".ai-loop" / "task.md").read_text(encoding="utf-8")
+    real_prompt = _powershell_build_implementer_prompt_from_task_first_script(_ROOT, tmp_path / "real", real_task)
+    assert "FILES IN SCOPE:" in real_prompt and "FILES OUT OF SCOPE:" in real_prompt
+
+    tmpl = (_ROOT / "templates" / "task.md").read_text(encoding="utf-8")
+    tmpl_lines = tmpl.splitlines()
+    assert "## Files in scope" in tmpl_lines
+    assert "## Files out of scope" in tmpl_lines
 
 
 def test_ai_loop_auto_resume_merges_persisted_implementer_state() -> None:
