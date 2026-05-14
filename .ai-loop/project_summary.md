@@ -11,11 +11,12 @@
 - `scripts/ai_loop_auto.ps1` — test/diff capture, Codex review, fix-loop, final test gate, safe staging, commit/push. Codex instructions use a single-quoted here-string so fenced JSON survives for `codex exec` and `Extract-FixPromptFromFile`. Optional `-WithWrapUp` (DD-023) runs `scripts/wrap_up_session.ps1` post-pass toward `.ai-loop/_debug/session_draft.md` without affecting exit codes when wrap-up errs.
 - `scripts/continue_ai_loop.ps1` -- resume wrapper for `ai_loop_auto.ps1 -Resume`; forwards explicit `-CursorCommand`, `-CursorModel`, and `-WithWrapUp`.
 - `scripts/run_cursor_agent.ps1` and `scripts/run_opencode_agent.ps1` -- implementer wrappers; parameter names remain `-CursorCommand` / `-CursorModel` for compatibility.
-- `scripts/run_scout_pass.ps1` -- optional read-only scout pre-pass for `-WithScout` (DD-022); writes gitignored `.ai-loop/_debug/scout_*` artifacts only.
+- `scripts/run_opencode_scout.ps1` -- OpenCode scout role wrapper (same stdin/`opencode run` flow as `run_opencode_agent.ps1` but SCOUT framing so scout instructions are not overridden by the implementer message).
+- `scripts/run_scout_pass.ps1` -- optional read-only scout pre-pass for `-WithScout` (DD-022); writes gitignored `.ai-loop/_debug/scout_*` artifacts only. When `-CommandName` points at `run_opencode_agent.ps1`, the pass auto-substitutes `run_opencode_scout.ps1` beside this script to avoid role conflict; warns and falls back if the scout wrapper is missing. Short scout output (under 200 bytes) is treated as a non-fatal startup failure with a warning.
 - `tests/test_orchestrator_validation.py` — parser smoke tests, safe-path parity, task-first delta semantics, implementer-state resume behavior, prompt parsing (C02 uses a dot-sourced PowerShell harness so `$STABLE_PREAMBLE` / `Get-TaskScopeBlocks` are not reimplemented in Python), dynamic step-label checks, repo map determinism checks, Codex `Run-CodexReview`/template fenced-json assertions. Added wrap-up (`wrap_up_session.ps1`) plus manual promote (`promote_session.ps1`) checks for DD-023.
 - `.ai-loop/repo_map.md` is a committed, script-generated file index. `ai_loop_task_first.ps1` invokes `scripts/build_repo_map.ps1` automatically when the map is absent or stale (>1 h); regenerate manually after structural changes if you need immediate freshness; deterministic output is pinned by tests.
 - `templates/` -- target-project scaffolds, including `implementer_summary_template.md`, `codex_review_prompt.md`, `project_summary.md`, `task.md`, and `opencode.json`.
-- `scripts/install_into_project.ps1` -- copies orchestrator scripts (including `run_scout_pass.ps1` for DD-022 `-WithScout`, plus `wrap_up_session.ps1` and `promote_session.ps1` for DD-023) and `templates/` into a target project; when adding or removing files under `templates/`, update this script so installs stay complete (see AGENTS.md templates contract).
+- `scripts/install_into_project.ps1` -- copies orchestrator scripts (including `run_scout_pass.ps1` and `run_opencode_scout.ps1` for DD-022 `-WithScout`, plus `wrap_up_session.ps1` and `promote_session.ps1` for DD-023) and `templates/` into a target project; when adding or removing files under `templates/`, update this script so installs stay complete (see AGENTS.md templates contract).
 
 ## Current Pipeline / Workflow
 
@@ -44,11 +45,11 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 
 ## Current Stage
 
-Reviewable: C05 wrap-up / failures log (DD-023) — optional `-WithWrapUp` on the PowerShell drivers runs `scripts/wrap_up_session.ps1` after `PASS` (non-fatal); cross-session notes land in `.ai-loop/failures.md` when the developer runs `scripts/promote_session.ps1` manually; installer copies both scripts; emitted markdown uses U+2014 with PS-5.1-safe orchestrator sources (`[char]0x2014`). Keep `python -m pytest -q` green prior to merges.
+Reviewable: C06 OpenCode scout framing — `run_opencode_scout.ps1` provides SCOUT-role `opencode run` stdin/file attachment parity with `run_opencode_agent.ps1`; `run_scout_pass.ps1` substitutes it when `-CommandName` targets `run_opencode_agent.ps1`, warns on suspiciously short scout output (<200 bytes), and falls back gracefully if the scout wrapper is absent. Installer copies `run_opencode_scout.ps1` beside other orchestrator scripts. Keep `python -m pytest -q` green prior to merges.
 
 ## Last Completed Task
 
-C05 (DD-023): wrap-up draft path (`.ai-loop/_debug/session_draft.md`), seeded `failures.md` with rolling retention / archive rolls, `SafeAddPaths` updates, AGENTS.md iteration-≥2 read rule for `failures.md`, validation tests for wrap-up and promote scripts, Codex-gate hygiene — out-of-scope `tasks/context_audit/**` left unchanged from the tracked tree.
+C06: OpenCode scout wrapper (`scripts/run_opencode_scout.ps1`), `run_scout_pass.ps1` auto-substitute + short-output guard, installer copy line, and validation tests for scout message and scout-pass markers.
 
 ## Next Likely Steps
 

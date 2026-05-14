@@ -805,6 +805,20 @@ def test_install_into_project_copies_implementer_summary_template() -> None:
     assert not (_ROOT / "templates" / "cursor_summary_template.md").exists()
 
 
+def test_run_opencode_scout_has_scout_role_message() -> None:
+    script = Path("scripts/run_opencode_scout.ps1")
+    assert script.exists(), "scripts/run_opencode_scout.ps1 must exist"
+    content = script.read_text(encoding="utf-8")
+    assert "SCOUT" in content, "must contain SCOUT role message"
+    assert "IMPLEMENTER" not in content, "must not reuse IMPLEMENTER message"
+
+
+def test_run_scout_pass_has_auto_substitute_and_short_output_guard() -> None:
+    content = Path("scripts/run_scout_pass.ps1").read_text(encoding="utf-8")
+    assert "run_opencode_scout" in content, "missing auto-substitute for opencode_agent"
+    assert "200" in content, "missing short-output guard (< 200 bytes)"
+
+
 def test_install_into_project_copies_run_scout_pass_script() -> None:
     """Installer must ship run_scout_pass.ps1 so target projects can use -WithScout (DD-022)."""
     text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")

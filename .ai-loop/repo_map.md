@@ -28,7 +28,8 @@
 - `scripts/promote_session.ps1` — Draft snapshot destination: `.ai-loop/archive/rolls/` (timestamped filenames).
 - `scripts/run_cursor_agent.ps1` — Invoke the Cursor agent CLI (node.exe) directly, reading the prompt from stdin.
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
-- `scripts/run_scout_pass.ps1` — (no header summary)
+- `scripts/run_opencode_scout.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
+- `scripts/run_scout_pass.ps1` — Auto-swap opencode_agent -> opencode_scout to avoid IMPLEMENTER role conflict.
 - `scripts/wrap_up_session.ps1` — Writes `.ai-loop\_debug\session_draft.md` via read-only ingest of orchestrator artefacts (non-fatal).
 
 ## templates/

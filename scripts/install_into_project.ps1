@@ -20,6 +20,7 @@ Copy-Item (Join-Path $Root "scripts\ai_loop_task_first.ps1") (Join-Path $TargetS
 Copy-Item (Join-Path $Root "scripts\continue_ai_loop.ps1") (Join-Path $TargetScripts "continue_ai_loop.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\run_cursor_agent.ps1") (Join-Path $TargetScripts "run_cursor_agent.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\run_opencode_agent.ps1") (Join-Path $TargetScripts "run_opencode_agent.ps1") -Force
+Copy-Item (Join-Path $Root "scripts\run_opencode_scout.ps1") (Join-Path $TargetScripts "run_opencode_scout.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\run_scout_pass.ps1") (Join-Path $TargetScripts "run_scout_pass.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\wrap_up_session.ps1") (Join-Path $TargetScripts "wrap_up_session.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\promote_session.ps1") (Join-Path $TargetScripts "promote_session.ps1") -Force

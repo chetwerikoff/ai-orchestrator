@@ -46,8 +46,19 @@ $enc = New-Object System.Text.UTF8Encoding $false
 $agentArgs = @("--print", "--trust", "--workspace", $root)
 if (-not [string]::IsNullOrWhiteSpace($Model)) { $agentArgs += @("--model", $Model) }
 
+# Auto-swap opencode_agent -> opencode_scout to avoid IMPLEMENTER role conflict.
+$resolvedCommand = $CommandName
+if ($CommandName -match 'run_opencode_agent') {
+    $scoutWrapper = Join-Path $PSScriptRoot "run_opencode_scout.ps1"
+    if (Test-Path -LiteralPath $scoutWrapper) {
+        $resolvedCommand = $scoutWrapper
+    } else {
+        Write-ScoutWarning "run_opencode_scout.ps1 not found beside run_scout_pass.ps1; using original command (role framing may conflict)."
+    }
+}
+
 try {
-    $scoutPrompt | & $CommandName @agentArgs *> $outputPath
+    $scoutPrompt | & $resolvedCommand @agentArgs *> $outputPath
 }
 catch {
     Write-ScoutWarning "implementer invocation failed: $($_.Exception.Message)"
@@ -70,9 +81,14 @@ if ([string]::IsNullOrWhiteSpace($raw)) {
     exit 0
 }
 
+if ($raw.Length -lt 200) {
+    Write-ScoutWarning "scout output is suspiciously short ($($raw.Length) bytes) - likely a session startup failure. See $outputPath."
+    exit 0
+}
+
 $m = [regex]::Match($raw, '(?s)```json\s*\r?\n?(.*?)```')
 if (-not $m.Success) {
-    Write-ScoutWarning "no ```json fenced block found in scout output."
+    Write-ScoutWarning 'no ```json fenced block found in scout output.'
     exit 0
 }
 
