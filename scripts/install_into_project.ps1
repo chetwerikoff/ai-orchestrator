@@ -23,6 +23,7 @@ Copy-Item (Join-Path $Root "scripts\run_opencode_agent.ps1") (Join-Path $TargetS
 Copy-Item (Join-Path $Root "scripts\run_scout_pass.ps1") (Join-Path $TargetScripts "run_scout_pass.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\wrap_up_session.ps1") (Join-Path $TargetScripts "wrap_up_session.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\promote_session.ps1") (Join-Path $TargetScripts "promote_session.ps1") -Force
+Copy-Item (Join-Path $Root "scripts\build_repo_map.ps1") (Join-Path $TargetScripts "build_repo_map.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\filter_pytest_failures.py") (Join-Path $TargetScripts "filter_pytest_failures.py") -Force
 
 $TaskTarget = Join-Path $TargetAiLoop "task.md"
