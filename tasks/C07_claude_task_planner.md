@@ -42,12 +42,29 @@ Do not read by default:
 ## Goal
 
 Add a **manual, opt-in** planner stage that converts a natural-language ASK
-into `.ai-loop/task.md`. Architect-agnostic via wrapper pattern (mirrors
-`-CursorCommand` for implementers).
+(inline or in a file) into `.ai-loop/task.md`. The planner acts as an
+**architect with final say**: when the ASK proposes an implementation, the
+planner must critically evaluate it and may diverge with documented reasoning.
 
+Architect-agnostic via wrapper pattern (mirrors `-CursorCommand` for implementers).
+
+Two invocation forms:
+
+```powershell
+# Inline ask (one-liners, short asks)
+.\scripts\ai_loop_plan.ps1 -Ask "Add a hello-world smoke test that prints OK"
+
+# File-based ask (longer asks, structured ideas, proposed implementations)
+.\scripts\ai_loop_plan.ps1 -AskFile tasks\my_idea.md
+.\scripts\ai_loop_plan.ps1 -AskFile .ai-loop\user_ask.md   # default if -Ask omitted
+
+# Both forms accept the same optional flags
+.\scripts\ai_loop_plan.ps1 -AskFile tasks\idea.md -Force
 ```
-ai_loop_plan.ps1 -Ask "..." [-PlannerCommand .\scripts\run_claude_planner.ps1] [-Force]
-```
+
+`-AskFile` accepts **any** path (relative or absolute). The default value
+`.ai-loop\user_ask.md` is only the fallback when neither `-Ask` nor an
+explicit `-AskFile` is given.
 
 The planner is invoked **manually by the user** before
 `ai_loop_task_first.ps1`. Not part of any automated loop. Human review of
@@ -247,17 +264,52 @@ Keep under 50 lines.
 ### templates/planner_prompt.md
 
 ```markdown
-# Planner role
+# Planner role: Architect with final say
 
-You are the PLANNER for the ai-orchestrator file-based workflow. Convert the
-USER ASK at the end of this prompt into a fully-formed `.ai-loop/task.md`.
+You are the PLANNER and ARCHITECT for the ai-orchestrator file-based workflow.
+You convert the USER ASK at the end of this prompt into a `.ai-loop/task.md`.
 
-## Hierarchy of authority
+The USER ASK may be:
+- a short goal description ("add subcommand X")
+- a structured problem description
+- a proposed implementation, approach, or solution (possibly detailed)
+- a mix of goal and proposed implementation
 
-- `AGENTS.md` (provided below) — common rules for all agents.
-- `CLAUDE.md` (target project, if present) — Claude-specific context; not your concern here.
-- This prompt — your role: planner.
-- Output `task.md` — concrete contract for the implementer.
+## You are the architect — final say
+
+If the USER ASK contains a proposed implementation, approach, or solution:
+
+- You have the FINAL SAY on what goes into `task.md`.
+- Do NOT blindly translate the user's proposed implementation into a task.
+- Critically evaluate the proposal against the provided project context:
+  - Does it match project conventions in `AGENTS.md` and `project_summary.md`?
+  - Is it the simplest approach that solves the goal?
+  - Does it create unnecessary complexity, coupling, or new failure modes?
+  - Are there better alternatives consistent with existing patterns (e.g.,
+    the wrapper convention, file-based contract, safe staging)?
+  - Does it violate any constraints (forbidden paths, scope limits, etc.)?
+- If the proposal is sound: use it, but still verify the details.
+- If the proposal has issues: write the better approach into `task.md` and
+  surface the divergence explicitly in `## Important`, stating what you
+  changed and why.
+- If the proposal cannot be safely implemented: write the corrected approach
+  in `task.md` and explain in `## Important` why the user's proposal was
+  rejected.
+
+You may agree with the user. You may also disagree — and if you disagree,
+your version is what goes into `task.md`. The human reviewer can override
+you by editing `task.md` manually after they read your reasoning in
+`## Important`. Do not silently rewrite the user's proposal — always name
+the change and the reason.
+
+## Hierarchy of authority (when planning)
+
+1. `AGENTS.md` (provided below) — non-negotiable common rules.
+2. `project_summary.md`, `repo_map.md` — current ground truth about the project.
+3. Your architectural judgment — applied when ASK is ambiguous, incomplete,
+   or proposes something suboptimal.
+4. USER ASK — input describing intent; **not** a contract you must follow verbatim.
+5. `CLAUDE.md` (target project, if present) — Claude-specific context; not your concern here.
 
 ## Output format
 
@@ -268,9 +320,9 @@ Produce a markdown document with these headings, in order:
   `.ai-loop/project_summary.md`, `.ai-loop/implementer_summary.md` for iter 2+).
 - `## Goal` — one paragraph, concrete.
 - `## Scope` — `Allowed:` / `Not allowed:` bullet lists.
-- `## Files in scope` — concrete relative paths only, one per bullet. Mark new
-  files with trailing ` (new)`. Optional explanation only after whitespace on
-  the same line.
+- `## Files in scope` — concrete relative paths only, one per bullet. Mark
+  new files with trailing ` (new)`. Optional explanation only after whitespace
+  on the same line.
 - `## Files out of scope` — must include `docs/archive/**`, `.ai-loop/_debug/**`,
   `ai_loop.py`, plus task-specific exclusions.
 - `## Required behavior` — numbered steps.
@@ -280,26 +332,36 @@ Produce a markdown document with these headings, in order:
 - `## Project summary update` — what durable info to record, or "no update needed".
 - `## Output hygiene` — four standard bullets (no task duplication into summary,
   no debug writes, no commit, no archive writes).
-- `## Important` — task-specific gotchas. If the ASK was ambiguous, list the
-  concrete assumptions you made here so the human reviewer can spot them. Do
-  not silently pick "reasonable defaults".
+- `## Important` — task-specific gotchas. Use this section to:
+  - List assumptions you made for any ambiguous parts of the ASK.
+  - **Name every divergence from the user's proposed implementation** with
+    a one-line reason (architect-divergence note). Example:
+    `Architect note: user proposed putting the validator in a new Python
+    package; this task uses a PowerShell wrapper to match the existing
+    run_*_agent.ps1 convention.`
+  - Surface any constraint that the implementer must respect but is not
+    obvious from the rest of the file.
 
 ## Hard rules
 
 - Output ONLY the task.md content. The very first line of your output must be
-  `# Task: <short name>`. No preamble (no "Here is the task...", no
-  explanation), no fenced code block wrapping the whole document, no HTML
-  comments.
+  `# Task: <short name>`. No preamble ("Here is the task...", "I'll write..."),
+  no fenced code block wrapping the whole document, no HTML comments.
 - Do not invent file paths. Use only paths visible in `AGENTS.md`,
   `project_summary.md`, or `repo_map.md`. Marking a path with ` (new)` is
   allowed for files the task creates.
 - Keep implementation under ~80 lines of code change. If the ask is larger,
   split into ordered subtasks under `## Important`.
-- Do not ask the user questions. Choose the conservative interpretation and
-  surface the assumption under `## Important`.
+- Do not ask the user questions. Make the architect's call, write it into
+  `task.md`, and surface the reasoning in `## Important`.
+- When the ASK proposes an implementation: critically evaluate it. If you
+  diverge, name the divergence in `## Important`. Do not silently comply
+  with a flawed proposal; do not silently override a good one.
 - Downstream validation is minimal (first line must be `# Task:`; `## Goal`
-  must exist). It does NOT check business logic. The human reviewer is the
-  business-logic gate. Do not assume mechanical validation will catch errors.
+  must exist). It does NOT check business logic, scope appropriateness, or
+  architectural soundness. The human reviewer is the final gate — your
+  `## Important` section is what they will read to decide whether to accept
+  your plan.
 ```
 
 ### scripts/install_into_project.ps1
@@ -341,7 +403,10 @@ Add to `tests/test_orchestrator_validation.py` (eight tests total — no more):
 
 1. `test_ai_loop_plan_script_exists` — assert `scripts/ai_loop_plan.ps1` exists.
 2. `test_run_claude_planner_script_exists` — assert `scripts/run_claude_planner.ps1` exists.
-3. `test_planner_prompt_template_exists` — assert `templates/planner_prompt.md` exists.
+3. `test_planner_prompt_has_architect_framing` — assert
+   `templates/planner_prompt.md` exists AND contains literals
+   `Architect with final say`, `final say`, `critically evaluate`, AND
+   `Architect note:` (the divergence-note convention from `## Important`).
 4. `test_planner_scripts_parse_cleanly` — extend the existing PowerShell
    `Parser::ParseFile` test list with the two new `.ps1` files.
 5. `test_run_claude_planner_has_no_param_block_and_no_stderr_redirect` — read
@@ -379,16 +444,30 @@ Self-install guard check:
 .\scripts\install_into_project.ps1 -TargetProject .  # must exit non-zero
 ```
 
-Manual smoke (requires authenticated `claude` CLI). Two scenarios — both must work:
+Manual smoke (requires authenticated `claude` CLI). Three scenarios — all must work:
 
-**From source repo (uses templates/ fallback):**
+**1. Inline ask, from source repo (uses templates/ fallback):**
 ```powershell
 .\scripts\ai_loop_plan.ps1 -Ask "Add a hello-world smoke test that prints OK" -Out .ai-loop\task_smoke.md
 Get-Content .ai-loop\task_smoke.md | Select-Object -First 20
 Remove-Item .ai-loop\task_smoke.md
 ```
 
-**Installed into temp target (uses .ai-loop/planner_prompt.md):**
+**2. File-based ask with a proposed implementation (architect evaluation):**
+Create `tasks/test_idea.md` with both a goal AND a proposed implementation
+that violates project conventions (e.g., proposes adding a Python validator
+where a PS wrapper would fit the existing convention). Run:
+```powershell
+.\scripts\ai_loop_plan.ps1 -AskFile tasks\test_idea.md -Out .ai-loop\task_smoke.md
+# Verify the generated task.md either:
+#   (a) uses the user's proposal and notes "Architect note:" if minor adjustments
+#   (b) diverges from the proposal and explains why in `## Important`
+# It must NOT silently change the proposal without surfacing the divergence.
+Get-Content .ai-loop\task_smoke.md
+Remove-Item .ai-loop\task_smoke.md, tasks\test_idea.md
+```
+
+**3. Installed into temp target (uses .ai-loop/planner_prompt.md):**
 ```powershell
 $tmp = Join-Path $env:TEMP "ai_orch_smoke_$(Get-Random)"
 New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -438,6 +517,20 @@ validator, file-existence parsing, `-AllowIncomplete`/`-StrictFiles` flags,
 SHA256 hashes, `planner_validation.md`, or `repo_map.md` auto-refresh —
 those were considered and explicitly deferred. If you think one of them is
 critical, write a separate follow-up task spec rather than expanding C07.
+
+**Architect framing in `planner_prompt.md` is load-bearing:** the prompt
+template gives the planner the responsibility to critically evaluate any
+implementation proposed in the ASK and to diverge with documented reasoning
+when needed. The literals `Architect with final say`, `final say`,
+`critically evaluate`, and the divergence-note pattern `Architect note:` are
+pinned by test #3. If you reword the template, keep these literals or update
+the test together — do not silently weaken the architect framing.
+
+**File-based ASK is a first-class invocation form:** `-AskFile` accepts any
+path (e.g., `tasks/my_idea.md`). The default `.ai-loop/user_ask.md` is only
+the implicit fallback when neither `-Ask` nor an explicit `-AskFile` is
+given. The Goal section in the spec shows both forms; the planner prompt
+explicitly handles ASKs that contain proposed implementations.
 
 **Manual stage, not in loop:** `ai_loop_plan.ps1` is invoked **by the user**
 before `ai_loop_task_first.ps1`. Do NOT add a call to it from
