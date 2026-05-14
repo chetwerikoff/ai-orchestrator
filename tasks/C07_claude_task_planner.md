@@ -186,16 +186,24 @@ Logic (use an explicit `$script:ExitCode` variable — see Hard rules):
    - Contents of `$planPrompt`
    - `## AGENTS.md` + contents of `AGENTS.md`
    - `## project_summary.md` + contents of `.ai-loop/project_summary.md`
-   - `## repo_map.md` + contents of `.ai-loop/repo_map.md` if it exists
-     (otherwise omit this section; do NOT auto-run `build_repo_map.ps1`)
+   - `## repo_map.md` + contents of `.ai-loop/repo_map.md` if it exists.
+     If `.ai-loop/repo_map.md` does NOT exist, omit this section AND emit
+     `Write-Warning "repo_map.md is missing — planner context will be limited. Run scripts/build_repo_map.ps1 first for better results."`
+     Do NOT auto-run `build_repo_map.ps1` (kept simple per scope discipline).
    - `## USER ASK` + resolved ask
 
 5. **Backup existing output:** if `$Out` exists and `-Force` is not set,
-   `Move-Item -Force $Out "$Out.bak"`. Remember `$backupMade = $true`.
+   `Move-Item -Force $Out "$Out.bak"`. Set `$backupMade = $true`.
 
-6. **Invoke planner wrapper inside try/catch with explicit exit-code variable:**
+6. **Invoke planner wrapper, write through a temp file, restore on any failure.**
+   This pattern (atomic-ish replace; restore-before-log) prevents two known
+   failure modes: a partial `Set-Content` leaving `$Out` truncated, and
+   `Write-Error` under `$ErrorActionPreference='Stop'` throwing past the
+   restore step.
+
    ```powershell
    $script:ExitCode = 0
+   $tmpOut = "$Out.tmp"
    try {
        $output = $prompt | & $PlannerCommand --workspace $ProjectRoot --model $PlannerModel
        if ($LASTEXITCODE -ne 0) {
@@ -203,24 +211,41 @@ Logic (use an explicit `$script:ExitCode` variable — see Hard rules):
            throw "Planner wrapper exited with code $LASTEXITCODE."
        }
 
-       # Minimal sanity check: output must start with '# Task:' and contain '## Goal'
+       # Sanity check: required structural headings must be present.
        $first = ($output -split "`r?`n", 2)[0].TrimStart()
        if (-not $first.StartsWith("# Task:")) {
            $script:ExitCode = 2
-           throw "Planner output does not start with '# Task:' — looks like a preamble or refusal."
+           throw "Planner output does not start with '# Task:' (looks like a preamble or refusal)."
        }
-       if ($output -notmatch '(?m)^##\s+Goal\b') {
-           $script:ExitCode = 2
-           throw "Planner output is missing '## Goal' section."
+       $required = @('## Goal', '## Scope', '## Files in scope', '## Tests', '## Important')
+       foreach ($h in $required) {
+           # Use a line-anchored regex so '## Files in scope' inside a paragraph does not satisfy '## Files in scope' heading.
+           $pattern = '(?m)^' + [regex]::Escape($h) + '\b'
+           if ($output -notmatch $pattern) {
+               $script:ExitCode = 2
+               throw "Planner output is missing required heading '$h'."
+           }
        }
 
-       Set-Content -LiteralPath $Out -Value $output -Encoding UTF8
+       # Write to temp file first, then atomically replace $Out.
+       Set-Content -LiteralPath $tmpOut -Value $output -Encoding UTF8
+       Move-Item -Force -LiteralPath $tmpOut -Destination $Out
    }
    catch {
-       Write-Error $_.Exception.Message
+       # CRITICAL ORDER: restore the backup BEFORE any Write-Error / Write-Warning.
+       # Under $ErrorActionPreference='Stop' (which the orchestrator scripts use),
+       # Write-Error itself throws and would skip the restore.
        if ($backupMade -and -not (Test-Path -LiteralPath $Out)) {
-           Move-Item -Force "$Out.bak" $Out
-           Write-Host "Restored previous $Out from backup."
+           Move-Item -Force -LiteralPath "$Out.bak" -Destination $Out
+       }
+       # Clean up the temp file if it lingered.
+       if (Test-Path -LiteralPath $tmpOut) {
+           Remove-Item -LiteralPath $tmpOut -Force -ErrorAction SilentlyContinue
+       }
+       # Now safe to log. Use Write-Warning, not Write-Error, to avoid re-throwing.
+       Write-Warning $_.Exception.Message
+       if ($backupMade) {
+           Write-Warning "Restored previous $Out from backup."
        }
    }
    finally {
@@ -242,9 +267,9 @@ correct`. The point is to avoid false confidence.
 Exit codes:
 - 0: success
 - 1: missing prerequisites or planner wrapper invocation error (backup restored)
-- 2: planner output failed the minimal sanity check (backup restored)
+- 2: planner output failed the sanity check (backup restored, temp file cleaned)
 
-Keep `ai_loop_plan.ps1` under 130 lines including comments.
+Keep `ai_loop_plan.ps1` under 150 lines including comments.
 
 ### scripts/run_claude_planner.ps1
 
@@ -255,11 +280,24 @@ Mirrors `run_opencode_agent.ps1` line-for-line on the wrapper convention:
 - Default model: `claude-sonnet-4-6`.
 - Read prompt from `$input`. Empty → `Write-Error "run_claude_planner: no prompt received on stdin."` + exit 1.
 - `Push-Location` to workspace if provided; `Pop-Location` in `finally`.
-- Invoke `claude --print --model $model` with the prompt piped via stdin.
+- **Native-command error mode workaround** (mirror `run_opencode_agent.ps1`
+  pattern): the caller may be running under `$ErrorActionPreference = "Stop"`.
+  If the `claude` CLI writes any non-fatal text to stderr, PowerShell can
+  raise `NativeCommandError` and abort even when exit code is 0. Wrap the
+  invocation:
+  ```powershell
+  $prevEA = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  claude --print --model $model
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $prevEA
+  exit $exitCode
+  ```
+  The prompt is piped via `$input` — PowerShell pipes stdin to the native
+  command automatically.
 - **No `2>&1`** — stdout-only is captured by the caller; stderr flows to console.
-- `exit $LASTEXITCODE`.
 
-Keep under 50 lines.
+Keep under 55 lines.
 
 ### templates/planner_prompt.md
 
@@ -419,10 +457,14 @@ Add to `tests/test_orchestrator_validation.py` (eight tests total — no more):
    `Refusing to self-install`.
 7. `test_gitignore_excludes_planner_artifacts` — assert `.gitignore` contains
    `.ai-loop/*.bak` AND `.ai-loop/user_ask.md`.
-8. `test_ai_loop_plan_uses_explicit_exit_code_and_prompt_fallback` — read
-   `ai_loop_plan.ps1`; assert it contains both:
-   - `$script:ExitCode` literal (explicit exit-code variable, per Hard rules)
+8. `test_ai_loop_plan_structural_invariants` — read `ai_loop_plan.ps1`;
+   assert it contains ALL of:
+   - `$script:ExitCode` literal (explicit exit-code variable)
    - `templates\planner_prompt.md` literal (source-repo fallback path)
+   - All required sanity-check headings as literals: `## Goal`, `## Scope`,
+     `## Files in scope`, `## Tests`, `## Important`
+   - `.tmp` literal (temp-file atomic-write pattern)
+   - `repo_map.md is missing` literal (warning text)
 
 Do NOT call the `claude` CLI in tests. Do NOT add behavior tests for the
 minimal sanity check — its logic is two `if` statements, structural tests are
@@ -531,6 +573,50 @@ path (e.g., `tasks/my_idea.md`). The default `.ai-loop/user_ask.md` is only
 the implicit fallback when neither `-Ask` nor an explicit `-AskFile` is
 given. The Goal section in the spec shows both forms; the planner prompt
 explicitly handles ASKs that contain proposed implementations.
+
+**Template drift policy** (documented to prevent confusion):
+
+- `templates/planner_prompt.md` is the **source** of the planner prompt. It is
+  the file to edit when changing planner behavior.
+- `.ai-loop/planner_prompt.md` is the **installed runtime copy** in target
+  projects. Created by `install_into_project.ps1`. Read by `ai_loop_plan.ps1`
+  at runtime (with `templates/...` as source-repo fallback for self-hosting).
+- After editing `templates/planner_prompt.md`, **reinstall** the orchestrator
+  into target projects (`scripts/install_into_project.ps1 -TargetProject ...`)
+  so the runtime copy picks up the change. The installed copy is not
+  automatically refreshed.
+- Do NOT edit `.ai-loop/planner_prompt.md` in a target project directly — it
+  will be overwritten by the next install. Edit the source template and
+  reinstall.
+
+**Validation is intentionally minimal:**
+
+- Sanity check is structural only (required headings present, starts with
+  `# Task:`). It catches obvious LLM failures (preambles, refusals, partial
+  output) but does NOT catch invented file paths, wrong scope, weak tests,
+  or wrong business logic.
+- The human reviewer of `.ai-loop/task.md` is the **only** quality gate.
+  Specifically inspect: `## Files in scope` for invented paths, `## Required
+  behavior` for scope correctness, `## Tests` for meaningful coverage,
+  `## Important` for assumptions and architect-divergence notes.
+- If practice shows the planner regularly produces low-quality output, an
+  LLM validator can be added as a separate task. Do not add one in C07.
+
+**Backup hygiene (critical implementation order):**
+
+In the `catch` block, **restore the backup BEFORE any logging command**.
+Under `$ErrorActionPreference = "Stop"` (which the orchestrator scripts
+use), `Write-Error` itself throws and would skip the restore step. Use
+`Write-Warning` (or `Write-Host`) for post-restore messages — these do not
+throw under Stop mode.
+
+**Atomic-ish write through temp file:**
+
+Write planner output to `$Out.tmp` first, then `Move-Item -Force $Out.tmp
+-> $Out`. This prevents a half-written `$Out` if `Set-Content` fails mid-write
+(e.g., disk full, antivirus lock). Combined with the backup, the user's
+existing `task.md` is preserved unless the full pipeline (write → sanity →
+move) succeeds.
 
 **Manual stage, not in loop:** `ai_loop_plan.ps1` is invoked **by the user**
 before `ai_loop_task_first.ps1`. Do NOT add a call to it from
