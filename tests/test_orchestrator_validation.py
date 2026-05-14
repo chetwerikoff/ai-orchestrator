@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import textwrap
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,14 @@ _TESTS_DIR = Path(__file__).resolve().parent
 def _orch_scratch(prefix: str) -> Path:
     """Unique work dir under tests/ — avoids Windows PermissionError on pytest tmp_path roots."""
     return _TESTS_DIR / f".orch_{prefix}_{uuid.uuid4().hex}"
+
+
+@pytest.fixture
+def orch_preflight_dir() -> Iterator[Path]:
+    root = _orch_scratch("task_first_preflight")
+    root.mkdir(parents=True, exist_ok=True)
+    yield root
+    shutil.rmtree(root, ignore_errors=True)
 
 
 _SCRIPTS = _ROOT / "scripts"
@@ -1067,3 +1076,150 @@ def test_install_copies_user_ask_template() -> None:
         'Copy-Item (Join-Path $Root "templates\\user_ask_template.md") (Join-Path $TargetAiLoop "user_ask.md")'
         not in text
     )
+
+
+def test_ai_loop_task_first_declares_skip_scope_check() -> None:
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "[switch]$SkipScopeCheck" in text
+
+
+def test_ai_loop_task_first_has_files_in_scope_helper() -> None:
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "function Test-TaskFilesInScopeExist" in text
+
+
+def test_ai_loop_task_first_invokes_preflight_before_step1() -> None:
+    text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    idx_pf = text.find("if (-not $SkipScopeCheck)")
+    assert idx_pf >= 0
+    idx_s1 = text.find("STEP 1: ")
+    assert idx_s1 >= 0
+    assert idx_pf < idx_s1
+
+
+def _run_task_first_preflight_harness(
+    tmp_project: Path,
+    task_body: str,
+    *,
+    extra_args: list[str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    ai_loop = tmp_project / ".ai-loop"
+    ai_loop.mkdir(parents=True, exist_ok=True)
+    (ai_loop / "task.md").write_text(task_body, encoding="utf-8")
+    fake_auto = tmp_project / "fake_auto_loop.ps1"
+    fake_auto.write_text("exit 0\n", encoding="utf-8")
+    script = _SCRIPTS / "ai_loop_task_first.ps1"
+    args = [
+        ps,
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script.resolve()),
+        "-SkipInitialCursor",
+        "-NoPush",
+        "-AutoLoopScript",
+        str(fake_auto.resolve()),
+        "-TaskPath",
+        ".ai-loop\\task.md",
+        "-CursorCommand",
+        str((_SCRIPTS / "run_cursor_agent.ps1").resolve()),
+    ]
+    if extra_args:
+        args.extend(extra_args)
+    return subprocess.run(
+        args,
+        cwd=str(tmp_project.resolve()),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=180,
+        check=False,
+    )
+
+
+def test_preflight_fails_on_invented_path(orch_preflight_dir: Path) -> None:
+    task = textwrap.dedent(
+        """
+        # Task
+        ## Files in scope
+        - nonexistent/path.py
+        ## Files out of scope
+        - docs/**
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode != 0, out
+    assert "nonexistent/path.py" in out
+    assert "PREFLIGHT FAILED" in out
+
+
+def test_preflight_passes_when_paths_exist(orch_preflight_dir: Path) -> None:
+    (orch_preflight_dir / "real_asset.txt").write_text("x", encoding="utf-8")
+    task = textwrap.dedent(
+        """
+        ## Files in scope
+        - real_asset.txt
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, out
+    assert "Preflight:" in out and "path(s) in scope all exist or marked (new)." in out
+
+
+def test_preflight_skips_paths_marked_new(orch_preflight_dir: Path) -> None:
+    task = textwrap.dedent(
+        """
+        ## Files in scope
+        - not_yet_there.py (new)
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, out
+
+
+def test_preflight_blocks_when_new_is_not_trailing(orch_preflight_dir: Path) -> None:
+    task = textwrap.dedent(
+        """
+        ## Files in scope
+        - scripts/existing.ps1 keep old behavior with (new) mode
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode != 0, out
+    assert "scripts/existing.ps1" in out
+
+
+def test_preflight_skips_globs_and_dirs(orch_preflight_dir: Path) -> None:
+    task = textwrap.dedent(
+        """
+        ## Files in scope
+        - src/**
+        - tests/test_*.py
+        - docs/
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, out
+
+
+def test_preflight_warns_on_missing_section(orch_preflight_dir: Path) -> None:
+    task = textwrap.dedent(
+        """
+        ## Goal
+        No Files in scope heading here on purpose.
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, out
+    assert "Preflight: '## Files in scope' section not found in" in out

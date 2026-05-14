@@ -6,6 +6,7 @@ param(
     [string]$CursorCommand = ".\scripts\run_cursor_agent.ps1",
     [string]$CursorModel = "",
     [switch]$SkipInitialCursor,
+    [switch]$SkipScopeCheck,
     [switch]$NoPush,
     [switch]$WithScout,
     [switch]$WithWrapUp,
@@ -33,9 +34,6 @@ Important:
 - Otherwise, edit the codebase directly.
 - You MUST update .ai-loop/implementer_summary.md (a fresh stub was written at run start): list changed files, test results, implementation summary, task-specific command output or why it was skipped, and remaining risks.
 "@
-$ProjectRoot = (Resolve-Path ".").Path
-$AiLoop = Join-Path $ProjectRoot ".ai-loop"
-$ResultPathRelative = ".ai-loop/implementer_result.md"
 
 function ConvertTo-CrtSafeArg {
     # Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
@@ -313,6 +311,38 @@ function Invoke-AutoReviewLoop {
     }
 }
 
+function Test-TaskFilesInScopeExist {
+    param([string]$TaskPath, [string]$ProjectRoot)
+    $text = Get-Content -LiteralPath $TaskPath -Raw -Encoding UTF8 -ErrorAction Stop
+    $m = [regex]::Match($text, '(?ms)^##\s+Files in scope\s*$(.*?)(?=^##\s+|\z)')
+    if (-not $m.Success) {
+        return @{ Invented = @(); Checked = 0; SectionFound = $false }
+    }
+    $body = $m.Groups[1].Value
+    $invented = New-Object System.Collections.Generic.List[string]
+    $checked = 0
+    foreach ($line in ($body -split "`r?`n")) {
+        if ($line -notmatch '^\s*[-*]\s+') { continue }
+        $bullet = $line -replace '^\s*[-*]\s+', ''
+        $bullet = $bullet -replace '^`([^`]+)`', '$1'
+        $token = ($bullet -split '\s+', 2)[0]
+        if ([string]::IsNullOrWhiteSpace($token)) { continue }
+        if ($token -match '[\*\?]' -or $token.EndsWith('/') -or $token.EndsWith('\')) { continue }
+        if ($bullet -match '\s+\(new\)\s*$') { continue }
+        $checked++
+        $resolved = Join-Path $ProjectRoot ($token -replace '\\', '/')
+        if (-not (Test-Path -LiteralPath $resolved)) { $invented.Add($token) }
+    }
+    return @{ Invented = @($invented); Checked = $checked; SectionFound = $true }
+}
+
+# Dot-source guard: load helper definitions only when dot-sourcing this file.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
+$ProjectRoot = (Resolve-Path ".").Path
+$AiLoop = Join-Path $ProjectRoot ".ai-loop"
+$ResultPathRelative = ".ai-loop/implementer_result.md"
+
 Write-Section "AI LOOP TASK-FIRST START"
 Assert-FileExists -Path $TaskPath -Message "Task file was not found."
 Assert-FileExists -Path $AutoLoopScript -Message "Existing auto loop script was not found."
@@ -328,6 +358,28 @@ if ($needsRefresh -and (Test-Path $repoMapScript)) {
         & $repoMapScript
     } catch {
         Write-Warning "build_repo_map.ps1 failed (non-fatal): $_"
+    }
+}
+
+if (-not $SkipScopeCheck) {
+    $taskFullPath = if ([System.IO.Path]::IsPathRooted($TaskPath)) { $TaskPath } else { Join-Path $ProjectRoot $TaskPath }
+    $scopeResult = Test-TaskFilesInScopeExist -TaskPath $taskFullPath -ProjectRoot $ProjectRoot
+    if (-not $scopeResult.SectionFound) {
+        Write-Warning "Preflight: '## Files in scope' section not found in ${TaskPath}. Skipping path-existence check."
+    }
+    elseif ($scopeResult.Invented.Count -gt 0) {
+        Write-Host ""
+        Write-Host "PREFLIGHT FAILED: invented or missing paths in ## Files in scope:" -ForegroundColor Red
+        foreach ($p in $scopeResult.Invented) {
+            Write-Host "  - $p" -ForegroundColor Red
+        }
+        Write-Host ""
+        Write-Host "Fix: either correct the path in $TaskPath, mark it with trailing ' (new)' if intentional," -ForegroundColor Yellow
+        Write-Host "     or re-run with -SkipScopeCheck to bypass this check."
+        exit 1
+    }
+    else {
+        Write-Host "Preflight: $($scopeResult.Checked) path(s) in scope all exist or marked (new)." -ForegroundColor Green
     }
 }
 
