@@ -131,8 +131,10 @@ Not allowed:
              if ([string]::IsNullOrWhiteSpace($token)) { continue }
              # Skip globs / directory-ish entries.
              if ($token -match '[\*\?]' -or $token.EndsWith('/') -or $token.EndsWith('\')) { continue }
-             # Skip if marked (new) anywhere on the line.
-             if ($bullet -match '\(new\)') { continue }
+             # Skip if marked (new) as a TRAILING marker on the line.
+             # Trailing-only avoids bypasses where '(new)' appears inside a
+             # description like 'existing.ps1 keep old behavior; add (new) mode'.
+             if ($bullet -match '\s+\(new\)\s*$') { continue }
              $checked++
              # Normalize separators; Test-Path handles both on Windows but be explicit.
              $resolved = Join-Path $ProjectRoot ($token -replace '\\', '/')
@@ -179,9 +181,29 @@ Not allowed:
    goes BEFORE the existing "STEP 1: $step1Label IMPLEMENTATION" banner so
    the user sees preflight result first.
 
+5. **Dot-source guard for testability.** `ai_loop_task_first.ps1` is an
+   executable script: its main flow runs at the bottom. Tests that need to
+   call `Test-TaskFilesInScopeExist` in isolation cannot simply dot-source
+   the file — doing so would execute the entire task-first flow (repo_map
+   refresh, prerequisite checks, implementer pass, auto-loop chain) and
+   pollute test state.
+
+   Add a guard at the top of the main flow (right after `param()` and
+   `$ErrorActionPreference`, before any other statement). PowerShell sets
+   `$MyInvocation.InvocationName` to `.` when the script is dot-sourced:
+
+   ```powershell
+   # When dot-sourced (e.g. for unit-testing helper functions), expose
+   # function definitions only; do not execute the main flow.
+   if ($MyInvocation.InvocationName -eq '.') { return }
+   ```
+
+   This keeps the main behavior unchanged for normal invocation and makes
+   helper functions cleanly callable from a test harness.
+
 Keep the helper function under 40 lines. Total addition to
-`ai_loop_task_first.ps1` should be under 70 lines including param, helper,
-and invocation.
+`ai_loop_task_first.ps1` should be under 75 lines including param, helper,
+invocation, and the dot-source guard.
 
 ## Tests
 
@@ -202,22 +224,45 @@ tests can dot-source the script into a temp harness):
 3. `test_ai_loop_task_first_invokes_preflight_before_step1` — read the
    script body; assert the `SkipScopeCheck` invocation block appears
    **before** the literal `STEP 1: ` in the file (textual order check).
+**Test isolation requirement (critical).** `-SkipInitialCursor` skips only
+the implementer pass; the script still proceeds to `Invoke-AutoReviewLoop`,
+which would invoke `codex` and exercise the full auto loop. Behavior tests
+must isolate to the preflight stage only by passing **both** of:
+
+- `-SkipInitialCursor` (skip implementer)
+- `-AutoLoopScript <fakeAutoLoop>` (replace the auto-loop script with a fake
+  that just `exit 0`)
+
+Create the fake script in the test fixture, e.g.:
+```python
+fake_autoloop = tmp_path / "fake_auto_loop.ps1"
+fake_autoloop.write_text("exit 0\n", encoding="utf-8")
+# pass to subprocess as: -AutoLoopScript $fake_autoloop
+```
+
+Without this isolation tests could call real `codex` or interact with git
+state — making them flaky and slow. Treat the AutoLoopScript override as
+mandatory for any test that runs `ai_loop_task_first.ps1` end-to-end.
+
 4. `test_preflight_fails_on_invented_path` — write a temp task.md with
    `## Files in scope` containing `nonexistent/path.py` (no `(new)`); run
-   the script via PowerShell subprocess in a temp project (use a fixture
-   project root); assert exit code is non-zero AND stdout contains the
-   invented path.
+   the script via PowerShell subprocess in a temp project; assert exit
+   code is non-zero AND stdout contains the invented path. **Use
+   `-SkipInitialCursor -AutoLoopScript <fake>`.**
 5. `test_preflight_passes_when_paths_exist` — same harness; task.md
    references real files from the temp project; assert exit code 0 and
-   "Preflight:" success line in output. (Mock the implementer step by
-   passing `-SkipInitialCursor` so the test does not actually invoke an
-   agent; we only verify the preflight gate.)
+   "Preflight:" success line in output. **Use `-SkipInitialCursor
+   -AutoLoopScript <fake>`.**
 6. `test_preflight_skips_paths_marked_new` — same harness; task.md
-   references `not_yet_there.py (new)`; assert preflight passes without
-   error.
-7. `test_preflight_skips_globs_and_dirs` — `src/**`, `tests/test_*.py`,
+   references `not_yet_there.py (new)` as a TRAILING marker; assert
+   preflight passes without error.
+7. `test_preflight_blocks_when_new_is_not_trailing` — task.md contains
+   `existing.ps1 keep old behavior with (new) mode` — `(new)` is NOT
+   trailing, so the path must still be subject to the existence check;
+   assert preflight enforces existence normally.
+8. `test_preflight_skips_globs_and_dirs` — `src/**`, `tests/test_*.py`,
    `docs/`; assert preflight passes (these are not checked for existence).
-8. `test_preflight_warns_on_missing_section` — task.md lacks
+9. `test_preflight_warns_on_missing_section` — task.md lacks
    `## Files in scope`; assert preflight emits a warning (not an error)
    and continues.
 
@@ -316,6 +361,25 @@ hit a parsing edge case (markdown weirdness, intentional reference to a path
 not yet on disk that is NOT marked `(new)`) can bypass with
 `-SkipScopeCheck`. Do NOT make this default-off — the whole point is to
 catch errors before they waste an implementer pass.
+
+**Post-merge action (reinstall in target projects):** target projects use
+their own installed copy of `scripts/ai_loop_task_first.ps1`. After C08
+merges in this repo, the preflight check is **not** automatically active in
+target projects. Each target project must run:
+
+```powershell
+# from this orchestrator repo
+.\scripts\install_into_project.ps1 -TargetProject <path-to-target>
+```
+
+to pick up the updated `ai_loop_task_first.ps1`. The implementer of C08
+should mention this in the project-summary `Next Likely Steps` so the next
+session knows to reinstall before relying on preflight in target projects.
+
+To verify after reinstall:
+```powershell
+rg -n "SkipScopeCheck|Test-TaskFilesInScopeExist" <target>\scripts\ai_loop_task_first.ps1
+```
 
 **Task-first only, not auto/resume:** the check belongs in
 `ai_loop_task_first.ps1` only. `ai_loop_auto.ps1` (review/fix existing

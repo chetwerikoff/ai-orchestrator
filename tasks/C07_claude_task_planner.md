@@ -100,6 +100,7 @@ Allowed:
 - Create `scripts/ai_loop_plan.ps1`
 - Create `scripts/run_claude_planner.ps1`
 - Create `templates/planner_prompt.md`
+- Create `templates/user_ask_template.md`
 - Edit `scripts/install_into_project.ps1`
 - Edit `.gitignore`
 - Edit `tests/test_orchestrator_validation.py`
@@ -175,10 +176,13 @@ Logic (use an explicit `$script:ExitCode` variable — see Hard rules):
        Write-Error "Planner prompt not found at .ai-loop\planner_prompt.md or templates\planner_prompt.md."
        exit 1
    }
+   Write-Host "Using planner prompt: $planPrompt"
    ```
    This lets the planner run both from a target project (installed prompt) and
    from the orchestrator source repo (template prompt) without duplicating the
-   file in git.
+   file in git. The console trace makes it obvious which copy is being used —
+   if a stale `.ai-loop/planner_prompt.md` appears in the source repo and
+   shadows `templates/planner_prompt.md`, the user sees it immediately.
 
 3. **Validate prerequisites:** exit 1 with explicit "missing X" if any of:
    - `AGENTS.md`
@@ -492,10 +496,18 @@ Add under a section header `# planner runtime artifacts`:
 ```
 .ai-loop/*.bak
 .ai-loop/user_ask.md
+.ai-loop/planner_prompt.md
 ```
 
-(`user_ask.md` is gitignored because asks may contain private intent; users
-can force-add if they want to track it.)
+Notes:
+- `user_ask.md` is gitignored because asks may contain private intent; users
+  can force-add if they want to track it.
+- `.ai-loop/planner_prompt.md` is gitignored **in this source repo** so a
+  stale runtime copy can never accidentally shadow `templates/planner_prompt.md`
+  (the source of truth). In target projects the file is installed by
+  `install_into_project.ps1` and is the runtime path the script reads. The
+  source-repo fallback (`templates/planner_prompt.md`) handles planner runs
+  from this repo.
 
 ## Tests
 
@@ -504,7 +516,7 @@ Run:
 python -m pytest -q
 ```
 
-Add to `tests/test_orchestrator_validation.py` (eight tests total — no more):
+Add to `tests/test_orchestrator_validation.py` (ten tests total — no more):
 
 1. `test_ai_loop_plan_script_exists` — assert `scripts/ai_loop_plan.ps1` exists.
 2. `test_run_claude_planner_script_exists` — assert `scripts/run_claude_planner.ps1` exists.
@@ -610,11 +622,15 @@ Update `.ai-loop/implementer_summary.md` with:
 Update `.ai-loop/project_summary.md`:
 
 - Architecture section: add one line each for `ai_loop_plan.ps1`,
-  `run_claude_planner.ps1`, `templates/planner_prompt.md`.
+  `run_claude_planner.ps1`, `templates/planner_prompt.md`, and
+  `templates/user_ask_template.md`.
 - Note: planner is **manual**, NOT part of the automated loop.
 - Note: planner is architect-agnostic via `-PlannerCommand` (mirrors
   `-CursorCommand`).
 - Note: minimal validation only; human review of `task.md` is the quality gate.
+- Note: `templates/user_ask_template.md` is a source template; installer
+  copies it to `.ai-loop/user_ask_template.md` (NOT to `user_ask.md` —
+  user-created `user_ask.md` is never overwritten).
 - Update Current Stage. Add to Next Likely Steps: "if planner proves
   unreliable in practice, add an LLM validator wrapper as a separate task".
 
