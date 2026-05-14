@@ -25,6 +25,7 @@ if ([string]::IsNullOrWhiteSpace($model)) {
 
 $pushed = $false
 $exitCode = 1
+$systemPrompt = "Return only the final markdown document. The first byte of stdout must be '#'. Do not include analysis, status text, preambles, code fences, or tool calls."
 try {
     if ($workspace -and (Test-Path $workspace)) {
         Push-Location $workspace
@@ -32,7 +33,7 @@ try {
     }
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $promptText | cmd /c claude --print --model $model --tools '""'
+    $promptText | cmd /c claude --print --model $model --tools '""' --system-prompt $systemPrompt
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEA
 }

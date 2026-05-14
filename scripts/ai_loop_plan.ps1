@@ -72,6 +72,18 @@ function Test-PlannerOutputSanity {
     }
     return @{ Ok = $true; Reason = "" }
 }
+function Normalize-PlannerOutput {
+    param([Parameter(Mandatory)][string]$Output)
+    $lines = @($Output -split "`r?`n")
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $candidate = $lines[$i].TrimStart([char]0xFEFF).TrimStart()
+        if ($candidate.StartsWith("# Task:")) {
+            $lines[$i] = $candidate
+            return (@($lines[$i..($lines.Count - 1)]) -join "`n").TrimEnd()
+        }
+    }
+    return $Output
+}
 function Test-ReviewerOutputStrict {
     param([Parameter(Mandatory)][string]$Output)
     $t = $Output.Trim()
@@ -141,6 +153,7 @@ try {
     $rawLines = @($prompt | & $cmdPath @pwArgs)
     $output = ($rawLines | ForEach-Object { "$_" }) -join "`n"
     if ($LASTEXITCODE -ne 0) { $script:ExitCode = 1; throw "Planner wrapper exited with code $LASTEXITCODE." }
+    $output = Normalize-PlannerOutput -Output $output
     $sanityInit = Test-PlannerOutputSanity -Output $output
     if (-not $sanityInit.Ok) { $script:ExitCode = 2; throw $sanityInit.Reason }
     $writeText = $output
@@ -210,6 +223,7 @@ try {
                 $reviewLoopExitKind = "degraded"
                 break
             }
+            $revised = Normalize-PlannerOutput -Output $revised
             $sanityRev = Test-PlannerOutputSanity -Output $revised
             if (-not $sanityRev.Ok) {
                 [void]$traceLines.Add("## Iteration $i - REVIEW_STATUS: REVISION_SANITY_FAILED")

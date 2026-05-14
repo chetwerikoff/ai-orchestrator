@@ -1025,6 +1025,8 @@ def test_run_claude_planner_has_no_param_block_and_no_stderr_redirect() -> None:
     assert "2>&1" not in text
     assert "cmd /c claude --print" in text
     assert '--tools \'""\'' in text
+    assert "--system-prompt $systemPrompt" in text
+    assert "Do not include analysis, status text, preambles" in text
 
 
 def test_install_copies_planner_files_and_has_self_install_guard() -> None:
@@ -1077,6 +1079,9 @@ def test_ai_loop_plan_review_invariants() -> None:
     assert "[string]$ReviewerCommand" in text
     assert "[string]$ReviewerModel" in text
     assert "Test-PlannerOutputSanity" in text
+    assert "function Normalize-PlannerOutput" in text
+    assert "Normalize-PlannerOutput -Output $output" in text
+    assert "Normalize-PlannerOutput -Output $revised" in text
     assert "function Test-ReviewerOutputStrict" in text
     assert "$reviewLoopExitKind" in text
     assert 'if ($reviewLoopExitKind -eq "max_iterations")' in text
@@ -1093,6 +1098,29 @@ def test_ai_loop_plan_review_invariants() -> None:
         "simplicity of implementation wins",
     ):
         assert needle in text, needle
+
+
+def _normalize_planner_output(output: str) -> str:
+    """Mirrors scripts/ai_loop_plan.ps1 Normalize-PlannerOutput."""
+    lines = output.splitlines()
+    for i, line in enumerate(lines):
+        candidate = line.lstrip("\ufeff").lstrip()
+        if candidate.startswith("# Task:"):
+            lines[i] = candidate
+            return "\n".join(lines[i:]).rstrip()
+    return output
+
+
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        ("# Task: Clean\n\n## Goal\nx", "# Task: Clean\n\n## Goal\nx"),
+        ("Now writing.\n\n# Task: Clean\n\n## Goal\nx\n", "# Task: Clean\n\n## Goal\nx"),
+        ("Refusal without task", "Refusal without task"),
+    ],
+)
+def test_planner_output_normalization_strips_preamble_only_when_task_exists(body: str, expected: str) -> None:
+    assert _normalize_planner_output(body) == expected
 
 
 _ISSUE_BULLET_RE = re.compile(r"^\s*-\s*\[(logic|complexity|scope|missing)\]\s+\S")
