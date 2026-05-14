@@ -325,16 +325,20 @@ function Run-PostFixCommand {
 function Run-CodexReview {
     Ensure-AiLoopFiles
 
-    $prompt = @"
+    $prompt = @'
 You are the reviewer in an authenticated development loop.
 
-Read:
-- .ai-loop/project_summary.md
-- .ai-loop/task.md
-- .ai-loop/implementer_summary.md
-- .ai-loop/last_diff.patch (with .ai-loop/diff_summary.txt — git diff --stat for the same change set)
-- If .ai-loop/test_failures_summary.md exists, read it first for structured pytest failure context; otherwise read .ai-loop/test_output.txt
-- .ai-loop/git_status.txt
+Read in this priority order (stop reading once verdict is clear):
+
+1. `.ai-loop/task.md` — current task contract
+2. `.ai-loop/project_summary.md` — durable project orientation
+3. `AGENTS.md` at repo root — working rules
+4. `.ai-loop/implementer_summary.md` — implementer's report on the latest iteration
+5. `.ai-loop/diff_summary.txt` — short `git diff --stat`; if it reports more than 300 changed lines OR more than 8 changed files, read this before loading large diffs.
+6. `.ai-loop/test_failures_summary.md` — filtered failures (**read this before** raw pytest output when present; generated only when pytest fails)
+7. `.ai-loop/test_output.txt` — pytest output (the orchestrator already ran tests; use when item 6 is absent or you need full session output)
+8. `.ai-loop/last_diff.patch` — full git diff (only when items above are not sufficient)
+9. `.ai-loop/git_status.txt` — short porcelain status
 
 Review the latest changes.
 
@@ -353,6 +357,14 @@ Check:
 4. Is project_summary.md updated when durable project-level context changed?
 5. Is it safe to run the final test gate, commit, and push?
 
+## Diff size budget
+
+If `diff_summary.txt` reports more than 300 changed lines OR more than 8 changed files, read `diff_summary.txt` first. Do not load `last_diff.patch` unless a specific finding requires it; if you need to load it, justify briefly in `FINAL_NOTE`.
+
+## Test execution policy
+
+The orchestrator already ran `pytest` before this review; results are in `.ai-loop/test_output.txt` (and, on failure, `.ai-loop/test_failures_summary.md`). Do not re-run the full test suite. A targeted run of a single test file or a single test (`python -m pytest -q path/to/test_file.py::test_name`) is allowed only when a specific finding in this review requires direct verification. If you run any tests, state in one line in `FINAL_NOTE` exactly what you ran and why.
+
 Return exactly:
 
 VERDICT: PASS or FIX_REQUIRED
@@ -367,12 +379,29 @@ MEDIUM:
 - ...
 
 FIX_PROMPT_FOR_IMPLEMENTER:
-If fixes are required, write a concrete prompt for the implementer (Cursor, OpenCode/Qwen via your configured wrapper, etc.).
-If no fixes are required, write: none
+Between this label and `FINAL_NOTE:`, write either the literal `none` when no fixes are required, or one fenced JSON block that satisfies the schema below.
+
+```json
+{
+  "fix_required": true,
+  "files": ["src/foo.py", "tests/test_foo.py"],
+  "changes": [
+    { "path": "src/foo.py", "kind": "edit|add|delete", "what": "one-line directive" }
+  ],
+  "acceptance": "pytest -q passes; <other concrete criteria>"
+}
+```
+
+Rules:
+- `fix_required` must be `true` whenever your verdict is `FIX_REQUIRED`, and `false` when your verdict is `PASS`.
+- `files` is the deduplicated union of `changes[].path`.
+- Each `changes[].kind` must be exactly one of: `edit`, `add`, `delete`.
+- `acceptance` is a single concrete sentence.
+- The fenced JSON must be valid JSON (parseable by `ConvertFrom-Json`).
 
 FINAL_NOTE:
 Brief summary.
-"@
+'@
 
     Write-Host ""
     Write-Host "Running Codex review..."
@@ -404,6 +433,36 @@ function Get-CodexVerdict {
     return Get-ReviewVerdict -ReviewFile (Join-Path $AiLoop "codex_review.md")
 }
 
+function Format-FixPromptFromObject {
+    param($FixObject)
+
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine("# Fix prompt")
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("## Files to change")
+    foreach ($f in @($FixObject.files)) {
+        if ([string]::IsNullOrWhiteSpace([string]$f)) {
+            continue
+        }
+        [void]$sb.AppendLine("- $f")
+    }
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("## Changes")
+    foreach ($c in @($FixObject.changes)) {
+        if (-not $c) {
+            continue
+        }
+        $kind = [string]$c.kind
+        $p = [string]$c.path
+        $what = [string]$c.what
+        [void]$sb.AppendLine("- ($kind) ``$p`` - $what")
+    }
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("## Acceptance")
+    [void]$sb.AppendLine([string]$FixObject.acceptance)
+    return $sb.ToString()
+}
+
 function Extract-FixPromptFromFile {
     param(
         [string]$ReviewFile,
@@ -415,6 +474,31 @@ function Extract-FixPromptFromFile {
     }
 
     $review = Get-Content $ReviewFile -Raw
+
+    # 1) Prefer structured JSON in a ```json fence (full object; nested arrays/objects supported).
+    $jsonMatch = [regex]::Match(
+        $review,
+        '(?ms)FIX_PROMPT_FOR_IMPLEMENTER:\s*```json\s*(?<json>[\s\S]*?)\s*```',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if ($jsonMatch.Success) {
+        $jsonText = $jsonMatch.Groups['json'].Value.Trim()
+        try {
+            $obj = $jsonText | ConvertFrom-Json -ErrorAction Stop
+            if ($obj.fix_required) {
+                $rendered = Format-FixPromptFromObject -FixObject $obj
+                $rendered | Set-Content -Path $OutputPromptFile -Encoding UTF8
+                return $true
+            }
+            return $false
+        }
+        catch {
+            Write-Warning "FIX_PROMPT JSON parse failed: $($_.Exception.Message). Falling back to free-text extractor."
+        }
+    }
+
+    # 2) Fallback: legacy free-text regex (backward compatible with older Codex outputs).
+    Write-Warning "FIX_PROMPT: using legacy free-text extractor (JSON block absent or unusable)."
 
     # Codex sometimes omits or renames FINAL_NOTE; still recover the fix prompt when the delimiter exists.
     $match = [regex]::Match(

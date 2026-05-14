@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -46,6 +47,13 @@ _FIX_PROMPT_TAIL_RE = re.compile(
     r"FIX_PROMPT_FOR_IMPLEMENTER:\s*(?P<prompt>[\s\S]*)",
     re.IGNORECASE,
 )
+
+
+def _extract_fix_prompt_ps_functions_from_auto(ps1_text: str) -> str:
+    """`Format-FixPromptFromObject` + `Extract-FixPromptFromFile` from ai_loop_auto.ps1 (C03 harness)."""
+    start = ps1_text.index("function Format-FixPromptFromObject")
+    end = ps1_text.index("function Write-NextImplementerPrompt", start)
+    return ps1_text[start:end]
 
 
 def extract_fix_prompt_from_review_text(review: str) -> str | None:
@@ -504,6 +512,184 @@ def test_codex_template_uses_implementer_summary_only() -> None:
     t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
     assert "implementer_summary.md" in t
     assert "cursor_summary.md" not in t
+
+
+def _extract_run_codex_review_prompt_literal(ai_loop_auto_text: str) -> str:
+    """Exact Codex `$prompt` body inside `Run-CodexReview` single-quote here-string."""
+    anchor = ai_loop_auto_text.index("function Run-CodexReview")
+    open_idx = ai_loop_auto_text.index("$prompt = @'", anchor) + len("$prompt = @'")
+    close_idx = ai_loop_auto_text.index("\n'@", open_idx)
+    return ai_loop_auto_text[open_idx:close_idx]
+
+
+def test_run_codex_review_prompt_preserves_literal_json_fence() -> None:
+    """Run-CodexReview prompt must retain ```json fences (expandable `"@` strips/alters backticks)."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    anchor = text.index("function Run-CodexReview")
+    snippet = text[anchor : text.index("function Get-ReviewVerdict", anchor)]
+    assert '$prompt = @"' not in snippet
+    assert "$prompt = @'" in snippet
+    literal = _extract_run_codex_review_prompt_literal(text)
+    assert "```json\n" in literal
+    assert "\n```\n\nRules:" in literal
+
+
+def test_codex_review_template_shows_nested_json_fence() -> None:
+    """Target template must visibly include ```json fences (nested under a deeper outer fence)."""
+    t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
+    assert "```json\n{" in t
+    assert "`" * 4 in t
+
+
+def test_extract_fix_prompt_parses_json(tmp_path: Path) -> None:
+    """C03: Extract-FixPromptFromFile must parse the JSON schema."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    funcs = _extract_fix_prompt_ps_functions_from_auto((_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8"))
+    harness = tmp_path / "_orch_extract_fix_json.ps1"
+    harness.write_text(
+        """param(
+    [Parameter(Mandatory)][string]$ReviewPath,
+    [Parameter(Mandatory)][string]$OutPath
+)
+
+"""
+        + funcs
+        + """
+$r = Extract-FixPromptFromFile -ReviewFile $ReviewPath -OutputPromptFile $OutPath
+exit ($(if ($r) { 0 } else { 1 }))
+""",
+        encoding="utf-8",
+    )
+
+    review_path = tmp_path / "codex_review.md"
+    out_path = tmp_path / "next_implementer_prompt.md"
+    review_path.write_text(
+        textwrap.dedent(
+            """
+            VERDICT: FIX_REQUIRED
+
+            FIX_PROMPT_FOR_IMPLEMENTER:
+            ```json
+            {
+              "fix_required": true,
+              "files": ["src/foo.py"],
+              "changes": [
+                { "path": "src/foo.py", "kind": "edit", "what": "Fix widget." }
+              ],
+              "acceptance": "pytest -q passes."
+            }
+            ```
+
+            FINAL_NOTE:
+            ok
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            ps,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(harness),
+            str(review_path),
+            str(out_path),
+        ],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    detail = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+
+    body = out_path.read_text(encoding="utf-8")
+    assert "## Files to change" in body
+    assert "## Changes" in body
+    assert "## Acceptance" in body
+    assert "src/foo.py" in body
+    assert "Fix widget." in body
+
+
+def test_extract_fix_prompt_falls_back_on_invalid_json(tmp_path: Path) -> None:
+    """C03: malformed JSON must fall back to free-text regex extraction."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    funcs = _extract_fix_prompt_ps_functions_from_auto((_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8"))
+    harness = tmp_path / "_orch_extract_fix_fallback.ps1"
+    harness.write_text(
+        """param(
+    [Parameter(Mandatory)][string]$ReviewPath,
+    [Parameter(Mandatory)][string]$OutPath
+)
+
+"""
+        + funcs
+        + """
+$r = Extract-FixPromptFromFile -ReviewFile $ReviewPath -OutputPromptFile $OutPath
+exit ($(if ($r) { 0 } else { 1 }))
+""",
+        encoding="utf-8",
+    )
+
+    review_path = tmp_path / "codex_review_bad_json.md"
+    out_path = tmp_path / "next_implementer_prompt_legacy.md"
+    review_path.write_text(
+        textwrap.dedent(
+            """
+            VERDICT: FIX_REQUIRED
+
+            FIX_PROMPT_FOR_IMPLEMENTER:
+            ```json
+            { NOT VALID JSON
+            ```
+
+            Legacy fallback body line one.
+
+            FINAL_NOTE:
+            done
+            """
+        ).strip(),
+        encoding="utf-8",
+    )
+
+    proc = subprocess.run(
+        [
+            ps,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(harness),
+            str(review_path),
+            str(out_path),
+        ],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    detail = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+    assert "WARNING" in detail.upper(), detail
+
+    body = out_path.read_text(encoding="utf-8").strip()
+    assert body
+    assert "Legacy fallback body line one." in body
 
 
 def test_codex_template_reads_test_failures_before_raw_pytest_output() -> None:

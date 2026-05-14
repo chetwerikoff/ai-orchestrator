@@ -1,4 +1,4 @@
-# C02 — Required scope blocks in task template + stable implementer preamble
+# C03 — Structured JSON FIX_PROMPT_FOR_IMPLEMENTER + Codex diff-size budget + Codex test-execution policy
 
 - **Target project:** `ai-orchestrator`
 - **CWD:** `C:\Users\che\Documents\Projects\ai-orchestrator`
@@ -8,149 +8,170 @@
   powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPush
   ```
 
-- **Prerequisites:** C01 (`C01_repo_map_and_agents_policy.md`) merged.
-- **Risk:** medium — touches the implementer-prompt construction in `ai_loop_task_first.ps1` and the public `templates/task.md`.
-- **Estimated lines touched:** ~40 lines edited, +1 new test.
+- **Prerequisites:** C02 merged.
+- **Risk:** medium — changes the Codex contract; regression risk on fix-loop extraction. Keep regex fallback path.
+- **Estimated lines touched:** ~60 lines edited, +2 new tests.
 
 ---
 
-# Task: Require Files-in-scope / Files-out-of-scope blocks in task.md and surface them in the implementer prompt; factor the preamble into a byte-stable constant
+# Task: Codex fix prompt becomes structured JSON (with regex fallback); Codex prompt instructs diff-size budget and a tightened test-execution policy
 
 ## Project context
 
 Required reading before starting (in order; stop when you have enough):
 
-1. `AGENTS.md` — working rules
+1. `AGENTS.md`
 2. `.ai-loop/task.md` — this task
 3. `.ai-loop/project_summary.md`
-4. `.ai-loop/repo_map.md` (added by C01)
+4. `.ai-loop/repo_map.md`
 5. `.ai-loop/implementer_summary.md` — only if iteration ≥ 2
 
-Background: the implementer prompt today (`scripts/ai_loop_task_first.ps1`, function `Invoke-ImplementerImplementation`, ~line 180) is `<preamble> + "TASK:" + <task.md body>`. There is no explicit file-scope contract; `SafeAddPaths` enforces staging but never reaches the model. The context-plan report (§4 step 3, §9 Phase 1, §10) prescribes making `## Files in scope` / `## Files out of scope` required in `templates/task.md` and prepending them above `TASK:` in the implementer prompt. It also prescribes factoring the preamble into a single named constant so it is byte-stable across iterations (free `llama-server` KV-cache reuse).
+Background: `Run-CodexReview` (`scripts/ai_loop_auto.ps1` ~line 328) currently asks Codex to write a free-text `FIX_PROMPT_FOR_IMPLEMENTER:` block between two regex delimiters. `Extract-FixPromptFromFile` then regex-extracts whatever Codex wrote and pipes it back to the implementer. The format works but is unstructured — fix prompts vary wildly in length and specificity, which hurts local Qwen quality on fix iterations. The same review function also includes `.ai-loop/last_diff.patch` in the read list with no size budget, even though `diff_summary.txt` is already produced (O06). On top of that, the Codex prompt today is silent about test execution: the orchestrator already runs `pytest` before Codex and captures the result, yet Codex sometimes re-runs the full suite anyway — wasting 30–120 s per iteration without adding signal. The context-plan report (§9 Phase 1 step 1.3 + Phase 2 step 2.4, §10) prescribes the JSON + diff-budget pair; this task also adds a tightened test-execution policy to the same prompt.
 
 ## Goal
 
-1. Update `templates/task.md` so `## Files in scope` and `## Files out of scope` are required sections (with hard-rules note).
-2. Update `.ai-loop/task.md` for **this task** — it already follows the new contract (see "Files in scope" / "Not allowed" below), so this serves as the working example.
-3. Modify `Invoke-ImplementerImplementation` in `scripts/ai_loop_task_first.ps1`:
-   - Extract the static preamble into a single `$STABLE_PREAMBLE` script-scope constant declared once at the top of the function (or top of the file). Its bytes must not vary across runs for a given orchestrator version.
-   - Parse the two scope sections from `.ai-loop/task.md` and inject them as `FILES IN SCOPE:` / `FILES OUT OF SCOPE:` blocks **between** the preamble and `TASK:`.
-   - If either section is missing, emit a `Write-Warning` and continue (do not block — the contract is enforced softly so legacy task.md files still run).
-4. Add a unit test that verifies the implementer prompt (the file written to `.ai-loop/_debug/implementer_prompt.md`) contains both scope blocks above `TASK:` when present in `task.md`.
+1. Change the Codex prompt in `Run-CodexReview` to require `FIX_PROMPT_FOR_IMPLEMENTER` as a JSON block (with the schema below). Keep `VERDICT:` / `CRITICAL:` / `HIGH:` / `MEDIUM:` / `FINAL_NOTE:` sections unchanged.
+2. Update `Extract-FixPromptFromFile` to:
+   - Try JSON parse first (preferred path).
+   - On parse failure, fall back to the existing free-text regex extractor and log `Write-Warning`.
+   - When JSON is parsed, render a deterministic human-readable `next_implementer_prompt.md` from the schema (one section per field).
+3. Add a `## Diff size budget` instruction inside the Codex prompt: if `diff_summary.txt` reports >300 changed lines OR >8 changed files, Codex should read `diff_summary.txt` first and ask before reading `last_diff.patch`.
+4. Add a `## Test execution policy` instruction inside the Codex prompt: forbid full-suite re-runs (the orchestrator pre-captures pytest output); allow targeted runs (single file / single test) only when a specific finding requires direct verification; require Codex to state the reason for any targeted run in `FINAL_NOTE`.
+5. Mirror both the JSON schema **and** the test-execution policy in `templates/codex_review_prompt.md` so target projects stay in sync.
+6. Add two tests: one for the JSON parse path, one for the regex fallback path.
 
 ## Scope
 
 **Allowed:**
-- `scripts/ai_loop_task_first.ps1` — refactor `Invoke-ImplementerImplementation` + add a helper `Get-TaskScopeBlocks`.
-- `templates/task.md` — make the two sections required; refresh hard-rules comment.
-- `tests/test_orchestrator_validation.py` — one new test.
+- `scripts/ai_loop_auto.ps1` — `Run-CodexReview` + `Extract-FixPromptFromFile`.
+- `templates/codex_review_prompt.md` — mirror schema.
+- `tests/test_orchestrator_validation.py` — two new tests.
 - `.ai-loop/project_summary.md` — one-line note.
 
 **Not allowed:**
-- Do not modify `scripts/ai_loop_auto.ps1` in this task.
-- Do not modify `scripts/run_cursor_agent.ps1` or `scripts/run_opencode_agent.ps1`.
-- Do not modify `ai_loop.py`.
-- Do not change `SafeAddPaths` defaults (already done by C01).
-- Do not add the optional Qwen scout (separate task C04).
-- Do not modify the Codex review prompt (separate task C03).
+- Do not modify the rest of `ai_loop_auto.ps1` (state machine, safe staging, post-fix command, resume).
+- Do not modify `scripts/ai_loop_task_first.ps1` (owned by C02).
+- Do not modify `MaxIterations`.
+- Do not change `SafeAddPaths`.
+- Do not edit `ai_loop.py`.
+
+## Files likely to change
+
+- `scripts/ai_loop_auto.ps1` (~40 lines edited in 2 functions)
+- `templates/codex_review_prompt.md` (~15 lines)
+- `tests/test_orchestrator_validation.py` (~30 lines, 2 new tests)
+- `.ai-loop/project_summary.md` (1 line)
 
 ## Required behavior
 
-### 1. `templates/task.md` updates
+### 1. JSON schema for `FIX_PROMPT_FOR_IMPLEMENTER`
 
-Inside the HARD RULES comment (top), add a line:
+The Codex prompt in `Run-CodexReview` instructs Codex to emit, between `FIX_PROMPT_FOR_IMPLEMENTER:` and `FINAL_NOTE:`, **either** the literal `none` (no fixes) **or** a single fenced JSON block with this schema:
 
-```
-6. ## Files in scope and ## Files out of scope are REQUIRED sections.
-   List concrete relative paths or directory globs. Do not leave them empty
-   and do not write "the whole repo".
-```
-
-Replace the existing `## Files likely to change` section with `## Files in scope`. Add a new `## Files out of scope` section immediately after it:
-
-```markdown
-### Files in scope
-
-Paths the implementer MAY edit. List concrete relative paths or directory globs.
-
-- `src/...`
-- `tests/...`
-
-### Files out of scope
-
-Paths the implementer MUST NOT edit (in addition to AGENTS.md "Never edit").
-
-- `docs/archive/**`
-- `.ai-loop/_debug/**`
-- `ai_loop.py` (unless task explicitly authorizes)
+```json
+{
+  "fix_required": true,
+  "files": ["src/foo.py", "tests/test_foo.py"],
+  "changes": [
+    { "path": "src/foo.py", "kind": "edit|add|delete", "what": "one-line directive" }
+  ],
+  "acceptance": "pytest -q passes; <other concrete criteria>"
+}
 ```
 
-### 2. `scripts/ai_loop_task_first.ps1` changes
+Rules:
+- `fix_required` is `true` whenever Codex's verdict is `FIX_REQUIRED`.
+- `files` is the deduplicated union of `changes[].path`.
+- `changes[].kind` is one of `edit`, `add`, `delete`.
+- `acceptance` is a single concrete sentence.
+- The whole block must be valid JSON, parseable by `ConvertFrom-Json`.
 
-**Add helper `Get-TaskScopeBlocks`** above `Invoke-ImplementerImplementation`:
+### 2. `Extract-FixPromptFromFile` rewrite
 
 ```powershell
-function Get-TaskScopeBlocks {
-    param([string]$TaskFile)
-    $text = Get-Content -LiteralPath $TaskFile -Raw -Encoding UTF8
-    function _section($name) {
-        $pattern = "(?ms)^##\s+$([regex]::Escape($name))\s*$\r?\n(.*?)(?=^##\s+|\z)"
-        $m = [regex]::Match($text, $pattern)
-        if ($m.Success) { return $m.Groups[1].Value.Trim() }
-        return $null
+function Extract-FixPromptFromFile {
+    param([string]$ReviewFile, [string]$OutputPromptFile)
+    if (!(Test-Path $ReviewFile)) { return $false }
+    $review = Get-Content $ReviewFile -Raw
+
+    # 1) Try JSON path first.
+    $jsonMatch = [regex]::Match(
+        $review,
+        '(?ms)FIX_PROMPT_FOR_IMPLEMENTER:\s*```json\s*(?<json>\{.*?\})\s*```',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if ($jsonMatch.Success) {
+        try {
+            $obj = $jsonMatch.Groups['json'].Value | ConvertFrom-Json -ErrorAction Stop
+            if ($obj.fix_required) {
+                $rendered = Format-FixPromptFromObject -FixObject $obj
+                $rendered | Set-Content -Path $OutputPromptFile -Encoding UTF8
+                return $true
+            }
+            return $false
+        } catch {
+            Write-Warning "FIX_PROMPT JSON parse failed: $($_.Exception.Message). Falling back to free-text extractor."
+        }
     }
-    return [PSCustomObject]@{
-        InScope    = _section "Files in scope"
-        OutOfScope = _section "Files out of scope"
+
+    # 2) Fallback: existing regex behavior (verbatim) for backward compatibility.
+    # … (keep current code path unchanged) …
+}
+
+function Format-FixPromptFromObject {
+    param($FixObject)
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.AppendLine("# Fix prompt")
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("## Files to change")
+    foreach ($f in $FixObject.files) { [void]$sb.AppendLine("- $f") }
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("## Changes")
+    foreach ($c in $FixObject.changes) {
+        [void]$sb.AppendLine("- ($($c.kind)) `$($c.path)` — $($c.what)")
     }
+    [void]$sb.AppendLine("")
+    [void]$sb.AppendLine("## Acceptance")
+    [void]$sb.AppendLine($FixObject.acceptance)
+    return $sb.ToString()
 }
 ```
 
-**Declare a script-scope constant `$STABLE_PREAMBLE`** at the top of the script (right after `param(...)` and any `Set-StrictMode`/`$ErrorActionPreference`). Move the existing 20-line "You are the IMPLEMENTER…" header verbatim into this constant. Its bytes must be identical across runs.
+The fallback path **must remain bit-compatible** with current behavior so existing Codex runs that still emit free text continue to work. Emit `Write-Warning` on every fallback so the operator can spot it.
 
-**Rewrite the prompt assembly** inside `Invoke-ImplementerImplementation`:
+### 3. Codex prompt updates inside `Run-CodexReview`
 
-```powershell
-$scope = Get-TaskScopeBlocks -TaskFile $TaskFile
-$taskText = Get-Content -LiteralPath $TaskFile -Raw -Encoding UTF8
+- Add a new line to the read-priority list:
+  > `.ai-loop/diff_summary.txt` — short `git diff --stat`; read this first if it reports >300 lines or >8 files.
+- Add a `## Diff size budget` paragraph:
+  > If `diff_summary.txt` reports more than 300 changed lines OR more than 8 changed files, read `diff_summary.txt` first. Do not load `last_diff.patch` unless a specific finding requires it; if you need to load it, justify briefly in `FINAL_NOTE`.
+- Add a `## Test execution policy` paragraph:
+  > The orchestrator already ran `pytest` before this review; results are in `.ai-loop/test_output.txt` (and, on failure, `.ai-loop/test_failures_summary.md`). Do not re-run the full test suite. A targeted run of a single test file or a single test (`python -m pytest -q path/to/test_file.py::test_name`) is allowed only when a specific finding in this review requires direct verification. If you run any tests, state in one line in `FINAL_NOTE` exactly what you ran and why.
+- Replace the free-text `FIX_PROMPT_FOR_IMPLEMENTER` instruction with the JSON schema (verbatim from §1) wrapped in a `json` fenced block.
+- Keep `VERDICT:`, `CRITICAL:`, `HIGH:`, `MEDIUM:`, `FINAL_NOTE:` sections unchanged.
 
-$scopeBlock = ""
-if ($scope.InScope) {
-    $scopeBlock += "FILES IN SCOPE:`n$($scope.InScope)`n`n"
-} else {
-    Write-Warning "task.md is missing '## Files in scope' section. Continuing without scope contract."
-}
-if ($scope.OutOfScope) {
-    $scopeBlock += "FILES OUT OF SCOPE:`n$($scope.OutOfScope)`n`n"
-} else {
-    Write-Warning "task.md is missing '## Files out of scope' section. Continuing without scope contract."
-}
+### 4. `templates/codex_review_prompt.md` mirror
 
-$prompt = $STABLE_PREAMBLE + "`n`n" + $scopeBlock + "TASK:`n" + $taskText
-if (-not [string]::IsNullOrWhiteSpace($ExtraInstructions)) {
-    $prompt += "`n`n$($ExtraInstructions.Trim())`n"
-}
-```
+Update the read-priority list, replace the free-text fix block with the same JSON schema, and add the same `## Diff size budget` and `## Test execution policy` paragraphs. Keep the rest of the template's structure intact.
 
-The result written to `.ai-loop/_debug/implementer_prompt.md` must contain the scope blocks **above** `TASK:` when both are present in `task.md`.
+### 5. Tests
 
-### 3. Update `.ai-loop/task.md` for this very task
-
-This task spec already contains `## Files in scope` and `## Files out of scope` (verify them above the "Files likely to change" section). Make sure the running task.md is the spec from this file (after the `---` separator) so the new code path is exercised on the very first run.
-
-### 4. New test in `tests/test_orchestrator_validation.py`
+Add to `tests/test_orchestrator_validation.py`:
 
 ```python
-def test_implementer_prompt_surfaces_scope_blocks(tmp_path, monkeypatch) -> None:
-    """C02: Files in scope / out of scope from task.md must appear above TASK: in
-    the implementer prompt written to .ai-loop/_debug/implementer_prompt.md."""
-    # Strategy: invoke Get-TaskScopeBlocks via pwsh on a synthetic task.md, or
-    # parse the existing _debug/implementer_prompt.md from this run; pick whichever
-    # is more deterministic in the existing test harness.
+def test_extract_fix_prompt_parses_json(tmp_path) -> None:
+    """C03: Extract-FixPromptFromFile must parse the JSON schema."""
+    # Write a synthetic codex_review.md with VERDICT: FIX_REQUIRED + a JSON FIX_PROMPT.
+    # Invoke the function via pwsh subprocess; assert OutputPromptFile contains
+    # rendered sections (## Files to change, ## Changes, ## Acceptance).
+    ...
+
+def test_extract_fix_prompt_falls_back_on_invalid_json(tmp_path) -> None:
+    """C03: malformed JSON must fall back to free-text regex extraction."""
+    # Same as above but emit a broken JSON block; assert the extractor still
+    # produces a non-empty OutputPromptFile via the legacy regex path.
     ...
 ```
-
-If a full PowerShell subprocess test is too heavy, accept a regex test against `.ai-loop/_debug/implementer_prompt.md` generated by *this* task's run.
 
 ## Tests
 
@@ -158,60 +179,59 @@ If a full PowerShell subprocess test is too heavy, accept a regex test against `
 python -m pytest -q
 ```
 
-Expected: baseline-after-C01 + 1 new test, no regressions.
+Expected: baseline-after-C02 + 2 new tests, no regressions.
 
 PowerShell parser check:
 
 ```powershell
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"
 ```
 
 ## Verification
 
-1. After this task runs, `.ai-loop\_debug\implementer_prompt.md` contains, in order: the `STABLE_PREAMBLE`, then `FILES IN SCOPE:` block, then `FILES OUT OF SCOPE:` block, then `TASK:`.
-2. `Select-String -Path templates\task.md -Pattern "^## Files in scope$|^## Files out of scope$"` returns 2 matches.
-3. `Select-String -Path scripts\ai_loop_task_first.ps1 -Pattern "STABLE_PREAMBLE|Get-TaskScopeBlocks"` returns ≥3 matches.
-4. `python -m pytest -q` shows baseline + 1 new test, no regressions.
-5. Re-running the implementer with an unchanged `task.md` produces a byte-identical prompt prefix (capture two consecutive `_debug/implementer_prompt.md` and compare with `fc /b` up to the first dynamic byte — should match through the end of the preamble).
+1. `Select-String -Path scripts\ai_loop_auto.ps1 -Pattern "Format-FixPromptFromObject|diff_summary\.txt|Diff size budget|Test execution policy"` returns ≥4 matches.
+2. `Select-String -Path templates\codex_review_prompt.md -Pattern "fix_required|acceptance|Test execution policy"` returns ≥3 matches.
+3. `python -m pytest -q` shows baseline + 2 new tests, no regressions.
+4. Synthetic `codex_review.md` with valid JSON FIX_PROMPT round-trips into a humanized `.ai-loop\next_implementer_prompt.md` with the three sections above.
+5. Synthetic `codex_review.md` with malformed JSON still produces a non-empty `.ai-loop\next_implementer_prompt.md` and triggers a warning.
 
 ## Implementer summary requirements
 
 Update `.ai-loop/implementer_summary.md` (target <50 lines):
 
 - Changed files.
-- Test result (baseline + 1 new test, no regressions).
-- Confirmation that `.ai-loop/_debug/implementer_prompt.md` shows the new ordering.
-- Remaining risks.
+- Test result (baseline + 2 new tests, no regressions).
+- Confirmation that JSON path and regex fallback both work.
+- Remaining risks (especially: any first run where Codex still emits the legacy free-text format will trigger the warning; this is expected for one cycle).
 
 ## Project summary update
 
 Add one line under "Current architecture" or "Important design decisions" in `.ai-loop/project_summary.md`:
 
-> Implementer prompt = `$STABLE_PREAMBLE` + `FILES IN SCOPE:` / `FILES OUT OF SCOPE:` blocks parsed from `task.md` + `TASK:` body. Required sections in `templates/task.md`; missing sections produce a warning, not a failure.
+> Codex emits `FIX_PROMPT_FOR_IMPLEMENTER` as JSON (`fix_required`, `files`, `changes[]`, `acceptance`); `Extract-FixPromptFromFile` prefers JSON and falls back to the legacy free-text regex with a warning. Codex prompt forbids full-suite re-runs (orchestrator pre-captures pytest output); targeted single-test runs are allowed with a one-line reason in `FINAL_NOTE`.
 
 ## Files in scope
 
-- `scripts/ai_loop_task_first.ps1`
-- `templates/task.md`
+- `scripts/ai_loop_auto.ps1`
+- `templates/codex_review_prompt.md`
 - `tests/test_orchestrator_validation.py`
 - `.ai-loop/project_summary.md`
 - `.ai-loop/implementer_summary.md`
 
 ## Files out of scope
 
-- `scripts/ai_loop_auto.ps1`
+- `scripts/ai_loop_task_first.ps1`
+- `scripts/continue_ai_loop.ps1`
+- `scripts/build_repo_map.ps1`
 - `scripts/run_cursor_agent.ps1`
 - `scripts/run_opencode_agent.ps1`
-- `scripts/continue_ai_loop.ps1`
-- `scripts/build_repo_map.ps1` (owned by C01)
 - `ai_loop.py`
 - `docs/archive/**`
 - `.ai-loop/_debug/**`
-- `.ai-loop/repo_map.md` (do not regenerate as part of this task)
+- `.ai-loop/repo_map.md`
 
 ## Important
 
 - Do not commit or push manually.
-- Do not change `MaxIterations`, Codex prompt, or scout logic — those are other tasks.
-- The `STABLE_PREAMBLE` constant must be byte-identical to the current 20-line header content (only the *placement* changes, not the *wording*).
-- If a `Write-Warning` fires on the very first run because legacy `task.md` exists, that is expected — the task spec above defines both sections so the warning should not appear on this task itself.
+- Keep the regex fallback path intact — removing it breaks any Codex run that still emits the legacy format.
+- Do not increase `MaxIterations`. Do not introduce new top-level directories. Do not add any embedding / vector logic.

@@ -1,42 +1,27 @@
-﻿# Implementer summary — C02
+﻿# Implementer summary
 
-## Changed files (C02)
+## Changed files
 
-- `scripts/ai_loop_task_first.ps1` — `$STABLE_PREAMBLE`, `Get-TaskScopeBlocks`, prompt = preamble + `FILES IN SCOPE:` / `FILES OUT OF SCOPE:` + full `task.md` after `TASK:`.
-- `templates/task.md` — required `## Files in scope` / `## Files out of scope` sections and hard-rules note.
-- `tests/test_orchestrator_validation.py` — C02 coverage (scope blocks in implementer prompt; existing harness dot-sources task-first helpers / ParseFile checks).
-- `.ai-loop/project_summary.md` — design note for implementer prompt assembly.
-- `.ai-loop/task.md` — working task spec under the C02 contract.
-
-## This pass (next-implementer prompt)
-
-- `.ai-loop/implementer_summary.md` — replaced stale cleanup/repo_map narrative with this C02-focused summary.
-- `.ai-loop/repo_map.md` — `git restore --source=HEAD --staged --worktree` so it is no longer dirty; **no** committed change to map content.
+- `scripts/ai_loop_auto.ps1` (C03) — `Run-CodexReview` now instructs structured JSON for `FIX_PROMPT_FOR_IMPLEMENTER`, adds read priority for `diff_summary.txt`, **Diff size budget**, and **Test execution policy**; `Extract-FixPromptFromFile` parses fenced JSON first (`ConvertFrom-Json`), renders via `Format-FixPromptFromObject`, and falls back to the legacy free-text regex with `Write-Warning` on parse failure or missing JSON.
+- `templates/codex_review_prompt.md` — mirrors the live prompt (schema, policies, read order); JSON rules line matches **`ConvertFrom-Json`** like `Run-CodexReview`.
+- `tests/test_orchestrator_validation.py` (C03) — `test_extract_fix_prompt_parses_json`, `test_extract_fix_prompt_falls_back_on_invalid_json` (plus existing Codex prompt / parse coverage).
+- `.ai-loop/project_summary.md` — Current Stage, Last Completed Task, and Next Likely Steps aligned to C03 (JSON/extractor design bullets were already present).
 
 ## Tests
 
-- `python -m pytest -q` → **60 passed** (~1.4s).
+- `python -m pytest -q` → **64 passed**.
 
-## PowerShell parser check (`scripts\ai_loop_task_first.ps1`)
+## Task-specific commands
 
-- Covered by `tests/test_orchestrator_validation.py` (ParseFile / parse-cleanly tests); passes with the suite above. Manual check per `AGENTS.md`:
+- `powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"` — covered by `test_powershell_orchestrator_scripts_parse_cleanly` in pytest.
+- `.ai-loop/task.md` invocation `ai_loop_task_first.ps1 -NoPush` not run — full orchestrator loop needs live Codex/driver context.
 
-  `powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"`
+## Implementation summary
 
-## Implementer prompt ordering
-
-- As built in `Invoke-ImplementerImplementation`: **`$STABLE_PREAMBLE`**, then **`FILES IN SCOPE:`** (when present in `task.md`), then **`FILES OUT OF SCOPE:`**, then **`TASK:`** plus full `task.md` body; written to `.ai-loop/_debug/implementer_prompt.md` when task-first runs the implementer.
-
-## Task-specific command
-
-- `powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPush` — **not run** on this pass (would invoke the live implementer/review chain; scope here was documentation + repo_map hygiene only). Behavior is exercised by unit tests.
-
-## Skipped
-
-- Live task-first / implementer run — see above.
-- Regenerating `.ai-loop/repo_map.md` — out of scope for C02; file reset to `HEAD` only.
+- C03: Codex must emit parseable JSON between `FIX_PROMPT_FOR_IMPLEMENTER:` and `FINAL_NOTE:` (or `none`); the extractor prefers that path and writes a deterministic `next_implementer_prompt.md`. Invalid or absent JSON uses the legacy extractor so older reviews still work.
+- Template JSON validity rule text now matches the in-script Codex prompt (`ConvertFrom-Json`).
 
 ## Remaining risks
 
-- Legacy `task.md` files without scope sections still run with `Write-Warning` only (soft contract).
-- Prompt byte-stability for KV-cache applies to the static preamble; the scope blocks and full `task.md` body still vary per task.
+- Reviews that still use legacy free-text `FIX_PROMPT_FOR_IMPLEMENTER` trigger the fallback warning for one cycle until Codex adopts JSON — expected.
+- Malformed JSON in the fenced block falls back to free text; if Codex mixes broken JSON with no usable legacy text, the fix prompt may be weaker until the next review.
