@@ -18,6 +18,8 @@ _PS1_TARGETS = (
     "continue_ai_loop.ps1",
     "build_repo_map.ps1",
     "run_scout_pass.ps1",
+    "wrap_up_session.ps1",
+    "promote_session.ps1",
 )
 _SAFEADD_DEFAULT_RE = re.compile(
     r"\[string\]\$SafeAddPaths\s*=\s*\"([^\"]+)\"",
@@ -401,6 +403,36 @@ def test_continue_ai_loop_forwards_implementer_parameters() -> None:
     assert "$CursorCommand" in text
     assert '"-CursorCommand"' in text or "'-CursorCommand'" in text
     assert "-CursorModel" in text
+    assert '"-WithWrapUp"' in text or "'-WithWrapUp'" in text
+
+
+def test_wrap_up_session_script_exists() -> None:
+    script = Path("scripts/wrap_up_session.ps1")
+    assert script.exists(), "scripts/wrap_up_session.ps1 must exist"
+    content = script.read_text(encoding="utf-8")
+    assert "0x2014" in content, "session draft title must use Unicode em dash (U+2014)"
+    assert "session_draft.md" in content
+    assert "test_output.txt" in content
+    assert "implementer_summary.md" in content
+    assert "try" in content.lower(), "must have try/catch for non-fatal behavior"
+
+
+def test_promote_session_script_exists() -> None:
+    script = Path("scripts/promote_session.ps1")
+    assert script.exists(), "scripts/promote_session.ps1 must exist"
+    content = script.read_text(encoding="utf-8")
+    assert "0x2014" in content and "promote_session.ps1" in content and "do not edit manually" in content
+    assert "failures.md" in content
+    assert "archive/rolls" in content
+    assert "session_draft.md" in content
+
+
+def test_failures_log_seed_header_matches_contract() -> None:
+    text = (_ROOT / ".ai-loop" / "failures.md").read_text(encoding="utf-8")
+    lines = text.strip().splitlines()
+    assert lines[0] == "# Failures log"
+    assert lines[1] == "# Appended by scripts/promote_session.ps1 \u2014 do not edit manually."
+    assert lines[2].startswith("# Rotate:")
 
 
 def test_gitignore_excludes_implementer_json_runtime_state() -> None:
@@ -778,6 +810,15 @@ def test_install_into_project_copies_run_scout_pass_script() -> None:
     text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
     assert "run_scout_pass.ps1" in text
     assert (_SCRIPTS / "run_scout_pass.ps1").is_file()
+
+
+def test_install_into_project_copies_wrap_up_and_promote_scripts() -> None:
+    """Installer must ship wrap-up and promote helpers for -WithWrapUp / failures log (DD-023)."""
+    text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
+    assert "wrap_up_session.ps1" in text
+    assert "promote_session.ps1" in text
+    assert (_SCRIPTS / "wrap_up_session.ps1").is_file()
+    assert (_SCRIPTS / "promote_session.ps1").is_file()
 
 
 def test_active_power_shell_contract_has_no_legacy_cursor_artifact_aliases() -> None:

@@ -5,9 +5,10 @@ param(
     [switch]$NoPush,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md",
+    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md",
     [string]$CursorCommand = "",
-    [string]$CursorModel = ""
+    [string]$CursorModel = "",
+    [switch]$WithWrapUp
 )
 
 $ErrorActionPreference = "Continue"
@@ -714,6 +715,9 @@ function Try-ResumeFromExistingReview {
             Commit-And-Push
             Write-FinalStatus "PASS from resume mode. Changes committed and pushed if NoPush was not enabled."
             Write-Host "Final status: PASS"
+            if ($WithWrapUp) {
+                & "$PSScriptRoot\wrap_up_session.ps1"
+            }
             exit 0
         }
 
@@ -799,6 +803,9 @@ DETAIL: No working-tree changes before Codex review on iteration $i after the im
         Write-Host ".ai-loop\implementer_summary.md"
         Write-Host ".ai-loop\project_summary.md"
 
+        if ($WithWrapUp) {
+            & "$PSScriptRoot\wrap_up_session.ps1"
+        }
         exit 0
     }
 

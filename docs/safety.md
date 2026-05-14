@@ -28,6 +28,9 @@ setup.cfg
 .ai-loop/implementer_summary.md
 .ai-loop/project_summary.md
 .ai-loop/repo_map.md
+.ai-loop/failures.md
+.ai-loop/archive/rolls/
+.ai-loop/_debug/session_draft.md
 ```
 
 Runtime artifacts are not staged.

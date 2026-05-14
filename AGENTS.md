@@ -13,7 +13,7 @@ You may edit:
 - `templates/` — files copied into target projects by `install_into_project.ps1`
 - `docs/` — architecture, decisions, safety, workflow (**not** `docs/archive/`)
 - `README.md`, `AGENTS.md`, `.gitignore`, `pytest.ini`, `requirements.txt`
-- `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, `.ai-loop/project_summary.md`, `.ai-loop/repo_map.md`
+- `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, `.ai-loop/project_summary.md`, `.ai-loop/repo_map.md`, `.ai-loop/failures.md`
 - `tasks/` — queued task specs
 
 Never edit:
@@ -31,8 +31,11 @@ When loading context, read in this order and stop when you have enough:
 3. `.ai-loop/repo_map.md` — deterministic file index (always)
 4. `AGENTS.md` — this file (always, once)
 5. `.ai-loop/implementer_summary.md` — previous iteration only (if N > 1)
-6. `docs/architecture.md` — only if the task is architecture-related
-7. `docs/decisions.md`, `docs/workflow.md`, `docs/safety.md` — only when directly relevant
+6. `.ai-loop/failures.md` — cross-session recurring failure fingerprints (recommended once you reach iteration 2).
+7. `docs/architecture.md` — only if the task is architecture-related
+8. `docs/decisions.md`, `docs/workflow.md`, `docs/safety.md` — only when directly relevant
+
+**Rule:** From iteration **2 onward**, read `.ai-loop/failures.md` for recurring failure patterns before writing your first fix attempt in that iteration.
 
 Do not read by default:
 
@@ -53,7 +56,7 @@ powershell -NoProfile -Command "[void][System.Management.Automation.Language.Par
 ```
 
 ## Safe paths (committed by orchestrator)
-The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
+The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
 
 ## Templates contract
 When you add or remove a file in `templates/`, also check `scripts/install_into_project.ps1` so auto-copied target files stay correct.

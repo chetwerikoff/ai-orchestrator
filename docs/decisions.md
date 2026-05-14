@@ -104,3 +104,14 @@ See `docs/architecture.md` §12 DD-021 for rationale and risk notes.
 Opt-in `scripts/run_scout_pass.ps1` before the implementer in task-first mode; adds `RELEVANT FILES (from scout):` to the prompt only when scout JSON is valid and non-empty. Default path unchanged (C02 ordering).
 
 See `docs/architecture.md` §12 DD-022 for rationale and risk notes.
+
+## DD-023: Opt-in wrap-up and failures log (C05)
+
+Date: May 14, 2026
+Status: accepted
+
+Context: No cross-session memory for recurring failures existed. Options considered: `.ai-memory/` directory (rejected adds stale-index risk and maintenance burden), semantic search (rejected overkill for repos under roughly 100k LOC), external service (rejected adds dependency).
+
+Decision: Minimal two-script approach. `scripts/wrap_up_session.ps1` drafts session output after a passing driver finish when `-WithWrapUp`. `scripts/promote_session.ps1` (manual) persists drafts into `.ai-loop/failures.md`. A rolling cap of 200 total lines moves overflow rows into `.ai-loop/archive/failures/` snapshots named by deterministic dates. No classifier, no outbound HTTP.
+
+Consequences: Developers must invoke `promote_session.ps1` manually to anchor history ahead of truncation. `_debug/session_draft.md` stays ephemeral until promotion.

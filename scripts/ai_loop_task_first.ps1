@@ -8,9 +8,10 @@ param(
     [switch]$SkipInitialCursor,
     [switch]$NoPush,
     [switch]$WithScout,
+    [switch]$WithWrapUp,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md"
+    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md"
 )
 $ErrorActionPreference = "Stop"
 $STABLE_PREAMBLE = @"
@@ -288,6 +289,7 @@ function Invoke-AutoReviewLoop {
         [string]$PostFixCommand,
         [string]$SafeAddPaths,
         [switch]$ChainHandoffFromImplementer,
+        [switch]$WithWrapUp,
         [string]$FixerCommand = "",
         [string]$FixerModel = ""
     )
@@ -298,6 +300,7 @@ function Invoke-AutoReviewLoop {
     if (-not [string]::IsNullOrWhiteSpace($FixerCommand)) { $psArgs += @("-CursorCommand", $FixerCommand) }
     if (-not [string]::IsNullOrWhiteSpace($FixerModel)) { $psArgs += @("-CursorModel", $FixerModel) }
     if ($NoPush) { $psArgs += "-NoPush" }
+    if ($WithWrapUp) { $psArgs += "-WithWrapUp" }
     if ($ChainHandoffFromImplementer) {
         $env:AI_LOOP_CHAIN_FROM_TASK_FIRST = "1"
     }
@@ -401,5 +404,5 @@ else {
 }
 
 Write-Section "STEP 2: CODEX REVIEW / FIX LOOP"
-Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromImplementer:$(-not $SkipInitialCursor) -FixerCommand $CursorCommand -FixerModel $CursorModel
+Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromImplementer:$(-not $SkipInitialCursor) -WithWrapUp:$WithWrapUp -FixerCommand $CursorCommand -FixerModel $CursorModel
 Write-Section "AI LOOP TASK-FIRST DONE"

@@ -1,23 +1,22 @@
-﻿# Implementer summary
+﻿## Changed files
 
-## Changed files
-
-- `scripts/install_into_project.ps1` — copies `scripts/run_scout_pass.ps1` into the target `scripts/` directory with the other orchestrator wrappers (enables `-WithScout` on installed projects).
-- `tests/test_orchestrator_validation.py` — added `test_install_into_project_copies_run_scout_pass_script` asserting the installer references `run_scout_pass.ps1` and the source script exists.
+- `.tmp_head_readme.md` — deleted (untracked scratch); removed so it cannot influence generated repo metadata.
+- `.ai-loop/repo_map.md` — dropped the Top-level entry for `.tmp_head_readme.md`; left C05 script lines (`promote_session.ps1`, `wrap_up_session.ps1`) unchanged.
 
 ## Tests
 
-- `python -m pytest -q` — **66 passed**.
+`70 passed` (`python -m pytest -q`)
 
-## Implementation (this fix pass)
+## Implementation
 
-- Ensures installs ship `run_scout_pass.ps1` beside `ai_loop_task_first.ps1` so relative `Join-Path $PSScriptRoot run_scout_pass.ps1` resolves in target repos using DD-022 scout.
+- Removed the stray root scratch markdown file called out in the fix prompt.
+- Updated the committed repo map Top-level section so it no longer references that file.
 
-## Task-specific outputs / skipped live run
+## Task-specific commands
 
-- `.ai-loop/task.md` verification (`powershell … ai_loop_task_first.ps1 -NoPush`) **not run** — full implementer/agents invocation is out of scope for this installer-focused fix pass.
+- Skipped `ai_loop_task_first.ps1 -NoPush` from `.ai-loop/task.md`: it targets **`ai-git-orchestrator`** at a different CWD than this workspace (`ai-orchestrator`).
 
 ## Remaining risks
 
-- Targets installed **before** this installer change lack `run_scout_pass.ps1` until reinstall or manual copy.
-- Scout runtime risks unchanged (latency, malformed JSON, non-fatal warnings).
+- `scripts/build_repo_map.ps1` could not be run from this session’s shell allowlist; Top-level was edited to match the tree without the scratch file (same ordering as generator output). Regenerate locally with PowerShell if you change repo layout.
+- `git status` was not available via the tooling shell here; verify locally that `.tmp_head_readme.md` is absent.

@@ -25,9 +25,11 @@
 - `scripts/continue_ai_loop.ps1` — Resumes ai_loop_auto.ps1 -Resume. Optional -CursorCommand / -CursorModel override
 - `scripts/filter_pytest_failures.py` — Filter pytest -q output into a structured failures summary.
 - `scripts/install_into_project.ps1` — (no header summary)
+- `scripts/promote_session.ps1` — Draft snapshot destination: `.ai-loop/archive/rolls/` (timestamped filenames).
 - `scripts/run_cursor_agent.ps1` — Invoke the Cursor agent CLI (node.exe) directly, reading the prompt from stdin.
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
 - `scripts/run_scout_pass.ps1` — (no header summary)
+- `scripts/wrap_up_session.ps1` — Writes `.ai-loop\_debug\session_draft.md` via read-only ingest of orchestrator artefacts (non-fatal).
 
 ## templates/
 
