@@ -26,6 +26,7 @@ if ([string]::IsNullOrWhiteSpace($promptText)) {
 }
 
 $pushed = $false
+$exitCode = 1
 try {
     if ($workspace -and (Test-Path -LiteralPath $workspace)) {
         Push-Location $workspace

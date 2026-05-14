@@ -2,26 +2,39 @@
 
 ## Changed files
 
-- `scripts/ai_loop_plan.ps1` (`Test-ReviewerOutputStrict`; `reviewLoopExitKind`; conditional max-iteration trace; `REVIEW_STATUS` on planner revision failure and revision sanity failure)
-- `tests/test_orchestrator_validation.py` (extended planner review structural tests + parametric mirror of strict reviewer format)
+- `scripts/run_codex_reviewer.ps1` — Set `$exitCode = 1` before the `try` that runs `codex`, matching `run_claude_planner.ps1` so failures before `$LASTEXITCODE` assignment exit non-zero.
+- `scripts/ai_loop_plan.ps1` — Replaced five corrupted `?` placeholders in user-facing strings with `$([char]0x2014)` (em dash at runtime).
+- `scripts/run_claude_planner.ps1` — No edits; no literal UTF-8 em-dash bytes and no string changes needed.
+- `templates/reviewer_prompt.md` — Replaced seven ` ? ` placeholders with ` -- ` per template convention.
+- `templates/planner_prompt.md` — Replaced twenty-one ` ? ` placeholders with ` -- `; left real sentence-ending `?` in checklist bullets unchanged.
+- `tests/test_orchestrator_validation.py` — Added `test_run_codex_reviewer_initializes_exit_code_before_try` and `test_planner_related_ps1_has_no_utf8_em_dash_literal_bytes`.
+
+## Exit code init
+
+`$exitCode = 1` is present in `run_codex_reviewer.ps1` and occurs before the first `try {`.
+
+## Em dash cleanup (literal `E2 80 94` in sources)
+
+| File | Literal em-dash bytes in file (before) | Replaced in this pass |
+|------|----------------------------------------|------------------------|
+| `run_codex_reviewer.ps1` | 0 (none) | N/A |
+| `run_claude_planner.ps1` | 0 (none) | N/A |
+| `ai_loop_plan.ps1` | 0 (none); five strings used `?` corruption | 5 → `$([char]0x2014)` |
+| `templates/reviewer_prompt.md` | 0; used `?` placeholders | 7 → ` -- ` |
+| `templates/planner_prompt.md` | 0; used `?` placeholders | 21 → ` -- ` |
+
+## Get-Content / template reads
+
+`ai_loop_plan.ps1` has no `Get-Content` calls; template bodies use `[System.IO.File]::ReadAllText`. No `-Encoding UTF8` additions were applicable.
 
 ## Tests
 
-`python -m pytest -q` — **111 passed** (suite count only). `test_planner_scripts_parse_cleanly` still exercises `Parser::ParseFile` on `ai_loop_plan.ps1`.
+- `python -m pytest -q`: **116 passed** (1 PytestCacheWarning on this machine; unrelated to changes). Parser smoke for the three scripts is covered by `test_planner_scripts_parse_cleanly`.
 
-## Implementation (short)
+## PowerShell parse
 
-Reviewer output must be trimmed exactly `NO_BLOCKING_ISSUES` or an `ISSUES:` block whose every non-blank line is a `- [logic|complexity|scope|missing] …` bullet; otherwise the trace logs `REVIEWER_OUTPUT_MALFORMED` and the loop degrades without sending garbage to revision. Loop exit tracks `max_iterations` vs early clean vs degraded; “MaxReviewIterations reached” trace and console line run only on a genuine cap finish. Planner revision nonzero exit and failed revision sanity prepend `REVIEW_STATUS: PLANNER_REVISION_FAILED` / `REVISION_SANITY_FAILED` before breaking.
-
-## Task-specific live run / smoke
-
-Skipped `ai_loop_task_first.ps1 -NoPush` smoke from `.ai-loop/task.md` (requires Cursor/implementer and full orchestrator inputs; not executed in this iteration).
-
-## Skipped
-
-- Manual Codex-backed `-WithReview` smoke (authenticated CLIs not required by the fix prompt).
+Could not run a standalone `ParseFile` invocation from this agent shell (command rejected); `test_planner_scripts_parse_cleanly` exercises the same AST parse for `run_codex_reviewer.ps1`, `run_claude_planner.ps1`, and `ai_loop_plan.ps1` and passed.
 
 ## Remaining risks
 
-- Mirror test `_reviewer_output_strict_ok` must stay aligned with PowerShell `Test-ReviewerOutputStrict` if either side changes.
-- Very large malformed reviewer payloads are still surfaced in the trace verbatim (unchanged clipping behavior).
+- If new prose is pasted into `.ps1` strings with a literal em dash from a Unicode editor, the binary guard test should catch it; reviewers should prefer `$([char]0x2014)` or ASCII ` -- ` in templates.

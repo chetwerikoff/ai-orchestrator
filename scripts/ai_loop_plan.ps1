@@ -137,7 +137,7 @@ if (Test-Path -LiteralPath $repoPath) {
     $repoMapBody = [System.IO.File]::ReadAllText($repoPath)
     $repoBlock = "`n`n## repo_map.md`n" + $repoMapBody
 } else {
-    Write-Warning "repo_map.md is missing ? planner context will be limited. Run scripts/build_repo_map.ps1 first for better results."
+    Write-Warning "repo_map.md is missing $([char]0x2014) planner context will be limited. Run scripts/build_repo_map.ps1 first for better results."
 }
 $prompt = $planPromptBody + "`n`n## AGENTS.md`n" + $agentsBody + "`n`n## project_summary.md`n" + $summaryBody + $repoBlock + "`n`n## USER ASK`n" + $resolvedAsk
 $backupMade = $false
@@ -192,7 +192,7 @@ try {
             if (($issues.Trim()) -eq "NO_BLOCKING_ISSUES") {
                 [void]$traceLines.Add("Exit: NO_BLOCKING_ISSUES at iteration $i.")
                 $reviewLoopExitKind = "no_issues"
-                Write-Host "Reviewer: NO_BLOCKING_ISSUES ? exited at iteration $i."
+                Write-Host "Reviewer: NO_BLOCKING_ISSUES $([char]0x2014) exited at iteration $i."
                 break
             }
             $revisionInstructions = (@(
@@ -202,7 +202,7 @@ try {
 "ISSUES list below. The reviewer is advisory; you have the final say.", "",
 "For each issue:",
 "- If you agree, incorporate the fix into the revised task.md silently",
-"  (no Architect note required for accepted fixes ? the change is the",
+"  (no Architect note required for accepted fixes $([char]0x2014) the change is the",
 "  evidence).",
 "- If you disagree, reject it and add an 'Architect note: rejected",
 "  <category>:<short ref> because <one-line reason>' under ## Important.",
@@ -247,10 +247,10 @@ try {
     if ($outParent -and -not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Force -Path $outParent | Out-Null }
     Set-Content -LiteralPath $tmpOut -Value $writeText -Encoding UTF8
     Move-Item -Force -LiteralPath $tmpOut -Destination $Out
-    Write-Host "Wrote $Out (no obvious structural issues found).`n`nFiles in scope (extracted from task.md ? verify before running):"
+    Write-Host "Wrote $Out (no obvious structural issues found).`n`nFiles in scope (extracted from task.md $([char]0x2014) verify before running):"
     $paths = Get-FilesInScopeSummary -Text $writeText
     if ($paths.Count -eq 0) {
-        Write-Host "  (Could not parse Files in scope ? review task.md manually.)"
+        Write-Host "  (Could not parse Files in scope $([char]0x2014) review task.md manually.)"
     } else {
         $n = [Math]::Min(10, $paths.Count)
         for ($j = 0; $j -lt $n; $j++) { Write-Host "  $($paths[$j])" }

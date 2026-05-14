@@ -1072,6 +1072,20 @@ def test_run_codex_reviewer_invariants() -> None:
     assert "2>&1" not in text
 
 
+def test_run_codex_reviewer_initializes_exit_code_before_try() -> None:
+    text = (_SCRIPTS / "run_codex_reviewer.ps1").read_text(encoding="utf-8")
+    assert "$exitCode = 1" in text
+    assert text.index("$exitCode = 1") < text.index("try {")
+
+
+def test_planner_related_ps1_has_no_utf8_em_dash_literal_bytes() -> None:
+    """Planner/reviewer wrappers must not embed UTF-8 U+2014 bytes (PS 5.1 source corruption)."""
+    em = b"\xe2\x80\x94"
+    for name in ("run_codex_reviewer.ps1", "run_claude_planner.ps1", "ai_loop_plan.ps1"):
+        data = (_SCRIPTS / name).read_bytes()
+        assert em not in data, f"{name} must not contain literal UTF-8 em dash; use $([char]0x2014)"
+
+
 def test_ai_loop_plan_review_invariants() -> None:
     text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
     assert "[switch]$WithReview" in text
