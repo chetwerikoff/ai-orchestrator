@@ -32,7 +32,7 @@ try {
     }
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $promptText | cmd /c claude --print --model $model --tools ""
+    $promptText | cmd /c claude --print --model $model --tools '""'
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEA
 }

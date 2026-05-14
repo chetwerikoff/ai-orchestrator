@@ -1024,7 +1024,7 @@ def test_run_claude_planner_has_no_param_block_and_no_stderr_redirect() -> None:
     assert "param(" not in text
     assert "2>&1" not in text
     assert "cmd /c claude --print" in text
-    assert '--tools ""' in text
+    assert '--tools \'""\'' in text
 
 
 def test_install_copies_planner_files_and_has_self_install_guard() -> None:
