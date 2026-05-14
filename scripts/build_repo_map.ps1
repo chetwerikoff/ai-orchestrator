@@ -20,6 +20,7 @@ function Test-RepoMapSkipPath {
     if ($RelNorm -match '(^|/)\.ai-loop/_debug(/|$)') { return $true }
     if ($RelNorm -match '(^|/)\.ai-loop/archive(/|$)') { return $true }
     if ($RelNorm -match '(^|/)(\.tmp|__pycache__|\.git|\.pytest_cache|\.claude|node_modules|input|output)(/|$)') { return $true }
+    if ($RelNorm -eq 'CLAUDE.md') { return $true }
     return $false
 }
 
