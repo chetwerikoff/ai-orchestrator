@@ -1,8 +1,8 @@
-# C07 — Claude task planner: plan_task.py + ai_loop_plan_with_claude.ps1
+# C07 — Task planner with swappable architect wrappers
 
 **Project:** `ai-orchestrator`
 **CWD:** `C:\Users\che\Documents\Projects\ai-orchestrator`
-**Risk:** medium — new scripts + API dependency + install contract change.
+**Risk:** medium — three new scripts + install contract change.
 
 How to run:
 ```powershell
@@ -12,7 +12,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 -NoPus
 
 ---
 
-# Task: Claude task planner
+# Task: Architect-agnostic task planner
 
 ## Project context
 
@@ -22,7 +22,9 @@ Required reading before starting (in order; stop when you have enough):
 2. `.ai-loop/task.md` — this task
 3. `.ai-loop/project_summary.md` — durable project orientation
 4. `.ai-loop/repo_map.md` — file index
-5. `.ai-loop/implementer_summary.md` — only if this is iteration 2+
+5. `scripts/ai_loop_task_first.ps1` — existing implementer-prompt assembly pattern to mirror
+6. `scripts/run_cursor_agent.ps1`, `scripts/run_opencode_agent.ps1` — existing wrapper convention
+7. `.ai-loop/implementer_summary.md` — only if this is iteration 2+
 
 Do not read by default:
 
@@ -31,120 +33,193 @@ Do not read by default:
 
 ## Goal
 
-Create two new scripts that let a user describe a task in natural language and
-get a properly formatted `.ai-loop/task.md` back from Claude:
+Add a planner stage that produces `.ai-loop/task.md` from a natural-language ask,
+using the **same wrapper pattern already used for implementers**:
 
-1. `scripts/plan_task.py` — Python script that reads project context, calls
-   the Claude API (claude-sonnet-4-6), and writes `.ai-loop/task.md`.
-2. `scripts/ai_loop_plan_with_claude.ps1` — thin PowerShell wrapper that
-   validates prerequisites and invokes `plan_task.py`.
+```
+ai_loop_plan.ps1 -PlannerCommand .\scripts\run_claude_planner.ps1
+```
 
-Update `scripts/install_into_project.ps1` so both files are copied into target
-projects. Add tests pinning the new scripts' existence and basic structure.
+Architect can be swapped by writing a new wrapper (`run_gpt_planner.ps1`, etc.).
+The main entrypoint is architect-agnostic.
+
+Deliverables:
+
+1. `scripts/ai_loop_plan.ps1` — main entrypoint. Builds the planner prompt
+   (context + format reference + user ask), pipes it to the wrapper, captures
+   stdout, writes `.ai-loop/task.md`.
+2. `scripts/run_claude_planner.ps1` — Claude wrapper. Reads prompt from stdin,
+   invokes `claude --print` non-interactively, returns stdout.
+3. `templates/planner_prompt.md` — system instructions for the planner role
+   (architect-agnostic). Read once by `ai_loop_plan.ps1` and embedded in the prompt.
+
+Update `scripts/install_into_project.ps1` to copy all three files into target
+projects. Update `AGENTS.md` Never-edit list. Add tests.
 
 ## Scope
 
 Allowed:
-- Create `scripts/plan_task.py`
-- Create `scripts/ai_loop_plan_with_claude.ps1`
-- Edit `scripts/install_into_project.ps1` (add two copy lines)
+- Create `scripts/ai_loop_plan.ps1`
+- Create `scripts/run_claude_planner.ps1`
+- Create `templates/planner_prompt.md`
+- Edit `scripts/install_into_project.ps1` (add three copy lines)
 - Edit `tests/test_orchestrator_validation.py` (add tests)
-- Edit `AGENTS.md` — add `scripts/plan_task.py` to Never-edit list
+- Edit `AGENTS.md` (Never-edit list, safe-paths note if needed)
 
 Not allowed:
 - Any changes to `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`,
   `scripts/continue_ai_loop.ps1`
-- Changes to `templates/` or other docs
-- Changes to `src/`, `ai_loop.py`
+- Changes to existing implementer wrappers (`run_cursor_agent.ps1`,
+  `run_opencode_agent.ps1`, `run_opencode_scout.ps1`)
+- Changes to other templates, `src/`, `ai_loop.py`, docs
 
 ## Files in scope
 
-- `scripts/plan_task.py` (new)
-- `scripts/ai_loop_plan_with_claude.ps1` (new)
-- `scripts/install_into_project.ps1` (edit — add copy lines)
-- `tests/test_orchestrator_validation.py` (edit — add tests)
-- `AGENTS.md` (edit — Never-edit list)
+- `scripts/ai_loop_plan.ps1` (new)
+- `scripts/run_claude_planner.ps1` (new)
+- `templates/planner_prompt.md` (new)
+- `scripts/install_into_project.ps1` (edit)
+- `tests/test_orchestrator_validation.py` (edit)
+- `AGENTS.md` (edit)
 
 ## Files out of scope
 
 - `scripts/ai_loop_auto.ps1`
 - `scripts/ai_loop_task_first.ps1`
 - `scripts/continue_ai_loop.ps1`
+- `scripts/run_cursor_agent.ps1`
+- `scripts/run_opencode_agent.ps1`
+- `scripts/run_opencode_scout.ps1`
+- `scripts/run_scout_pass.ps1`
 - `docs/archive/**`
 - `.ai-loop/_debug/**`
 - `ai_loop.py`
-- `templates/**`
 
 ## Required behavior
 
-### scripts/plan_task.py
+### scripts/ai_loop_plan.ps1
 
-CLI interface:
-```
-python scripts/plan_task.py --ask "TEXT" [--out .ai-loop/task.md] [--force]
-```
-
-- `--ask TEXT` — user's natural language task description. Required unless
-  `.ai-loop/user_ask.md` exists (fallback: read that file).
-- `--out PATH` — output path (default: `.ai-loop/task.md`).
-- `--force` — overwrite without backup. Without this flag, if the output file
-  exists it is backed up to `<out>.bak` before overwriting.
-
-Context Claude receives (in this order, with prompt caching on the context block):
-
-1. Contents of `AGENTS.md` (working rules + scope).
-2. Contents of `.ai-loop/project_summary.md` (project orientation).
-3. First 120 lines of `.ai-loop/repo_map.md` if the file exists (file index).
-4. Contents of `templates/task.md` stripped of the HTML comment header (output format reference).
-
-Then the user ask is appended as the non-cached final message.
-
-Claude's system prompt instructs it to:
-- Output ONLY the filled task.md content (no preamble, no explanation).
-- Follow the template format exactly: all required sections present.
-- Keep the task to ≤80 lines of code change (per AGENTS.md task size policy).
-- Use concrete file paths from repo_map where relevant.
-- Not invent behavior not implied by the ask and context.
-
-API call:
-- Model: `claude-sonnet-4-6`
-- API key: from `ANTHROPIC_API_KEY` environment variable. Exit with clear error
-  if unset.
-- Use the `anthropic` Python SDK.
-- Apply `cache_control={"type": "ephemeral"}` to the project context block
-  (the combined AGENTS.md + project_summary + repo_map + template content)
-  so repeated planner calls within a session hit the cache.
-- `max_tokens`: 2048.
-
-Error handling:
-- Missing `ANTHROPIC_API_KEY` → print actionable message and exit 1.
-- Missing `AGENTS.md` or `project_summary.md` → print which file is missing and exit 1.
-- API error → print error and exit 1.
-- On success → print the output path.
-
-### scripts/ai_loop_plan_with_claude.ps1
-
-```
-.\scripts\ai_loop_plan_with_claude.ps1 [-Ask "TEXT"] [-Out ".ai-loop\task.md"] [-Force]
+Parameters:
+```powershell
+param(
+    [string]$Ask = "",
+    [string]$PlannerCommand = ".\scripts\run_claude_planner.ps1",
+    [string]$PlannerModel = "",
+    [string]$Out = ".ai-loop\task.md",
+    [string]$AskFile = ".ai-loop\user_ask.md",
+    [switch]$Force
+)
 ```
 
-- Checks that `ANTHROPIC_API_KEY` env var is set; exits with message if not.
-- Checks that `scripts/plan_task.py` exists; exits if not.
-- Invokes `python scripts\plan_task.py` forwarding `-Ask`, `-Out`, `-Force`.
-- On exit code 0: prints path of the written file and reminder to review before
-  running `ai_loop_task_first.ps1`.
-- On non-zero exit: prints the error and exits with the same code.
+Logic:
+
+1. Resolve user ask: prefer `-Ask`; if empty, read `$AskFile`; if both empty/missing,
+   exit 1 with clear message.
+2. Validate prerequisites (`AGENTS.md`, `.ai-loop/project_summary.md`,
+   `templates/planner_prompt.md` exist; exit 1 with which is missing if not).
+3. Validate `$PlannerCommand` exists (mirror `Assert-CommandExists` pattern from
+   `ai_loop_task_first.ps1`).
+4. Build the planner prompt by concatenating, in order:
+   - Contents of `templates/planner_prompt.md` (system instructions + format).
+   - Header line `## AGENTS.md` followed by contents of `AGENTS.md`.
+   - Header line `## project_summary.md` followed by contents of
+     `.ai-loop/project_summary.md`.
+   - Header line `## repo_map.md (excerpt)` followed by first 120 lines of
+     `.ai-loop/repo_map.md` if it exists.
+   - Header line `## USER ASK` followed by the resolved ask.
+5. If `$Out` exists and `-Force` is not set: rename it to `$Out.bak` (overwriting
+   any prior `.bak`).
+6. Pipe the prompt to the wrapper:
+   `$prompt | & $PlannerCommand --workspace $ProjectRoot --model $PlannerModel`
+   Capture stdout.
+7. Validate response: must contain at least the headings `## Goal`,
+   `## Files in scope`, `## Files out of scope` (warn if missing, do not fail).
+8. Write captured stdout to `$Out` (UTF-8 no BOM).
+9. Print: `Wrote $Out. Review before running ai_loop_task_first.ps1.`
+
+Exit codes: 0 on success; 1 on missing prerequisites or wrapper error.
+
+### scripts/run_claude_planner.ps1
+
+Mirrors `run_opencode_agent.ps1` structure: no `param()` block; reads piped
+prompt from `$input`; parses `--workspace` and `--model` from `$args`; silently
+ignores other flags.
+
+Logic:
+
+1. Read prompt from `$input` into a single string. Empty → `Write-Error` + exit 1.
+2. Resolve `--workspace` (optional, used as cwd) and `--model` (default
+   `claude-sonnet-4-6`).
+3. Push-Location to workspace if given.
+4. Invoke `claude --print --model $model` (non-interactive). Pass the prompt via
+   stdin. Capture stdout (returned as-is to caller). `2>&1` so stderr surfaces.
+5. Pop-Location in `finally`.
+6. `exit $LASTEXITCODE`.
+
+Exit codes: forwarded from `claude` CLI.
+
+### templates/planner_prompt.md
+
+A markdown file with these sections (no HTML comments at top — those belong to
+the task template, not the planner instructions):
+
+```markdown
+# Planner role
+
+You are the PLANNER. Output **only** the contents of `.ai-loop/task.md` for the
+user ask below — no preamble, no explanation, no code fences around the whole
+output.
+
+## Output format (mandatory)
+
+Produce a markdown document with these headings, in order:
+
+- `# Task: <short name>`
+- `## Project context` — required reading list (point to AGENTS.md, task.md,
+  project_summary.md; iteration-2+ note for implementer_summary.md)
+- `## Goal` — one paragraph, concrete
+- `## Scope` — Allowed / Not allowed bullets
+- `## Files in scope` — concrete relative paths only
+- `## Files out of scope` — concrete paths (include `docs/archive/**`,
+  `.ai-loop/_debug/**`, `ai_loop.py`)
+- `## Required behavior` — numbered steps
+- `## Tests` — what to add/update; the command `python -m pytest -q`
+- `## Verification` — concrete commands
+- `## Implementer summary requirements` — five-point list
+- `## Project summary update` — what durable info to add, if any
+- `## Output hygiene` — standard four bullets (no duplication, no debug, no
+  commit, no archive writes)
+- `## Important` — task-specific gotchas
+
+## Hard rules
+
+- Keep the implementation under 80 lines of code change (per AGENTS.md task
+  size policy). If the ask is larger, split into ordered subtasks in `## Important`.
+- Do not invent file paths. Use only paths visible in the provided project
+  context (AGENTS.md scope, repo_map excerpt).
+- Do not ask the user questions. Make reasonable choices and call them out in
+  `## Important`.
+- Do not output `<!-- ... -->` HTML comments.
+- Do not write anything before `# Task:` or after `## Important`.
+```
 
 ### scripts/install_into_project.ps1
 
-Add copy lines for `scripts/plan_task.py` and
-`scripts/ai_loop_plan_with_claude.ps1` alongside the existing script copies.
-Follow the existing pattern (Copy-Item with `-Force`, same destination layout).
+Add `Copy-Item -Force` lines for `scripts/ai_loop_plan.ps1`,
+`scripts/run_claude_planner.ps1`, `templates/planner_prompt.md`. Place them
+near the existing script/template copies, in alphabetical order if the file
+already groups by directory.
 
 ### AGENTS.md
 
-Add `scripts/plan_task.py` to the "Never edit" list (managed by ai-orchestrator;
-reinstall via `install_into_project.ps1`).
+Add to "Never edit" list:
+- `scripts/run_claude_planner.ps1`
+- (`scripts/ai_loop_plan.ps1` is editable from this repo — it is one of the
+  orchestrator scripts; only add the wrapper to Never-edit so target projects
+  do not modify it.)
+
+Add a one-line note under "## Commands" or near it pointing at the new entrypoint:
+`Plan: powershell -File .\scripts\ai_loop_plan.ps1 -Ask "..."`
 
 ## Tests
 
@@ -156,16 +231,28 @@ python -m pytest -q
 
 Add to `tests/test_orchestrator_validation.py`:
 
-1. `test_plan_task_script_exists` — assert `scripts/plan_task.py` is a file.
-2. `test_plan_task_has_required_args` — read `plan_task.py` text; assert it
-   contains `--ask`, `--out`, `--force`, `ANTHROPIC_API_KEY`,
-   `claude-sonnet-4-6`, `cache_control`.
-3. `test_ai_loop_plan_ps1_parses_cleanly` — PowerShell `Parser::ParseFile`
-   check for `ai_loop_plan_with_claude.ps1` (same pattern as existing parse tests).
-4. `test_install_copies_plan_task_scripts` — read `install_into_project.ps1`
-   text; assert it contains `plan_task.py` and `ai_loop_plan_with_claude.ps1`.
+1. `test_ai_loop_plan_script_exists` — assert `scripts/ai_loop_plan.ps1` exists.
+2. `test_run_claude_planner_script_exists` — assert
+   `scripts/run_claude_planner.ps1` exists.
+3. `test_planner_prompt_template_exists` — assert
+   `templates/planner_prompt.md` exists.
+4. `test_planner_scripts_parse_cleanly` — extend the existing PowerShell
+   `Parser::ParseFile` test list with the two new `.ps1` files.
+5. `test_ai_loop_plan_accepts_required_parameters` — read
+   `ai_loop_plan.ps1` text; assert it declares `$Ask`, `$PlannerCommand`,
+   `$PlannerModel`, `$Out`, `$AskFile`, `$Force`.
+6. `test_run_claude_planner_uses_claude_print` — read
+   `run_claude_planner.ps1`; assert it contains the `claude` invocation with
+   `--print` and `--model` handling, and has no `param()` block (matches
+   wrapper convention).
+7. `test_planner_prompt_has_required_sections` — read
+   `templates/planner_prompt.md`; assert it contains `# Planner role`,
+   `## Output format`, `## Hard rules`.
+8. `test_install_copies_planner_files` — read `install_into_project.ps1`;
+   assert it copies `ai_loop_plan.ps1`, `run_claude_planner.ps1`,
+   `planner_prompt.md`.
 
-Do NOT call the Claude API in tests.
+Do NOT call the `claude` CLI in tests.
 
 ## Verification
 
@@ -174,15 +261,15 @@ python -m pytest -q
 ```
 
 ```powershell
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan_with_claude.ps1', [ref]$null, [ref]$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan.ps1', [ref]$null, [ref]$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\run_claude_planner.ps1', [ref]$null, [ref]$null)"
 ```
 
-Manual smoke (requires `ANTHROPIC_API_KEY` set):
-```bash
-python scripts/plan_task.py --ask "Add a hello-world smoke test that prints OK" --out .ai-loop/task_smoke.md
+Manual smoke (requires `claude` CLI authenticated):
+```powershell
+.\scripts\ai_loop_plan.ps1 -Ask "Add a hello-world smoke test that prints OK" -Out .ai-loop\task_smoke.md
 ```
-Verify `.ai-loop/task_smoke.md` contains all required template sections and
-delete it after inspection.
+Verify `.ai-loop\task_smoke.md` contains the required sections, then delete it.
 
 ## Implementer summary requirements
 
@@ -198,10 +285,12 @@ Update `.ai-loop/implementer_summary.md` with:
 
 Update `.ai-loop/project_summary.md`:
 
-- Add `scripts/plan_task.py` and `scripts/ai_loop_plan_with_claude.ps1` to the
-  Architecture section (one line each).
-- Update Current Stage to reflect that the Claude planner is available.
-- Update Next Likely Steps.
+- Add `scripts/ai_loop_plan.ps1` and `scripts/run_claude_planner.ps1` and
+  `templates/planner_prompt.md` to the Architecture section (one line each).
+- Mention the wrapper pattern: planner is swappable via `-PlannerCommand`,
+  mirroring `-CursorCommand` for implementers.
+- Update Current Stage.
+- Update Next Likely Steps (e.g. add wrappers for other architects later).
 
 ## Output hygiene
 
@@ -214,9 +303,18 @@ The implementer must not:
 
 ## Important
 
-- Do not call the Claude API in tests — test only structure and arguments.
-- `plan_task.py` is a new script installed into target projects; it must work
-  from the target project's CWD (paths relative to CWD, not to script location).
-- The backup (`task.md.bak`) must not be staged by the orchestrator — it is not
-  in `SafeAddPaths`.
-- Keep `plan_task.py` under 120 lines total (including imports and docstring).
+- `ai_loop_plan.ps1` is invoked **manually by the user** before
+  `ai_loop_task_first.ps1`. It is NOT part of the automated loop. Do not
+  add a call to it from `ai_loop_task_first.ps1`.
+- The planner is **architect-agnostic**. `ai_loop_plan.ps1` must never call
+  `claude` directly — only through `$PlannerCommand`. A future
+  `run_gpt_planner.ps1` or `run_local_planner.ps1` must work as a drop-in
+  replacement without changes to the main entrypoint.
+- The wrapper convention requires **no `param()` block** in
+  `run_claude_planner.ps1` so PowerShell pipeline binding does not consume
+  `$input`. Mirror `run_opencode_agent.ps1` exactly on this point.
+- `.bak` file from the backup step must not be staged. Verify after the run
+  that `SafeAddPaths` does not include `*.bak` (it should not — no change needed).
+- `task.md` written by the planner replaces `.ai-loop/task.md`. The user is
+  expected to review it before running `ai_loop_task_first.ps1`.
+- Keep `ai_loop_plan.ps1` under 120 lines, `run_claude_planner.ps1` under 50.
