@@ -27,6 +27,5 @@ Responsibilities:
 - **`docs/decisions.md`** may lag `docs/architecture.md` §12 — the architecture doc wins on conflicts.
 - **`tasks/context_audit/`** is a spec queue, not orientation. Do not read it during normal context loading.
 - **`.ai-loop/implementer.json`** is runtime-only (gitignored) — not durable documentation.
-- **`opencode_proxy.py`** lives outside VCS at `C:\AI\scripts\` (Q-10 open). Phase 1 direct-port runs (`:8081–:8083`) do not need it.
 - **Scout role**: always use `run_opencode_scout.ps1` for scout passes, never `run_opencode_agent.ps1`. Mixing roles causes silent failures.
 - **`SafeAddPaths`** literal lives in three scripts and `docs/safety.md` — update all four together when adding a new always-committed path.

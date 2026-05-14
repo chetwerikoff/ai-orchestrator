@@ -45,17 +45,16 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 
 ## Current Stage
 
-Reviewable: C06 OpenCode scout framing — `run_opencode_scout.ps1` provides SCOUT-role `opencode run` stdin/file attachment parity with `run_opencode_agent.ps1`; `run_scout_pass.ps1` substitutes it when `-CommandName` targets `run_opencode_agent.ps1`, warns on suspiciously short scout output (<200 bytes), and falls back gracefully if the scout wrapper is absent. Installer copies `run_opencode_scout.ps1` beside other orchestrator scripts. Keep `python -m pytest -q` green prior to merges.
+Stable. Phase 1 A/B closed (2026-05-14): Cursor confirmed as permanent default implementer (DD-021 resolved). Proxy (DD-020) retired. `MaxIterations` default set to 5 (DD-011 resolved). `CLAUDE.md` added for Claude Code sessions and excluded from repo_map. All orchestrator queue tasks (O01–O06, DD-011) complete.
 
 ## Last Completed Task
 
-C06: OpenCode scout wrapper (`scripts/run_opencode_scout.ps1`), `run_scout_pass.ps1` auto-substitute + short-output guard, installer copy line, and validation tests for scout message and scout-pass markers.
+DD-011 / housekeeping: MaxIterations default 10→5 in all driver scripts; docs and decisions updated; Phase 1 A/B closed; DD-020/DD-021 resolved.
 
 ## Next Likely Steps
 
-1. Run `python -m pytest -q`, update `scripts/build_repo_map.ps1` output when filesystem contracts change, and run PowerShell parse checks whenever scripts mutate.
+1. H2N target project cleanup: D01 (compact project_summary.md) → D02 (reinstall scripts + AGENTS.md) → D03 (compact REVIEW_STATE.md, manual).
 2. Use task-first for new work; use `continue_ai_loop.ps1` for interrupted loops; optionally pass `-WithWrapUp`, then periodically run `promote_session.ps1` to refresh `failures.md`.
-3. Keep collecting OpenCode/Qwen A/B telemetry; optionally pair `-WithScout` (DD-022) with wrap-up summaries for large repos.
 
 ## Notes For Future AI Sessions
 

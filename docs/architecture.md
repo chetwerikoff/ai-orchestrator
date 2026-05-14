@@ -1,7 +1,7 @@
 ---
 doc_type: architecture
 status: living_document
-as_of: 2026-05-13
+as_of: 2026-05-14
 ---
 
 # Architecture — AI Orchestrator
@@ -11,7 +11,7 @@ as_of: 2026-05-13
 - **§0** is ground truth for what runs today (Cursor implementer, Codex reviewer, file-based `.ai-loop/` contract).
 - **§1 onward** describe the *target* asymmetric multi-model factory: Claude planner → OpenCode + local Qwen coder → deterministic guards → Codex → Claude business gate. That pipeline is aspirational until phased rollout completes.
 - **§9–§11** spell out deferred harness layouts, deterministic safety expectations, companion-doc roles, plus archive paths for verbatim expert critique (**§9 carries the substantive blueprint internally** — not summarized away).
-- **Phase 0 (2026-05-11)** validated OpenCode + `llama-server` on Windows with a canonical trivial task. **Phase 1 A/B is IN PROGRESS (2026-05-13)** with three Qwen models at ports 8081/8082/8083 — direct connections, no proxy required (all emit native `tool_calls[]`). Proxy at **:8090** remains available as fallback — see **DD-020** and **§5.3**. **DD-022** adds an opt-in scout pre-pass (`-WithScout`) for OpenCode/Qwen; default Cursor path unchanged.
+- **Phase 0 (2026-05-11)** validated OpenCode + `llama-server` on Windows with a canonical trivial task. **Phase 1 A/B closed (2026-05-14)**: Cursor confirmed as the permanent default implementer (DD-021). OpenCode/Qwen remain available via `-CursorCommand` but are not the production path. Proxy (**DD-020**) retired — not needed. **DD-022** adds an opt-in scout pre-pass (`-WithScout`); default Cursor path unchanged.
 - Full numbered decisions live in **§12**; open questions in **§13**.
 
 ## §0 Current state (as of 2026-05-12)
@@ -70,40 +70,15 @@ OpenCode (non-interactive)
        --flash-attn on --cache-type-k q8_0 --cache-type-v q8_0
 ```
 
-**Phase 1 A/B stack** (as of 2026-05-13) — three direct providers, no proxy:
+**Phase 1 A/B closed (2026-05-14).** Cursor is confirmed as the permanent default implementer. OpenCode + Qwen remain supported via `-CursorCommand .\scripts\run_opencode_agent.ps1 -CursorModel <provider/model-id>` for opt-in use, but are not the production path. The proxy at `:8090` is retired (DD-020).
 
-```text
-:8081  Qwen3-Coder-30B-A3B-Instruct-Q3_K_M  (MoE, -c 131072, --n-cpu-moe 999)
-:8082  Qwen3.6-27B-IQ4_XS                   (dense, -c 32768, --cache-type-k/v q4_0)
-:8083  Qwen3.6-35B-A3B-UD-Q4_K_M            (MoE, -c 131072, --n-cpu-moe 999)
-```
-
-The proxy at `:8090` is **not used** in the Phase 1 A/B setup — all three models
-emit native `tool_calls[]` with llama.cpp `--jinja` (default). `opencode.json`
-in the target project defines each model as a separate provider pointing directly
-to its port. Proxy remains available as a fallback for text-format tool emitters
-(see DD-020 / §5.3).
-
-Orchestrator integration: pass `-CursorCommand .\scripts\run_opencode_agent.ps1
--CursorModel <provider/model-id>` to `ai_loop_task_first.ps1` to substitute
-OpenCode for Cursor as the implementer in the loop. The effective wrapper and
-model are written to **`.ai-loop/implementer.json`** (runtime, gitignored) so
-`continue_ai_loop.ps1` or `ai_loop_auto.ps1 -Resume` can reload them without
-repeating those switches; explicit `-CursorCommand` / `-CursorModel` still
-override the file.
+The effective implementer wrapper and model are written to **`.ai-loop/implementer.json`** (runtime, gitignored) so `continue_ai_loop.ps1` or `ai_loop_auto.ps1 -Resume` can reload them without repeating switches; explicit `-CursorCommand` / `-CursorModel` always override the file.
 
 ### §0.4 Gap between current state and target
 
 - Claude is not in the loop yet (planner / business gate).
-- OpenCode + Qwen has completed P0 but is not yet the default
-  implementer; Cursor remains the production implementer (see **DD-021**).
-- `domain_gate.py`, `diff_guard.py` from the target design do not exist
-  yet in `scripts/`.
-- `opencode_proxy.py` is a critical new component not yet in this repo
-  (lives in `C:\AI\scripts\`). See DD-020, Q-10.
-- `scripts/run_opencode_agent.ps1` **exists** — PowerShell wrapper that
-  bridges `ai_loop_auto.ps1` to `opencode run`; activated via
-  `-CursorCommand` flag. Also copied to target projects' `scripts/`.
+- `domain_gate.py`, `diff_guard.py` from the target design do not exist yet in `scripts/`.
+- `scripts/run_opencode_agent.ps1` exists as an opt-in wrapper; not the default path.
 
 The phase plan in §8 is the path from "current state" to "target state".
 
@@ -313,23 +288,9 @@ p1_default_coder: Qwen3-Coder-30B-A3B-Instruct Q3_K_M
 p1_integration_stack: see §0.3 above
 ```
 
-### §8.2 Phase 1 — IN PROGRESS (started 2026-05-13)
+### §8.2 Phase 1 — CLOSED (2026-05-14)
 
-Run A/B harness tasks comparing **Cursor** vs **OpenCode+Qwen** on real H2N-sized workloads (**DD-021**) before switching the default implementer.
-
-```yaml
-status: IN PROGRESS
-started: 2026-05-13
-models_under_test:
-  run_A: Cursor (baseline)
-  run_B: Qwen3-Coder-30B-A3B Q3_K_M  (:8081, -c 131072, MoE)
-  run_C: Qwen3.6-27B IQ4_XS          (:8082, -c 32768, dense, q4_0 KV)
-  run_D: Qwen3.6-35B-A3B Q4_K_M      (:8083, -c 131072, MoE, --n-cpu-moe)
-preliminary_notes:
-  - run_D: hit context overflow on first task (partial stash saved); second model run started
-  - proxy :8090 not used — all three Qwen3 models emit native tool_calls[]
-  - loop activated via: ai_loop_task_first.ps1 -CursorCommand .\scripts\run_opencode_agent.ps1 -CursorModel <provider/id>
-```
+A/B harness comparison of Cursor vs OpenCode+Qwen closed without switching the default implementer. Decision: Cursor remains the permanent production implementer (DD-021 resolved). OpenCode/Qwen available opt-in via `-CursorCommand`. Proxy (DD-020) retired.
 
 ## §9 Target component map and deferred factory layout (target)
 
@@ -342,7 +303,7 @@ OpenCode + local Qwen  = tool-using coding harness inside the target coding repo
 ai-orchestrator        = outer workflow (task contract, tests, safe git, Codex gate)
 ```
 
-Until Phase 1 evidence satisfies **DD-021**, **Cursor Agent** remains the production implementer for tasks driven from this repository.
+**Cursor Agent** is the confirmed production implementer (DD-021 resolved 2026-05-14).
 
 Expert review verbatim (findings IDs, MVP debate, critique lists) stays in **`docs/archive/2026-05-11_opencode_harness_expert_review.md`** for traceability — **not** as a substitute for the numbered contracts above and below.
 
@@ -652,50 +613,17 @@ Decision: Orchestrator entrypoints default `-MaxIterations` to **5**. Beyond 5 i
 
 Status: resolved (2026-05-14).
 
-### DD-020 — OpenCode↔llama text-tool normalization proxy (optional)
+### DD-020 — OpenCode↔llama text-tool normalization proxy (retired)
 
-Decision: Maintain a local HTTP proxy (`opencode_proxy.py` on port **8090**)
-that can sit between OpenCode and `llama-server` to convert **text-format** tool
-calls (`<tool_call>`, `<function=name>`, `<tools>`) into structured
-`tool_calls[]` on the wire response. **Phase 1 A/B** uses **direct**
-connections from `opencode.json` to `llama-server` ports **8081 / 8082 / 8083**
-(see **`templates/opencode.json`**, **§0.3**, **§5.3**) because the Qwen3
-candidates emit native `tool_calls[]`; the proxy remains the supported path
-for models that do not.
+Decision: Proxy (`opencode_proxy.py`, port **8090**) is retired as of 2026-05-14. Phase 1 A/B closed; Cursor is the confirmed production implementer; no active workflow depends on the proxy. Q-10 closed.
 
-Status: proxy script outside VCS; Phase 1 default wiring does not require it.
-Date: 2026-05-11 (clarified 2026-05-13).
+Status: retired (2026-05-14).
 
-Rationale: Phase 0 showed baseline **14B** could not satisfy OpenCode without
-normalization; Qwen3 stacks used in Phase 1 do not need the hop. Keeping the
-proxy as an **optional** component preserves one integration contract for
-future text-format emitters without contradicting direct `baseURL` in
-production A/B.
+### DD-021 — Cursor as permanent default implementer
 
-Risk: proxy currently lives outside this repository at
-`C:\AI\scripts\opencode_proxy.py`. Workflows that still depend on **8090**
-break if that script is lost; direct-port Phase 1 runs are unaffected.
-Mitigation: relocate to `scripts/` (Q-10).
+Decision: Cursor Agent is the confirmed production implementer. Phase 1 A/B closed without switching the default. OpenCode + Qwen remain available via `-CursorCommand .\scripts\run_opencode_agent.ps1` for opt-in use.
 
-### DD-021 — Cursor as transitional implementer through Phase 1
-
-Decision: keep Cursor Agent as the production implementer until OpenCode +
-Qwen3-Coder-30B-A3B has demonstrated stable behavior across at least 5
-real-world H2N tasks under the **Phase 1 OpenCode wiring** (direct
-`llama-server` per **§5.3** / **`templates/opencode.json`**; proxy **DD-020**
-only when a chosen model requires normalization). Until then, OpenCode runs
-only on Phase-1 A/B comparison tasks against Cursor.
-
-Status: active.
-Date: 2026-05-12.
-
-Rationale: P0 PASS was for a trivial single-step file creation task. Real
-H2N tasks involve 3-10+ tool calls, file reads, conditional logic. Cursor's
-behavior at that scale is known; Qwen3-Coder-30B-A3B's is not.
-
-Risk: prolonged dual-implementer setup creates maintenance burden. Mitigation:
-DD-021 is explicitly transitional; A/B data collected in Phase 1 determines
-the cutover.
+Status: resolved (2026-05-14).
 
 ### DD-022 — Optional Qwen scout pre-pass (`-WithScout`)
 
@@ -721,16 +649,4 @@ stay under `_debug/` and are not staged.
 
 ## §13 Open Questions
 
-### Q-10 — Where should `opencode_proxy.py` live and who owns it?
-
-Currently `C:\AI\scripts\opencode_proxy.py`. Options:
-
-- A: relocate into this repo `scripts/opencode_proxy.py` (preferred — under
-  VCS, reviewable, testable).
-- B: keep outside repo but add a known-installation check at orchestrator
-  startup (poll `http://127.0.0.1:8090/health` before running OpenCode).
-- C: extract to a separate dedicated `opencode-llama-proxy` repository.
-
-Pending user decision (see audit Q3). Blocks DD-020 relocation; **8090**-dependent
-workflows remain tied to out-of-VCS code until then. Phase 1 **direct** `llama-server`
-configs (§0.3, `templates/opencode.json`) do not require the proxy.
+No open questions at this time.

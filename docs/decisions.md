@@ -87,17 +87,13 @@ Placeholder; see `docs/architecture.md` §12 for current decision numbering.
 
 Placeholder; see `docs/architecture.md` §12 for current decision numbering.
 
-## DD-020: OpenCode↔llama text-tool normalization proxy (optional)
+## DD-020: OpenCode↔llama text-tool normalization proxy (retired)
 
-Use an optional local HTTP proxy (`opencode_proxy.py` on port **8090**) when a model emits **text-format** tool calls; it normalizes responses to structured `tool_calls[]`. **Phase 1 A/B** uses **direct** `llama-server` URLs in **`templates/opencode.json`** (ports **8081 / 8082 / 8083**) for Qwen3 stacks that already emit native tool calls; **8090** is not required for that path. The proxy script currently lives outside this repository pending relocation (Q-10).
+Proxy retired 2026-05-14. Phase 1 A/B closed; Cursor confirmed as permanent default implementer; no active workflow depends on the proxy.
 
-See `docs/architecture.md` §12 DD-020 for rationale and risk notes.
+## DD-021: Cursor as permanent default implementer
 
-## DD-021: Cursor as transitional implementer through Phase 1
-
-Keep Cursor Agent as the production implementer until OpenCode + Qwen3-Coder-30B-A3B has demonstrated stable behavior across real H2N workloads using the **Phase 1 direct** OpenCode wiring (§5.3 / `templates/opencode.json`); use the **DD-020** proxy only when the active model needs normalization. Until then, OpenCode runs only on Phase-1 A/B comparison tasks.
-
-See `docs/architecture.md` §12 DD-021 for rationale and risk notes.
+Cursor Agent is the confirmed production implementer (Phase 1 A/B closed 2026-05-14). OpenCode + Qwen available opt-in via `-CursorCommand`.
 
 ## DD-022: Optional scout pre-pass (`-WithScout`)
 
