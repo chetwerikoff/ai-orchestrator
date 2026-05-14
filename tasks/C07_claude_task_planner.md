@@ -88,9 +88,11 @@ real-world data driving the design.
 1. `scripts/ai_loop_plan.ps1` — main entrypoint, architect-agnostic.
 2. `scripts/run_claude_planner.ps1` — Claude planner wrapper.
 3. `templates/planner_prompt.md` — planner role + output format.
-4. `scripts/install_into_project.ps1` — self-install guard + copy lines.
-5. `.gitignore` — ignore planner runtime artifacts.
-6. `tests/test_orchestrator_validation.py` — minimal test set.
+4. `templates/user_ask_template.md` — structured ASK template (helps reduce
+   planner hallucination by giving it a structured input).
+5. `scripts/install_into_project.ps1` — self-install guard + copy lines.
+6. `.gitignore` — ignore planner runtime artifacts.
+7. `tests/test_orchestrator_validation.py` — minimal test set.
 
 ## Scope
 
@@ -119,6 +121,7 @@ Not allowed:
 - `scripts/ai_loop_plan.ps1` (new)
 - `scripts/run_claude_planner.ps1` (new)
 - `templates/planner_prompt.md` (new)
+- `templates/user_ask_template.md` (new)
 - `scripts/install_into_project.ps1`
 - `.gitignore`
 - `tests/test_orchestrator_validation.py`
@@ -253,11 +256,33 @@ Logic (use an explicit `$script:ExitCode` variable — see Hard rules):
    }
    ```
 
-7. **Success message** (printed before the `finally` block exits):
+7. **Success message + scope summary** (printed before the `finally` block
+   exits, on success path only):
+
    ```
    Wrote $Out (no obvious structural issues found).
-   This is a DRAFT. Review it manually before running ai_loop_task_first.ps1.
+
+   Files in scope (extracted from task.md — verify before running):
+     <path 1>
+     <path 2>
+     <path 3> (new)
+     ... (N more)
+
+   This is a DRAFT. Review .ai-loop/task.md manually before running ai_loop_task_first.ps1.
    ```
+
+   Extract `## Files in scope` block with a helper `Get-FilesInScopeSummary
+   $output`:
+   - find heading `^##\s+Files in scope\s*$` (line-anchored)
+   - read bullet lines (`^\s*[-*]\s+`) until next `^##\s+` heading
+   - per bullet: strip leading `-`/`*` and whitespace; strip surrounding
+     backticks; take first whitespace-delimited token; preserve trailing
+     `(new)` if present on the line
+   - print up to 10 paths; if more, end with `  ... (N more total)`
+
+   If the section is empty or unparseable, print:
+   `(Could not parse Files in scope — review task.md manually.)`
+
    If a backup was made and write succeeded, also print:
    `Previous task.md kept at $Out.bak.`
 
@@ -402,6 +427,45 @@ Produce a markdown document with these headings, in order:
   your plan.
 ```
 
+### templates/user_ask_template.md
+
+A short structured template that nudges users toward a higher-quality ASK,
+which in turn reduces planner hallucination. Copied to
+`.ai-loop/user_ask_template.md` by the installer; users can copy it to
+`.ai-loop/user_ask.md` (or `tasks/<name>.md`) and fill it in.
+
+```markdown
+# User ASK
+
+## Goal
+
+<One or two sentences. What outcome do you want?>
+
+## Affected files (your best guess — planner will verify)
+
+- `src/...`
+- `tests/...`
+
+## Out-of-scope (explicit boundaries)
+
+- `<paths the change must NOT touch>`
+
+## Proposed approach (optional)
+
+<If you already have an implementation idea, write it here. The planner is
+the architect and will critically evaluate the proposal — it may diverge
+with documented reasoning. Skip this section if you want a fresh design.>
+
+## Constraints / context the planner may not know
+
+- <e.g., "must not break the H2N smoke test">
+- <e.g., "user prefers PowerShell wrappers over Python scripts">
+```
+
+This file is **a template**, not a contract. Users may delete or rename
+sections. The planner reads it as ordinary ASK content; it does not enforce
+any of the template structure.
+
 ### scripts/install_into_project.ps1
 
 1. **Self-install guard** after parameter parsing, before any `New-Item` /
@@ -417,6 +481,9 @@ Produce a markdown document with these headings, in order:
    - `scripts/ai_loop_plan.ps1` → target `scripts/`
    - `scripts/run_claude_planner.ps1` → target `scripts/`
    - `templates/planner_prompt.md` → target `.ai-loop/planner_prompt.md`
+   - `templates/user_ask_template.md` → target `.ai-loop/user_ask_template.md`
+     (template — does NOT overwrite an existing `user_ask.md`; user manually
+     copies/renames when ready to use it)
 
 ### .gitignore
 
@@ -465,6 +532,14 @@ Add to `tests/test_orchestrator_validation.py` (eight tests total — no more):
      `## Files in scope`, `## Tests`, `## Important`
    - `.tmp` literal (temp-file atomic-write pattern)
    - `repo_map.md is missing` literal (warning text)
+   - `Get-FilesInScopeSummary` or `Files in scope (extracted` literal
+     (post-success path summary)
+9. `test_user_ask_template_exists_and_has_sections` — assert
+   `templates/user_ask_template.md` exists AND contains literals
+   `## Goal`, `## Affected files`, `## Out-of-scope`, `## Proposed approach`.
+10. `test_install_copies_user_ask_template` — assert
+    `install_into_project.ps1` copies `user_ask_template.md` to
+    `.ai-loop/user_ask_template.md` (NOT to `user_ask.md`).
 
 Do NOT call the `claude` CLI in tests. Do NOT add behavior tests for the
 minimal sanity check — its logic is two `if` statements, structural tests are
@@ -589,18 +664,38 @@ explicitly handles ASKs that contain proposed implementations.
   will be overwritten by the next install. Edit the source template and
   reinstall.
 
-**Validation is intentionally minimal:**
+**Validation is intentionally minimal (three layers, none of them strong):**
 
-- Sanity check is structural only (required headings present, starts with
-  `# Task:`). It catches obvious LLM failures (preambles, refusals, partial
-  output) but does NOT catch invented file paths, wrong scope, weak tests,
-  or wrong business logic.
-- The human reviewer of `.ai-loop/task.md` is the **only** quality gate.
-  Specifically inspect: `## Files in scope` for invented paths, `## Required
-  behavior` for scope correctness, `## Tests` for meaningful coverage,
-  `## Important` for assumptions and architect-divergence notes.
-- If practice shows the planner regularly produces low-quality output, an
-  LLM validator can be added as a separate task. Do not add one in C07.
+1. **Structural sanity check** (this task): required headings present, output
+   starts with `# Task:`. Catches obvious LLM failures (preambles, refusals,
+   partial output). Does NOT catch invented file paths, wrong scope, weak
+   tests, or wrong business logic.
+2. **Post-success scope summary** (this task): prints the first 10 paths
+   from `## Files in scope` to console so the user sees the highest-risk
+   content without opening the file. Best-effort parsing; "Could not parse"
+   is acceptable output.
+3. **Preflight gate** (separate task **C08**): `ai_loop_task_first.ps1` will
+   refuse to start if any non-`(new)` path in `## Files in scope` does not
+   exist in the working tree. Catches invented paths regardless of how
+   `task.md` got there (planner or manual edit).
+
+The human reviewer of `.ai-loop/task.md` is still the only **semantic**
+quality gate. The summary in #2 attracts attention to the most failure-prone
+section without forcing a full read; the preflight in #3 (when implemented)
+makes it impossible to start the loop with invented paths.
+
+If practice still shows low quality, an LLM validator can be added later.
+Do not add one in C07.
+
+**`user_ask_template.md` is a hint, not a contract:**
+
+The template is copied to `.ai-loop/user_ask_template.md` by the installer,
+NOT to `user_ask.md` (we do not overwrite anything the user may already
+have). Users can `Copy-Item .ai-loop/user_ask_template.md .ai-loop/user_ask.md`
+or copy it to `tasks/<topic>.md` and fill it in. The planner reads filled-in
+ASKs as ordinary text — there is no structure enforcement. The template
+exists to **bias the user toward structured input**, which empirically
+reduces planner hallucination.
 
 **Backup hygiene (critical implementation order):**
 
