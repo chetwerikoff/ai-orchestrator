@@ -273,13 +273,25 @@ Add to the `param()` block (do NOT touch existing parameters from C07):
 draft + sanity check, BEFORE the final write to `$Out`:
 
 ```powershell
-# Variables already in scope from C07:
-#   $output        — current draft text (initial draft from planner)
-#   $prompt        — initial planner prompt
-#   $resolvedAsk   — the user's ASK text
-#   $planPromptBody, $agentsBody, $summaryBody, $repoMapBody — context blocks
+# Variable contract (names below are descriptive; the actual C07
+# implementation may use different names — the C09 implementer reuses
+# whatever the existing script calls them, or extracts them into named
+# variables as a minor refactor):
+#   - current draft text (initial planner output, post-sanity)
+#   - resolved USER ASK
+#   - AGENTS.md body
+#   - .ai-loop/project_summary.md body
+#   - .ai-loop/repo_map.md body (may be empty if file absent)
+#   - the planner prompt body (contents of the resolved planner_prompt.md)
 #
-# After C07 builds $output and runs the sanity check, branch on $WithReview.
+# If C07's implementation did NOT expose these as named variables, the
+# C09 implementer may need a minor refactor to surface them. That is the
+# ONLY refactor of C07 code permitted beyond the Test-PlannerOutputSanity
+# extraction. Do not restructure C07's prompt-assembly flow, exit-code
+# behavior, or backup/restore logic.
+#
+# After C07 builds the initial draft and runs the sanity check, branch
+# on $WithReview.
 
 if (-not $WithReview) {
     # C07 path: write $output via temp file + Move-Item, success message, exit.
@@ -320,20 +332,35 @@ else {
 
         $issues = $reviewPrompt | & $ReviewerCommand --workspace $ProjectRoot --model $ReviewerModel
         if ($LASTEXITCODE -ne 0) {
-            $traceLines.Add("## Iteration $i — reviewer failed (exit $LASTEXITCODE)")
-            $traceLines.Add("Continuing with current draft; reviewer error is non-fatal.")
-            Write-Warning "Reviewer wrapper exited non-zero ($LASTEXITCODE) on iteration $i. Keeping current draft."
+            $traceLines.Add("## Iteration $i — REVIEW_STATUS: FAILED (reviewer exit $LASTEXITCODE)")
+            $traceLines.Add("task.md was written WITHOUT successful Codex review.")
+            Write-Warning "REVIEWER FAILED on iteration $i (exit $LASTEXITCODE). task.md will be written but Codex did NOT successfully review it. Treat -WithReview as if not set for this run."
             break
         }
         $traceLines.Add("## Iteration $i — reviewer output")
         $traceLines.Add($issues)
         $traceLines.Add("")
 
-        if ($issues -match '(?m)^\s*NO_BLOCKING_ISSUES\s*$') {
+        # Strict-format validation of reviewer output. Malformed output is
+        # treated as a soft-failure (break loop, keep current draft) rather
+        # than passed to the planner — feeding garbage to the planner would
+        # actively degrade the draft.
+        $cleanRx  = '(?m)^\s*NO_BLOCKING_ISSUES\s*$'
+        $issuesRx = '(?m)^\s*ISSUES:\s*$'
+        $catRx    = '(?m)^\s*-\s*\[(logic|complexity|scope|missing)\]'
+
+        if ($issues -match $cleanRx) {
             $traceLines.Add("Exit: NO_BLOCKING_ISSUES at iteration $i.")
             $exitedEarly = $true
             break
         }
+        elseif (-not (($issues -match $issuesRx) -and ($issues -match $catRx))) {
+            $traceLines.Add("## Iteration $i — REVIEW_STATUS: REVIEWER_OUTPUT_MALFORMED")
+            $traceLines.Add("Reviewer output did not match NO_BLOCKING_ISSUES nor ISSUES:+category format. Keeping current draft. task.md was written WITHOUT a successful Codex verdict.")
+            Write-Warning "Reviewer output on iteration $i is MALFORMED (no NO_BLOCKING_ISSUES, no ISSUES: with valid [logic|complexity|scope|missing] categories). Keeping current draft, breaking loop. Treat as if review did not happen."
+            break
+        }
+        # Validated ISSUES list — proceed to planner revision below.
 
         # Planner revision. Inline revision instructions — no separate template.
         $revisionInstructions = @"
@@ -420,14 +447,30 @@ exit-code semantics (exit 2 on initial-draft sanity failure).
 - Never `task is correct`, `validated`, or `safe to run`.
 
 Updated exit codes (no new codes added):
-- 0: success (with or without `-WithReview`)
-- 1: missing prerequisites, planner OR reviewer wrapper invocation error (backup restored)
+- 0: success (with or without `-WithReview`, **including** graceful degradation
+  when reviewer/revision fails mid-loop)
+- 1: missing prerequisites (incl. reviewer wrapper or
+  `.ai-loop/reviewer_prompt.md` / `templates/reviewer_prompt.md` when
+  `-WithReview` is set), OR initial planner wrapper invocation error
+  (backup restored)
 - 2: initial draft failed sanity check (backup restored)
 
-**Reviewer or revision failure is non-fatal** mid-loop: keep the previous
-draft, append a note to trace, break out of the loop, and write the current
-draft. This means `-WithReview` can degrade gracefully to "draft as-is" if
-Codex is unavailable.
+**Exit semantics are split explicitly to avoid implementer confusion:**
+
+- **Prerequisite check** for `-WithReview` runs BEFORE the loop starts.
+  Missing reviewer wrapper or reviewer prompt → throw → exit 1 via the
+  existing `$script:ExitCode` mechanism. Treat exactly like the C07
+  prerequisite path.
+- **Runtime failure** (reviewer wrapper exits non-zero, malformed output,
+  planner revision fails sanity) DURING the loop → **never exit 1**. Always
+  graceful degradation: append a `REVIEW_STATUS:` marker to the trace,
+  print a loud Write-Warning, break the loop, fall through to write the
+  current draft, and exit 0.
+
+This separation means `-WithReview` can degrade gracefully to "draft as-is"
+when Codex is transiently unavailable, but the user still gets exit 1 if
+they explicitly asked for review and the setup is broken (missing CLI
+wrapper, missing prompt template).
 
 Keep total `ai_loop_plan.ps1` under 270 lines after this extension.
 
@@ -457,7 +500,8 @@ Run:
 python -m pytest -q
 ```
 
-Add to `tests/test_orchestrator_validation.py` (six tests total — no more):
+Add to `tests/test_orchestrator_validation.py` (six tests total — no more.
+Test #4 is extended with extra literals but remains one test):
 
 1. `test_run_codex_reviewer_script_exists`
 2. `test_reviewer_prompt_template_exists_and_has_format` — assert
@@ -474,9 +518,14 @@ Add to `tests/test_orchestrator_validation.py` (six tests total — no more):
    ALL of:
    - declares `$WithReview`, `$MaxReviewIterations`, `$ReviewerCommand`, `$ReviewerModel`
    - contains literal `Test-PlannerOutputSanity` (sanity check extracted as helper)
-   - contains literal `MaxReviewIterations = 3` (default)
-   - contains clamp logic — pin via literal `clamp to 3`
+   - contains literal `MaxReviewIterations = 3` (default value)
+   - contains clamp logic — pin BOTH a comparison literal `-gt 3` (the
+     check that triggers clamp) AND a numeric `3` on the clamp assignment
+     line; do NOT pin a free-form wording like "clamp to 3" — implementers
+     may write the clamp message in different words.
    - contains literal `NO_BLOCKING_ISSUES` (early-exit check)
+   - contains literal `REVIEWER_OUTPUT_MALFORMED` (malformed-output handler)
+   - contains literal `REVIEW_STATUS:` (trace marker for failure cases)
    - contains literal `Architect note:` (revision instruction text)
    - contains literal `simplicity of implementation wins` (revision instruction text)
 5. `test_install_copies_reviewer_files` — assert
@@ -587,6 +636,21 @@ their decision. Tests pin the `Architect note:` literal (#4).
   workaround (save/restore `$ErrorActionPreference`).
 - Codex CLI uses positional prompt arg with `ConvertTo-CrtSafeArg` (duplicate
   the 5-line helper locally; do NOT import).
+
+**Known risk: positional-argv length on Windows.** Codex receives the
+review prompt as a single positional CLI argument. The full prompt
+(reviewer template + AGENTS.md + project_summary.md + repo_map.md +
+USER ASK + GENERATED task.md) can grow to tens of KB. Windows command-line
+length, quoting via `ConvertTo-CrtSafeArg`, and Unicode/markdown content
+combine into a fragile path that automated tests cannot fully cover.
+
+**Mandatory manual smoke before relying on C09 in practice:** run a real
+`-WithReview` invocation against a task.md and project context similar to
+your typical workload. If the reviewer truncates, errors on argv length,
+or returns garbage, the wrapper needs a temp-file based invocation path
+(deferred to a follow-up task — not in C09 scope). For initial C09 the
+positional-argv approach is acceptable; replacing it is a known future
+refactor if real workloads expose the limit.
 
 **Sanity check on revision drafts.** Each revised draft must pass the same
 sanity check as the initial draft (required headings, no HTML comments, no

@@ -188,14 +188,36 @@ Not allowed:
    refresh, prerequisite checks, implementer pass, auto-loop chain) and
    pollute test state.
 
-   Add a guard at the top of the main flow (right after `param()` and
-   `$ErrorActionPreference`, before any other statement). PowerShell sets
-   `$MyInvocation.InvocationName` to `.` when the script is dot-sourced:
+   Add the guard **after all function definitions** and **before the main
+   task-first flow** (the line that begins with `Assert-FileExists` /
+   `Write-Section "STEP 1..."` / the first non-function executable
+   statement in the existing script — whichever comes first). PowerShell
+   sets `$MyInvocation.InvocationName` to `.` when the script is
+   dot-sourced.
+
+   **Wrong placement** (guard above function definitions): dot-sourced
+   tests would `return` before functions are defined and would not see
+   `Test-TaskFilesInScopeExist`.
+
+   **Correct skeleton:**
 
    ```powershell
-   # When dot-sourced (e.g. for unit-testing helper functions), expose
-   # function definitions only; do not execute the main flow.
+   param(...)
+   $ErrorActionPreference = "Stop"
+
+   function Save-ImplementerStateAt { ... }
+   function Invoke-AutoReviewLoop { ... }
+   function Test-TaskFilesInScopeExist { ... }
+   # ... all other helpers ...
+
+   # Dot-source guard: when invoked as `. .\scripts\ai_loop_task_first.ps1`,
+   # load helper definitions only — do not execute the main flow.
    if ($MyInvocation.InvocationName -eq '.') { return }
+
+   # MAIN FLOW BELOW
+   $ProjectRoot = (Resolve-Path ".").Path
+   Assert-FileExists -Path $AutoLoopScript -Message "..."
+   # ...
    ```
 
    This keeps the main behavior unchanged for normal invocation and makes
@@ -402,9 +424,11 @@ both, but explicit normalization avoids edge cases.
 `/` or `\` are skipped. They are not checked for existence — they represent
 patterns, not literal paths.
 
-**`(new)` marker:** any occurrence of literal `(new)` on the same line as
-the bullet skips the existence check. This mirrors the planner_prompt.md
-convention from C07.
+**`(new)` marker (trailing only):** only a **trailing** ` (new)` marker
+(regex `\s+\(new\)\s*$`) skips the existence check. Mid-line occurrences
+(e.g. `scripts/existing.ps1 add support for (new) mode`) do NOT bypass —
+this prevents accidental skip via descriptive text. The Required behavior
+code block and this Important note must use the same regex pattern.
 
 **Console messages:** use `Write-Host -ForegroundColor Red` for failures and
 `Green` for success — mirrors the existing color convention in
