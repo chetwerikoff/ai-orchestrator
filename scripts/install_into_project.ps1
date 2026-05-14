@@ -33,6 +33,7 @@ Copy-Item (Join-Path $Root "scripts\build_repo_map.ps1") (Join-Path $TargetScrip
 Copy-Item (Join-Path $Root "scripts\filter_pytest_failures.py") (Join-Path $TargetScripts "filter_pytest_failures.py") -Force
 Copy-Item (Join-Path $Root "scripts\ai_loop_plan.ps1") (Join-Path $TargetScripts "ai_loop_plan.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\run_claude_planner.ps1") (Join-Path $TargetScripts "run_claude_planner.ps1") -Force
+Copy-Item (Join-Path $Root "scripts\run_codex_reviewer.ps1") (Join-Path $TargetScripts "run_codex_reviewer.ps1") -Force
 
 $TaskTarget = Join-Path $TargetAiLoop "task.md"
 if ($OverwriteTask -or !(Test-Path $TaskTarget)) {
@@ -46,6 +47,7 @@ if ($OverwriteProjectSummary -or !(Test-Path $ProjectSummaryTarget)) {
 
 Copy-Item (Join-Path $Root "templates\codex_review_prompt.md") (Join-Path $TargetAiLoop "codex_review_prompt.md") -Force
 Copy-Item (Join-Path $Root "templates\planner_prompt.md") (Join-Path $TargetAiLoop "planner_prompt.md") -Force
+Copy-Item (Join-Path $Root "templates\reviewer_prompt.md") (Join-Path $TargetAiLoop "reviewer_prompt.md") -Force
 Copy-Item (Join-Path $Root "templates\user_ask_template.md") (Join-Path $TargetAiLoop "user_ask_template.md") -Force
 Copy-Item (Join-Path $Root "templates\implementer_summary_template.md") (Join-Path $TargetAiLoop "implementer_summary_template.md") -Force
 

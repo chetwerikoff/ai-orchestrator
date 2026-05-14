@@ -998,7 +998,7 @@ def test_planner_scripts_parse_cleanly() -> None:
     ps = _powershell_exe()
     if not ps:
         pytest.skip("No pwsh or powershell on PATH")
-    for name in ("ai_loop_plan.ps1", "run_claude_planner.ps1"):
+    for name in ("ai_loop_plan.ps1", "run_claude_planner.ps1", "run_codex_reviewer.ps1"):
         script = _SCRIPTS / name
         assert script.is_file(), f"missing {script}"
         escaped = str(script.resolve()).replace("'", "''")
@@ -1038,6 +1038,122 @@ def test_gitignore_excludes_planner_artifacts() -> None:
     text = (_ROOT / ".gitignore").read_text(encoding="utf-8")
     assert ".ai-loop/*.bak" in text
     assert ".ai-loop/user_ask.md" in text
+
+
+def test_run_codex_reviewer_script_exists() -> None:
+    assert (_SCRIPTS / "run_codex_reviewer.ps1").is_file()
+
+
+def test_reviewer_prompt_template_exists_and_has_format() -> None:
+    path = _ROOT / "templates" / "reviewer_prompt.md"
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    for needle in (
+        "# Reviewer role",
+        "NO_BLOCKING_ISSUES",
+        "ISSUES:",
+        "[logic]",
+        "[complexity]",
+        "simplicity wins",
+        "NOT an architect",
+    ):
+        assert needle in text, needle
+
+
+def test_run_codex_reviewer_invariants() -> None:
+    text = (_SCRIPTS / "run_codex_reviewer.ps1").read_text(encoding="utf-8")
+    assert "param(" not in text
+    assert "codex" in text and "exec" in text
+    assert "function ConvertTo-CrtSafeArg" in text
+    assert "2>&1" not in text
+
+
+def test_ai_loop_plan_review_invariants() -> None:
+    text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
+    assert "[switch]$WithReview" in text
+    assert "[int]$MaxReviewIterations = 3" in text
+    assert "[string]$ReviewerCommand" in text
+    assert "[string]$ReviewerModel" in text
+    assert "Test-PlannerOutputSanity" in text
+    assert "function Test-ReviewerOutputStrict" in text
+    assert "$reviewLoopExitKind" in text
+    assert 'if ($reviewLoopExitKind -eq "max_iterations")' in text
+    assert "-gt 3)" in text
+    assert re.search(r"-gt 3\) \{[\s\S]*?\$MaxReviewIterations = 3", text), "clamp to 3 after -gt 3 guard"
+    for needle in (
+        "NO_BLOCKING_ISSUES",
+        "REVIEWER_OUTPUT_MALFORMED",
+        "REVIEW_STATUS:",
+        "REVIEW_STATUS: FAILED",
+        "REVIEW_STATUS: PLANNER_REVISION_FAILED",
+        "REVIEW_STATUS: REVISION_SANITY_FAILED",
+        "Architect note:",
+        "simplicity of implementation wins",
+    ):
+        assert needle in text, needle
+
+
+_ISSUE_BULLET_RE = re.compile(r"^\s*-\s*\[(logic|complexity|scope|missing)\]\s+\S")
+
+
+def _reviewer_output_strict_ok(output: str) -> bool:
+    """Mirrors scripts/ai_loop_plan.ps1 Test-ReviewerOutputStrict (structural pinning, no Codex)."""
+    t = output.strip()
+    if not t:
+        return False
+    if t == "NO_BLOCKING_ISSUES":
+        return True
+    hit_issues = False
+    bullets = 0
+    for raw_line in t.splitlines():
+        if not raw_line.strip():
+            continue
+        if not hit_issues:
+            if re.fullmatch(r"\s*ISSUES:\s*", raw_line):
+                hit_issues = True
+                continue
+            return False
+        if _ISSUE_BULLET_RE.match(raw_line) is None:
+            return False
+        bullets += 1
+    return hit_issues and bullets >= 1
+
+
+@pytest.mark.parametrize(
+    ("body", "expected_ok"),
+    [
+        ("NO_BLOCKING_ISSUES", True),
+        ("  NO_BLOCKING_ISSUES  \n", True),
+        ("Preamble\nNO_BLOCKING_ISSUES", False),
+        ("NO_BLOCKING_ISSUES\nExtra line", False),
+        ("ISSUES:\n- [logic] contradicts scope", True),
+        ("ISSUES:\n- [complexity] too big", True),
+        ("ISSUES:\n- [scope] drift", True),
+        ("ISSUES:\n- [missing] nothing", True),
+        ("ISSUES:\n- [logic]x", False),
+        ('ISSUES:\n- [Logic] case', False),
+        ("ISSUES:\n- [logic] ok\njunk after", False),
+        ("ISSUES:\n(no bullets)", False),
+        ("ISSUES:\nNO_BLOCKING_ISSUES", False),
+    ],
+)
+def test_reviewer_output_strict_matches_planner_contract(body: str, expected_ok: bool) -> None:
+    assert _reviewer_output_strict_ok(body) is expected_ok
+
+
+def test_install_copies_reviewer_files() -> None:
+    text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
+    assert "run_codex_reviewer.ps1" in text
+    assert (
+        'Copy-Item (Join-Path $Root "templates\\reviewer_prompt.md") (Join-Path $TargetAiLoop "reviewer_prompt.md")'
+        in text
+    )
+
+
+def test_gitignore_excludes_review_artifacts() -> None:
+    text = (_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".ai-loop/planner_review_trace.md" in text
+    assert ".ai-loop/reviewer_prompt.md" in text
 
 
 def test_ai_loop_plan_structural_invariants() -> None:

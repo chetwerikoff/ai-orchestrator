@@ -42,3 +42,5 @@ __pycache__/
 .ai-loop/*.bak
 .ai-loop/user_ask.md
 .ai-loop/planner_prompt.md
+.ai-loop/planner_review_trace.md
+.ai-loop/reviewer_prompt.md

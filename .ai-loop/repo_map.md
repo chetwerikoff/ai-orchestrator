@@ -28,6 +28,7 @@
 - `scripts/install_into_project.ps1` — (no header summary)
 - `scripts/promote_session.ps1` — Draft snapshot destination: `.ai-loop/archive/rolls/` (timestamped filenames).
 - `scripts/run_claude_planner.ps1` — No param block: keeps $input available for the pipeline.
+- `scripts/run_codex_reviewer.ps1` — No param block: keeps $input available for the pipeline.
 - `scripts/run_cursor_agent.ps1` — Invoke the Cursor agent CLI (node.exe) directly, reading the prompt from stdin.
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
 - `scripts/run_opencode_scout.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
@@ -41,6 +42,7 @@
 - `templates/opencode.json` — (no header summary)
 - `templates/planner_prompt.md` — Planner role: Architect with final say
 - `templates/project_summary.md` — Project Summary
+- `templates/reviewer_prompt.md` — Reviewer role
 - `templates/task.md` — Task: <task name>
 - `templates/user_ask_template.md` — User ASK
 
