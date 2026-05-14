@@ -7,6 +7,7 @@ param(
     [string]$CursorModel = "",
     [switch]$SkipInitialCursor,
     [switch]$NoPush,
+    [switch]$WithScout,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
     [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md"
@@ -132,7 +133,10 @@ function Clear-AiLoopRuntimeState {
         ".ai-loop/implementer_result.md",
         ".ai-loop/_debug/implementer_prompt.md",
         ".ai-loop/_debug/implementer_output.txt",
-        ".ai-loop/_debug/implementer_fix_output.txt"
+        ".ai-loop/_debug/implementer_fix_output.txt",
+        ".ai-loop/_debug/scout.json",
+        ".ai-loop/_debug/scout_prompt.md",
+        ".ai-loop/_debug/scout_output.txt"
     )
     foreach ($rel in $files) {
         Remove-Item (Join-Path $ProjectRoot $rel) -Force -ErrorAction SilentlyContinue
@@ -212,7 +216,7 @@ function Get-TaskScopeBlocks {
 }
 
 function Invoke-ImplementerImplementation {
-    param([string]$TaskFile, [string]$CommandName, [string]$Model, [string]$ExtraInstructions = "")
+    param([string]$TaskFile, [string]$CommandName, [string]$Model, [string]$ExtraInstructions = "", [string[]]$RelevantFiles = @())
     $scope = Get-TaskScopeBlocks -TaskFile $TaskFile
     $taskText = Get-Content -LiteralPath $TaskFile -Raw -Encoding UTF8
 
@@ -228,7 +232,13 @@ function Invoke-ImplementerImplementation {
         Write-Warning "task.md is missing '## Files out of scope' section. Continuing without scope contract."
     }
 
-    $prompt = $STABLE_PREAMBLE + "`n`n" + $scopeBlock + "TASK:`n" + $taskText
+    $relevantBlock = ""
+    $rf = @($RelevantFiles | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($rf.Count -gt 0) {
+        $lines = ($rf | ForEach-Object { "- $_" }) -join "`n"
+        $relevantBlock = "RELEVANT FILES (from scout):`n$lines`n`n"
+    }
+    $prompt = $STABLE_PREAMBLE + "`n`n" + $scopeBlock + $relevantBlock + "TASK:`n" + $taskText
     if (-not [string]::IsNullOrWhiteSpace($ExtraInstructions)) {
         $prompt += "`n`n$($ExtraInstructions.Trim())`n"
     }
@@ -315,6 +325,27 @@ if (-not $SkipInitialCursor) {
         Write-Host "Model: $CursorModel"
     }
     Assert-CommandExists -CommandName $CursorCommand
+    $relevantFiles = @()
+    if ($WithScout) {
+        $scoutScript = Join-Path $PSScriptRoot "run_scout_pass.ps1"
+        if (Test-Path -LiteralPath $scoutScript) {
+            & powershell -NoProfile -ExecutionPolicy Bypass -File $scoutScript `
+                -ProjectRoot $ProjectRoot `
+                -CommandName $CursorCommand `
+                -Model $CursorModel
+            $scoutJson = Join-Path $ProjectRoot ".ai-loop\_debug\scout.json"
+            if (Test-Path -LiteralPath $scoutJson) {
+                try {
+                    $obj = Get-Content $scoutJson -Raw | ConvertFrom-Json -ErrorAction Stop
+                    $relevantFiles = @($obj.relevant_files)
+                } catch {
+                    Write-Warning "Scout JSON parse failed: $($_.Exception.Message). Continuing without scout."
+                }
+            } else {
+                Write-Warning "Scout did not produce scout.json. Continuing without scout."
+            }
+        }
+    }
     $retryBody = @"
 The previous implementer pass produced no meaningful implementation delta in the working tree.
 
@@ -331,10 +362,10 @@ IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED
 
 Also update .ai-loop/implementer_summary.md (see initial instructions): changed files, tests, summary, task-specific command or skip reason, risks.
 "@
-    $implOutcome = Invoke-ImplementerImplementation -TaskFile $TaskPath -CommandName $CursorCommand -Model $CursorModel -ExtraInstructions ""
+    $implOutcome = Invoke-ImplementerImplementation -TaskFile $TaskPath -CommandName $CursorCommand -Model $CursorModel -ExtraInstructions "" -RelevantFiles $relevantFiles
     if (-not $implOutcome.HadAgentSideEffects) {
         Write-Host "No relevant working tree changes after first implementer pass; retrying with stricter instructions..." -ForegroundColor Yellow
-        $implOutcome = Invoke-ImplementerImplementation -TaskFile $TaskPath -CommandName $CursorCommand -Model $CursorModel -ExtraInstructions $retryBody
+        $implOutcome = Invoke-ImplementerImplementation -TaskFile $TaskPath -CommandName $CursorCommand -Model $CursorModel -ExtraInstructions $retryBody -RelevantFiles $relevantFiles
     }
     if (-not $implOutcome.HadAgentSideEffects) {
         Write-NoChangesFinalStatus

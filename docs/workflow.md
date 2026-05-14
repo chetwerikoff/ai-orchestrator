@@ -45,6 +45,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 `
 
 This clears stale `.ai-loop` runtime files (except `task.md`), runs the configured implementer first (Cursor Agent by default; override with `-CursorCommand`), resets `.ai-loop/implementer_summary.md` to a fresh stub (the implementer must fill it), then hands off to `ai_loop_auto.ps1` only if the implementer produced relevant git changes (or a documented no-code completion via `implementer_result.md`). If the implementer makes no effective changes twice, Codex is skipped and the script fails with `NO_CHANGES_AFTER_IMPLEMENTER`.
 
+**Optional scout pre-pass:** pass `-WithScout` to `ai_loop_task_first.ps1` to run a read-only scout (`scripts/run_scout_pass.ps1`) that writes `.ai-loop/_debug/scout.json` (`relevant_files[]` + `notes`). The implementer prompt then includes a `RELEVANT FILES (from scout):` block after the scope sections. Scout output is gitignored. Failures are non-fatal: the loop continues without scout context.
+
 ### `IMPLEMENTATION_STATUS: DONE_NO_CODE_CHANGES_REQUIRED`
 
 Task-first mode may treat **only** `.ai-loop/implementer_result.md` as the implementation delta (for example when git ignores that file or it alone changed vs filtered porcelain). In that situation the orchestrator allows proceeding **only if** `implementer_result.md` contains this marker as its **own line**.

@@ -11,7 +11,7 @@ as_of: 2026-05-13
 - **§0** is ground truth for what runs today (Cursor implementer, Codex reviewer, file-based `.ai-loop/` contract).
 - **§1 onward** describe the *target* asymmetric multi-model factory: Claude planner → OpenCode + local Qwen coder → deterministic guards → Codex → Claude business gate. That pipeline is aspirational until phased rollout completes.
 - **§9–§11** spell out deferred harness layouts, deterministic safety expectations, companion-doc roles, plus archive paths for verbatim expert critique (**§9 carries the substantive blueprint internally** — not summarized away).
-- **Phase 0 (2026-05-11)** validated OpenCode + `llama-server` on Windows with a canonical trivial task. **Phase 1 A/B is IN PROGRESS (2026-05-13)** with three Qwen models at ports 8081/8082/8083 — direct connections, no proxy required (all emit native `tool_calls[]`). Proxy at **:8090** remains available as fallback — see **DD-020** and **§5.3**.
+- **Phase 0 (2026-05-11)** validated OpenCode + `llama-server` on Windows with a canonical trivial task. **Phase 1 A/B is IN PROGRESS (2026-05-13)** with three Qwen models at ports 8081/8082/8083 — direct connections, no proxy required (all emit native `tool_calls[]`). Proxy at **:8090** remains available as fallback — see **DD-020** and **§5.3**. **DD-022** adds an opt-in scout pre-pass (`-WithScout`) for OpenCode/Qwen; default Cursor path unchanged.
 - Full numbered decisions live in **§12**; open questions in **§13**.
 
 ## §0 Current state (as of 2026-05-12)
@@ -699,6 +699,28 @@ behavior at that scale is known; Qwen3-Coder-30B-A3B's is not.
 Risk: prolonged dual-implementer setup creates maintenance burden. Mitigation:
 DD-021 is explicitly transitional; A/B data collected in Phase 1 determines
 the cutover.
+
+### DD-022 — Optional Qwen scout pre-pass (`-WithScout`)
+
+Decision: `ai_loop_task_first.ps1` accepts an opt-in `-WithScout` switch that runs
+`scripts/run_scout_pass.ps1` before the implementer pass. The scout uses the same
+implementer wrapper (`-CursorCommand` / `-CursorModel`) with a read-only prompt;
+it writes `.ai-loop/_debug/scout.json` with `relevant_files[]` (and optional
+`notes`). When that list is non-empty, the implementer prompt gains a
+`RELEVANT FILES (from scout):` block after `FILES OUT OF SCOPE:` and before
+`TASK:`. Omitting `-WithScout` leaves the C02 prompt prefix unchanged.
+
+Status: active.
+Date: 2026-05-14.
+
+Rationale: OpenCode + Qwen benefit from a compressed file hint to bound context
+cost; Cursor’s default path keeps frontier-scale context and native discovery, so
+scout stays off by default. The flag targets the Qwen path without slowing the
+production Cursor loop.
+
+Risk: extra latency when enabled; scout may return empty or invalid JSON (handled
+with warnings; run continues). Mitigation: non-fatal failures; scout artifacts
+stay under `_debug/` and are not staged.
 
 ## §13 Open Questions
 

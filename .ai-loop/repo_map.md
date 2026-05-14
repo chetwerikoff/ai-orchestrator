@@ -27,6 +27,7 @@
 - `scripts/install_into_project.ps1` — (no header summary)
 - `scripts/run_cursor_agent.ps1` — Invoke the Cursor agent CLI (node.exe) directly, reading the prompt from stdin.
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
+- `scripts/run_scout_pass.ps1` — (no header summary)
 
 ## templates/
 

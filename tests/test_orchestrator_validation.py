@@ -12,7 +12,13 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SCRIPTS = _ROOT / "scripts"
-_PS1_TARGETS = ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1", "build_repo_map.ps1")
+_PS1_TARGETS = (
+    "ai_loop_auto.ps1",
+    "ai_loop_task_first.ps1",
+    "continue_ai_loop.ps1",
+    "build_repo_map.ps1",
+    "run_scout_pass.ps1",
+)
 _SAFEADD_DEFAULT_RE = re.compile(
     r"\[string\]\$SafeAddPaths\s*=\s*\"([^\"]+)\"",
     re.MULTILINE,
@@ -148,6 +154,7 @@ if ($idx -lt 0) {{ throw "Marker not found: $marker" }}
 $head = $src.Substring(0, $idx)
 . ([scriptblock]::Create($head))
 $TaskFile = [System.IO.Path]::Combine($ProjectRoot, '.ai-loop', 'task.md')
+$RelevantFiles = @()
 . (Join-Path $PSScriptRoot '_orch_prompt_assembly.ps1')
 $enc = New-Object System.Text.UTF8Encoding $false
 [System.IO.File]::WriteAllText([System.IO.Path]::Combine($PSScriptRoot, '_orch_prompt_out.txt'), $prompt, $enc)
@@ -418,7 +425,8 @@ def test_implementer_prompt_surfaces_scope_blocks(tmp_path: Path) -> None:
     impl_body = script_text[impl_start:impl_end]
     assert "Set-Content -Path $promptPath -Value $prompt" in impl_body
     assert (
-        '$prompt = $STABLE_PREAMBLE + "`n`n" + $scopeBlock + "TASK:`n" + $taskText' in impl_body
+        '$prompt = $STABLE_PREAMBLE + "`n`n" + $scopeBlock + $relevantBlock + "TASK:`n" + $taskText'
+        in impl_body
     )
 
     assembly_src = _extract_implementer_prompt_assembly_from_task_first(script_text)
@@ -450,6 +458,16 @@ def test_implementer_prompt_surfaces_scope_blocks(tmp_path: Path) -> None:
     tmpl_lines = tmpl.splitlines()
     assert "## Files in scope" in tmpl_lines
     assert "## Files out of scope" in tmpl_lines
+
+
+def test_implementer_prompt_omits_relevant_files_when_scout_off() -> None:
+    """C04: default run (no -WithScout) must not produce a scout block in the
+    prompt prefix (the injected header only appears before ``TASK:``)."""
+    debug = _ROOT / ".ai-loop" / "_debug" / "implementer_prompt.md"
+    if debug.is_file():
+        text = debug.read_text(encoding="utf-8")
+        head, _, _ = text.partition("TASK:\n")
+        assert "RELEVANT FILES (from scout):" not in head
 
 
 def test_ai_loop_auto_resume_merges_persisted_implementer_state() -> None:
@@ -753,6 +771,13 @@ def test_install_into_project_copies_implementer_summary_template() -> None:
     assert "cursor_summary_template.md" not in text
     assert (_ROOT / "templates" / "implementer_summary_template.md").is_file()
     assert not (_ROOT / "templates" / "cursor_summary_template.md").exists()
+
+
+def test_install_into_project_copies_run_scout_pass_script() -> None:
+    """Installer must ship run_scout_pass.ps1 so target projects can use -WithScout (DD-022)."""
+    text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
+    assert "run_scout_pass.ps1" in text
+    assert (_SCRIPTS / "run_scout_pass.ps1").is_file()
 
 
 def test_active_power_shell_contract_has_no_legacy_cursor_artifact_aliases() -> None:

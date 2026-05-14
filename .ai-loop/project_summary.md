@@ -7,14 +7,15 @@
 ## Current Architecture
 
 - `ai_loop.py` -- experimental GitHub PR orchestrator; separate from the primary PowerShell loop.
-- `scripts/ai_loop_task_first.ps1` -- task-first entry: resets `implementer_summary.md`, saves the effective implementer selection, runs the configured implementer, gates on a path-set delta plus `.ai-loop/implementer_result.md` mtime/existence, then invokes `ai_loop_auto.ps1`.
+- `scripts/ai_loop_task_first.ps1` -- task-first entry: resets `implementer_summary.md`, saves the effective implementer selection, runs the configured implementer, gates on a path-set delta plus `.ai-loop/implementer_result.md` mtime/existence, then invokes `ai_loop_auto.ps1`. See **DD-022** for optional `-WithScout`.
 - `scripts/ai_loop_auto.ps1` — test/diff capture, Codex review, fix-loop, final test gate, safe staging, commit/push. Codex instructions use a single-quoted here-string so fenced JSON survives for `codex exec` and `Extract-FixPromptFromFile`.
 - `scripts/continue_ai_loop.ps1` -- resume wrapper for `ai_loop_auto.ps1 -Resume`; forwards explicit `-CursorCommand` / `-CursorModel` overrides.
 - `scripts/run_cursor_agent.ps1` and `scripts/run_opencode_agent.ps1` -- implementer wrappers; parameter names remain `-CursorCommand` / `-CursorModel` for compatibility.
-- `scripts/install_into_project.ps1` -- copies drivers, wrappers, templates, and `opencode.json` into target projects without clobbering existing task/project summary unless requested.
+- `scripts/run_scout_pass.ps1` -- optional read-only scout pre-pass for `-WithScout` (DD-022); writes gitignored `.ai-loop/_debug/scout_*` artifacts only.
 - `tests/test_orchestrator_validation.py` — parser smoke tests, safe-path parity, task-first delta semantics, implementer-state resume behavior, prompt parsing (C02 uses a dot-sourced PowerShell harness so `$STABLE_PREAMBLE` / `Get-TaskScopeBlocks` are not reimplemented in Python), dynamic step-label checks, repo map determinism checks, Codex `Run-CodexReview`/template fenced-json assertions.
 - `.ai-loop/repo_map.md` is a committed, script-generated file index. Regenerate via `scripts/build_repo_map.ps1` after structural changes; deterministic output is pinned by tests.
 - `templates/` -- target-project scaffolds, including `implementer_summary_template.md`, `codex_review_prompt.md`, `project_summary.md`, `task.md`, and `opencode.json`.
+- `scripts/install_into_project.ps1` -- copies orchestrator scripts (including `run_scout_pass.ps1` for DD-022 `-WithScout`) and `templates/` into a target project; when adding or removing files under `templates/`, update this script so installs stay complete (see AGENTS.md templates contract).
 
 ## Current Pipeline / Workflow
 
@@ -25,6 +26,7 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 ## Important Design Decisions
 
 - Implementer prompt = `$STABLE_PREAMBLE` + `FILES IN SCOPE:` / `FILES OUT OF SCOPE:` blocks parsed from `task.md` + `TASK:` body. Required sections in `templates/task.md`; missing sections produce a warning, not a failure.
+- Optional `-WithScout` (DD-022) runs `scripts/run_scout_pass.ps1` before the implementer pass and inserts `RELEVANT FILES (from scout):` after the scope blocks when scout returns a non-empty `relevant_files` list. Off by default; failures are non-fatal.
 - Active PowerShell artifacts are implementer-neutral: `implementer_summary.md`, `next_implementer_prompt.md`, `implementer_result.md`, `FIX_PROMPT_FOR_IMPLEMENTER`, and `_debug/implementer_*`.
 - Codex emits `FIX_PROMPT_FOR_IMPLEMENTER` as JSON (`fix_required`, `files`, `changes[]`, `acceptance`); `Extract-FixPromptFromFile` prefers JSON and falls back to the legacy free-text regex with a warning. Codex prompt forbids full-suite re-runs (orchestrator pre-captures pytest output); targeted single-test runs are allowed with a one-line reason in `FINAL_NOTE`.
 - Legacy Cursor-named alias artifacts are removed from the active PowerShell contract; summary, next-fix prompt, fix label, result marker, and debug outputs use implementer-neutral names.
@@ -41,20 +43,21 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 
 ## Current Stage
 
-Reviewable: C03 structured JSON `FIX_PROMPT_FOR_IMPLEMENTER` extraction is live in `ai_loop_auto.ps1` with regex fallback; `templates/codex_review_prompt.md` stays aligned with the in-script prompt (including JSON validity via `ConvertFrom-Json`). C02 file-scope blocks in task-first prompts remain. `python -m pytest -q` should pass before committing any further change.
+Reviewable: C04 adds opt-in `-WithScout` + `run_scout_pass.ps1` (DD-022). C03 structured JSON `FIX_PROMPT_FOR_IMPLEMENTER` extraction remains in `ai_loop_auto.ps1` with regex fallback; C02 scope blocks in task-first prompts remain. `python -m pytest -q` should pass before committing any further change.
 
 ## Last Completed Task
 
-C03 — structured JSON fix prompt + `Extract-FixPromptFromFile` JSON-first rendering + diff-summary budget and test-execution policy in Codex instructions; mirrored template; two extractor tests. Previously: C02 scope blocks in `templates/task.md` / `ai_loop_task_first.ps1`.
+C04 — optional `-WithScout` scout pre-pass, `run_scout_pass.ps1`, `RELEVANT FILES (from scout):` block in implementer prompt when enabled; docs DD-022; one validation test. `install_into_project.ps1` copies `run_scout_pass.ps1` into installed targets (installer assertion in tests). Previously: C03 structured JSON fix prompt path; C02 scope blocks.
 
 ## Next Likely Steps
 
 1. Run `python -m pytest -q` and PowerShell parser checks after each script contract change.
 2. Use task-first for new work; use `continue_ai_loop.ps1` for interrupted review/fix loops so persisted implementer state can be reused.
-3. Optional: C04 follow-ups (e.g., Qwen scout) per queued task specs.
+3. Collect Phase 1 OpenCode/Qwen A/B data; use `-WithScout` when bounding context on large target repos.
 
 ## Notes For Future AI Sessions
 
 - Keep durable project-level context here; put per-iteration detail in `.ai-loop/implementer_summary.md`.
 - Use `.ai-loop/task.md` as the task source of truth.
 - Do not read or write `.ai-loop/_debug/` unless explicitly debugging raw agent output.
+- The committed orchestrator task queue is summarized by `tasks/context_audit/README.md` (plus individual **O01–O06** spec files in that folder). Ad-hoc `tasks/context_audit/C*.md` drafts or local tool folders (for example under `tasks/` or `.claude/`) are not part of the default review surface — do not treat them as durable repo state or let them pollute the Codex gate.

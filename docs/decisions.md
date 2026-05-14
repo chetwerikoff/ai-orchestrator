@@ -98,3 +98,9 @@ See `docs/architecture.md` §12 DD-020 for rationale and risk notes.
 Keep Cursor Agent as the production implementer until OpenCode + Qwen3-Coder-30B-A3B has demonstrated stable behavior across real H2N workloads using the **Phase 1 direct** OpenCode wiring (§5.3 / `templates/opencode.json`); use the **DD-020** proxy only when the active model needs normalization. Until then, OpenCode runs only on Phase-1 A/B comparison tasks.
 
 See `docs/architecture.md` §12 DD-021 for rationale and risk notes.
+
+## DD-022: Optional scout pre-pass (`-WithScout`)
+
+Opt-in `scripts/run_scout_pass.ps1` before the implementer in task-first mode; adds `RELEVANT FILES (from scout):` to the prompt only when scout JSON is valid and non-empty. Default path unchanged (C02 ordering).
+
+See `docs/architecture.md` §12 DD-022 for rationale and risk notes.
