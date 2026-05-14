@@ -318,6 +318,19 @@ Assert-FileExists -Path $TaskPath -Message "Task file was not found."
 Assert-FileExists -Path $AutoLoopScript -Message "Existing auto loop script was not found."
 Write-Host "Project root: $ProjectRoot  Task: $TaskPath  Implementer (-CursorCommand): $CursorCommand  Iterations: $MaxIterations  NoPush: $NoPush  Tests: $TestCommand  SafeAdd: $SafeAddPaths"
 
+# Auto-refresh repo map if absent or stale (>1 h).
+$repoMapPath = Join-Path $PSScriptRoot "..\.ai-loop\repo_map.md"
+$repoMapScript = Join-Path $PSScriptRoot "build_repo_map.ps1"
+$needsRefresh = (-not (Test-Path $repoMapPath)) -or `
+    ((Get-Date) - (Get-Item $repoMapPath).LastWriteTime).TotalHours -gt 1
+if ($needsRefresh -and (Test-Path $repoMapScript)) {
+    try {
+        & $repoMapScript
+    } catch {
+        Write-Warning "build_repo_map.ps1 failed (non-fatal): $_"
+    }
+}
+
 if (-not $SkipInitialCursor) {
     Clear-AiLoopRuntimeState
     Initialize-ImplementerSummaryForImplementation
