@@ -606,6 +606,15 @@ planner. If `scripts/ai_loop_plan.ps1` does not exist or has a different
 shape than C07 specifies, stop and request a follow-up review of the
 divergence before implementing C09.
 
+**Recommended rollout sequence (defer C09 if not yet justified):** run C07
+(and optionally C08) on at least 5 real tasks before starting C09
+implementation. C09 is justified only when real planner output shows
+recurring semantic/scope failures that human review does not catch cheaply.
+If failures are mostly path hallucinations, C08 alone is sufficient — the
+LLM-churn cost of C09 (worst case 7 LLM calls per planning) is not earned
+yet. This is process advice, not a spec dependency: the prerequisite chain
+is only "C07 merged".
+
 **Simplicity is load-bearing.** The whole point of the review loop is to
 catch unnecessary complexity introduced by the planner. The reviewer prompt,
 revision instructions, and architect framing all push toward simpler

@@ -224,7 +224,7 @@ Logic (use an explicit `$script:ExitCode` variable — see Hard rules):
            $script:ExitCode = 2
            throw "Planner output does not start with '# Task:' (looks like a preamble or refusal)."
        }
-       $required = @('## Goal', '## Scope', '## Files in scope', '## Tests', '## Important')
+       $required = @('## Goal', '## Scope', '## Files in scope', '## Files out of scope', '## Tests', '## Important')
        foreach ($h in $required) {
            # Use a line-anchored regex so '## Files in scope' inside a paragraph does not satisfy '## Files in scope' heading.
            $pattern = '(?m)^' + [regex]::Escape($h) + '\b'
@@ -235,6 +235,13 @@ Logic (use an explicit `$script:ExitCode` variable — see Hard rules):
        }
 
        # Write to temp file first, then atomically replace $Out.
+       # Ensure parent directory exists for custom -Out paths (e.g.
+       # tasks/generated/task.md). Default .ai-loop/ exists already; this
+       # one-liner prevents a confusing Move-Item failure for nested paths.
+       $outParent = Split-Path -Parent $Out
+       if ($outParent -and -not (Test-Path -LiteralPath $outParent)) {
+           New-Item -ItemType Directory -Force -Path $outParent | Out-Null
+       }
        Set-Content -LiteralPath $tmpOut -Value $output -Encoding UTF8
        Move-Item -Force -LiteralPath $tmpOut -Destination $Out
    }
@@ -541,7 +548,7 @@ Add to `tests/test_orchestrator_validation.py` (ten tests total — no more):
    - `$script:ExitCode` literal (explicit exit-code variable)
    - `templates\planner_prompt.md` literal (source-repo fallback path)
    - All required sanity-check headings as literals: `## Goal`, `## Scope`,
-     `## Files in scope`, `## Tests`, `## Important`
+     `## Files in scope`, `## Files out of scope`, `## Tests`, `## Important`
    - `.tmp` literal (temp-file atomic-write pattern)
    - `repo_map.md is missing` literal (warning text)
    - `Get-FilesInScopeSummary` or `Files in scope (extracted` literal
