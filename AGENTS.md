@@ -92,5 +92,22 @@ Do **not** include prior-roll history, full diffs, or multi-page narratives. Tar
 - Prefer tasks that touch ≤80 lines. Split larger work into ordered subtasks (see `tasks/context_audit/` for examples).
 - If a task naturally exceeds that budget, flag it in the task spec rather than silently growing the diff.
 
+## Simplicity policy
+
+Default to the simplest implementation that solves the goal. Engineering over-complexity is a recurring failure mode in agent-generated work — pretty abstractions, "future-proofing", sophistication for its own sake.
+
+When two solutions are equally correct, prefer:
+
+- modifying an existing file over creating a new one;
+- extending a wrapper/helper over inventing a new subsystem;
+- one parameter with a clear default over multiple modes;
+- inline logic over an abstraction with exactly one caller;
+- a clear error message over fallback logic that hides the failure;
+- fewer LLM calls over more (bounded loops, opt-in validators).
+
+"It might be useful later" is not a justification. Splitting work into ordered subtasks beats growing one task past the ~80-line policy. Architecture proposals that add new subsystems must justify the cost against doing nothing.
+
+The planner stage (`scripts/ai_loop_plan.ps1`, `templates/planner_prompt.md`, `templates/reviewer_prompt.md`) explicitly enforces this principle for generated `.ai-loop/task.md`; the same principle applies to all agent work in this repo.
+
 ## When in doubt
 Ask the user. Do not invent commands, paths, or behaviors not documented here or in the linked docs.
