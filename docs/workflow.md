@@ -37,7 +37,7 @@ Use this when `.ai-loop/task.md` contains a new implementation task:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 `
-  -MaxIterations 10 `
+  -MaxIterations 5 `
   -CommitMessage "Implement feature" `
   -NoPush `
   -TestCommand "python -m pytest -q"
@@ -80,7 +80,7 @@ Use this only when implementation changes already exist and you want to start fr
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_auto.ps1 `
-  -MaxIterations 10 `
+  -MaxIterations 5 `
   -CommitMessage "Review existing changes"
 ```
 

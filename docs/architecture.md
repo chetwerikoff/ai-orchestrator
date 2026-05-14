@@ -31,8 +31,7 @@ truth; target is aspirational.
   -> Codex CLI reviews
   -> if PASS: final test gate + git commit + push (unless -NoPush)
   -> if FIX_REQUIRED: extract FIX_PROMPT_FOR_IMPLEMENTER, re-run implementer
-  -> cap: MaxIterations (default 10; DD-011 calls for 3 — pending
-     separate task)
+  -> cap: MaxIterations (default 5, per DD-011)
 ```
 
 Manual / out-of-loop:
@@ -100,7 +99,6 @@ override the file.
   implementer; Cursor remains the production implementer (see **DD-021**).
 - `domain_gate.py`, `diff_guard.py` from the target design do not exist
   yet in `scripts/`.
-- `MaxIterations` is 10 in the scripts; DD-011 says 3. Pending change.
 - `opencode_proxy.py` is a critical new component not yet in this repo
   (lives in `C:\AI\scripts\`). See DD-020, Q-10.
 - `scripts/run_opencode_agent.ps1` **exists** — PowerShell wrapper that
@@ -601,7 +599,7 @@ Illustrative starting thresholds from the harness spec (tune later in config):
 ```text
 max_changed_files_for_qwen = 5
 max_patch_lines_for_qwen = 500
-max_iterations = 5           # contrasts with DD-011 / §0.4 live default 10
+max_iterations = 5
 max_qwen_fix_attempts = 2
 ```
 
@@ -648,12 +646,11 @@ Review logs, diffs, test outputs, final status, temp files, input data, and outp
 
 `ai_loop_task_first.ps1` clears stale `.ai-loop` runtime files (except `task.md`), runs Cursor first, and calls `ai_loop_auto.ps1` only after detecting meaningful git changes or explicit no-code completion per marker rules.
 
-### DD-011 — MaxIterations cap (pending alignment)
+### DD-011 — MaxIterations cap
 
-Decision: Orchestrator entrypoints default `-MaxIterations` to **10**; architecture review recommends **3** to limit reviewer thrash and cost. Scripts and docs will be aligned in a dedicated change — **pending**.
+Decision: Orchestrator entrypoints default `-MaxIterations` to **5**. Beyond 5 iterations the agent is unlikely to converge and cost/time overhead is disproportionate. Override at call time with `-MaxIterations N` for exceptional cases.
 
-Status: open (scripts still use 10).
-Date noted: 2026-05-12.
+Status: resolved (2026-05-14).
 
 ### DD-020 — OpenCode↔llama text-tool normalization proxy (optional)
 

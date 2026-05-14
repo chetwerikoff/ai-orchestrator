@@ -2,7 +2,7 @@
 # .ai-loop/implementer.json (runtime); when omitted, auto-loop reloads persisted effective values.
 param(
     [string]$CommitMessage = "Continue AI loop",
-    [int]$MaxIterations = 10,
+    [int]$MaxIterations = 5,
     [switch]$NoPush,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",

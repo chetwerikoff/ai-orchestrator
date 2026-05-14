@@ -49,11 +49,11 @@ Placeholder; see `docs/architecture.md` §12 for current decision numbering.
 
 Placeholder; see `docs/architecture.md` §12 for current decision numbering.
 
-## DD-011: MaxIterations cap (pending alignment)
+## DD-011: MaxIterations cap
 
-Orchestrator entrypoints default `-MaxIterations` to **10**; architecture review recommends **3** to limit reviewer thrash and cost. Alignment of scripts and docs is deferred to a dedicated change; scripts still use 10 today.
+Orchestrator entrypoints default `-MaxIterations` to **5**. Override at call time with `-MaxIterations N` for exceptional cases.
 
-See `docs/architecture.md` §12 DD-011 for rationale and risk notes.
+See `docs/architecture.md` §12 DD-011 for rationale.
 
 ## DD-012: (reserved / not yet defined)
 

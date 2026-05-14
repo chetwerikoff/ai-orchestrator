@@ -1,5 +1,5 @@
 param(
-    [int]$MaxIterations = 10,
+    [int]$MaxIterations = 5,
     [string]$CommitMessage = "AI loop task implementation",
     [string]$TaskPath = ".ai-loop\task.md",
     [string]$AutoLoopScript = ".\scripts\ai_loop_auto.ps1",

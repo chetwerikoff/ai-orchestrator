@@ -99,7 +99,7 @@ From the target project root, use the task-first entrypoint:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_task_first.ps1 `
-  -MaxIterations 10 `
+  -MaxIterations 5 `
   -CommitMessage "Implement feature"
 ```
 
@@ -111,7 +111,7 @@ Use `ai_loop_auto.ps1` only when implementation changes already exist and you wa
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\ai_loop_auto.ps1 `
-  -MaxIterations 10 `
+  -MaxIterations 5 `
   -CommitMessage "Review existing changes"
 ```
 
@@ -147,7 +147,7 @@ Explicit OpenCode example:
 `ai_loop_auto.ps1` accepts:
 
 ```powershell
--MaxIterations 10
+-MaxIterations 5
 -CommitMessage "Message"
 -NoPush
 -TestCommand "python -m pytest"

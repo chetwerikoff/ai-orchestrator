@@ -924,7 +924,17 @@ def test_build_repo_map_is_deterministic() -> None:
 
 
 def test_repo_map_excludes_archive_and_debug() -> None:
-    """C01: generated repo_map.md must not list docs/archive/ or .ai-loop/_debug/ entries."""
+    """C01: generated repo_map.md must not list docs/archive/, .ai-loop/_debug/, or CLAUDE.md."""
     text = (_ROOT / ".ai-loop" / "repo_map.md").read_text(encoding="utf-8")
     assert "docs/archive/" not in text
     assert ".ai-loop/_debug/" not in text
+    assert "CLAUDE.md" not in text
+
+
+def test_ai_loop_auto_default_max_iterations_is_5() -> None:
+    """DD-011: default MaxIterations must be 5 in all three driver scripts."""
+    import re
+    pattern = re.compile(r"\[int\]\$MaxIterations\s*=\s*5\b")
+    for name in ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1"):
+        text = (_SCRIPTS / name).read_text(encoding="utf-8")
+        assert pattern.search(text), f"{name}: default MaxIterations must be 5 (DD-011)"

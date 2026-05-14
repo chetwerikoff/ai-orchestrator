@@ -1,5 +1,5 @@
 param(
-    [int]$MaxIterations = 10,
+    [int]$MaxIterations = 5,
     [string]$CommitMessage = "AI loop auto update",
     [switch]$Resume,
     [switch]$NoPush,
