@@ -37,3 +37,8 @@ __pycache__/
 .ai-loop/test_failures_summary.md
 .ai-loop/diff_summary.txt
 .ai-loop/implementer.json
+
+# planner runtime artifacts
+.ai-loop/*.bak
+.ai-loop/user_ask.md
+.ai-loop/planner_prompt.md

@@ -6,11 +6,20 @@ import re
 import shutil
 import subprocess
 import textwrap
+import uuid
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
+_TESTS_DIR = Path(__file__).resolve().parent
+
+
+def _orch_scratch(prefix: str) -> Path:
+    """Unique work dir under tests/ — avoids Windows PermissionError on pytest tmp_path roots."""
+    return _TESTS_DIR / f".orch_{prefix}_{uuid.uuid4().hex}"
+
+
 _SCRIPTS = _ROOT / "scripts"
 _PS1_TARGETS = (
     "ai_loop_auto.ps1",
@@ -447,7 +456,7 @@ def test_task_first_writes_implementer_state_file() -> None:
     assert "ai_loop_task_first.ps1" in text
 
 
-def test_implementer_prompt_surfaces_scope_blocks(tmp_path: Path) -> None:
+def test_implementer_prompt_surfaces_scope_blocks() -> None:
     """C02: Real PowerShell prelude plus the same `$prompt` assembly as `Invoke-ImplementerImplementation`."""
     script_text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
     assert script_text.count("STABLE_PREAMBLE") + script_text.count("Get-TaskScopeBlocks") >= 4
@@ -470,26 +479,31 @@ def test_implementer_prompt_surfaces_scope_blocks(tmp_path: Path) -> None:
         "## Files out of scope\n\n- `docs/archive/**`\n\n"
         "## Goal\n\nExample.\n"
     )
-    prompt = _powershell_build_implementer_prompt_from_task_first_script(_ROOT, tmp_path / "synth", task_body)
+    scratch = _orch_scratch("scope_blocks")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        prompt = _powershell_build_implementer_prompt_from_task_first_script(_ROOT, scratch / "synth", task_body)
 
-    idx_in = prompt.index("FILES IN SCOPE:")
-    idx_out = prompt.index("FILES OUT OF SCOPE:")
-    idx_task = prompt.index("TASK:\n")
-    assert idx_in < idx_out < idx_task
+        idx_in = prompt.index("FILES IN SCOPE:")
+        idx_out = prompt.index("FILES OUT OF SCOPE:")
+        idx_task = prompt.index("TASK:\n")
+        assert idx_in < idx_out < idx_task
 
-    m_pre = re.search(r"\$STABLE_PREAMBLE\s*=\s*@\"\r?\n([\s\S]*?)\r?\n\"@", script_text)
-    assert m_pre is not None
-    preamble_body = m_pre.group(1)
-    assert prompt.lstrip("\ufeff").startswith(preamble_body + "\n\n")
+        m_pre = re.search(r"\$STABLE_PREAMBLE\s*=\s*@\"\r?\n([\s\S]*?)\r?\n\"@", script_text)
+        assert m_pre is not None
+        preamble_body = m_pre.group(1)
+        assert prompt.lstrip("\ufeff").startswith(preamble_body + "\n\n")
 
-    real_task = (_ROOT / ".ai-loop" / "task.md").read_text(encoding="utf-8")
-    real_prompt = _powershell_build_implementer_prompt_from_task_first_script(_ROOT, tmp_path / "real", real_task)
-    assert "FILES IN SCOPE:" in real_prompt and "FILES OUT OF SCOPE:" in real_prompt
+        real_task = (_ROOT / ".ai-loop" / "task.md").read_text(encoding="utf-8")
+        real_prompt = _powershell_build_implementer_prompt_from_task_first_script(_ROOT, scratch / "real", real_task)
+        assert "FILES IN SCOPE:" in real_prompt and "FILES OUT OF SCOPE:" in real_prompt
 
-    tmpl = (_ROOT / "templates" / "task.md").read_text(encoding="utf-8")
-    tmpl_lines = tmpl.splitlines()
-    assert "## Files in scope" in tmpl_lines
-    assert "## Files out of scope" in tmpl_lines
+        tmpl = (_ROOT / "templates" / "task.md").read_text(encoding="utf-8")
+        tmpl_lines = tmpl.splitlines()
+        assert "## Files in scope" in tmpl_lines
+        assert "## Files out of scope" in tmpl_lines
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_implementer_prompt_omits_relevant_files_when_scout_off() -> None:
@@ -591,155 +605,165 @@ def test_codex_review_template_shows_nested_json_fence() -> None:
     assert "`" * 4 in t
 
 
-def test_extract_fix_prompt_parses_json(tmp_path: Path) -> None:
+def test_extract_fix_prompt_parses_json() -> None:
     """C03: Extract-FixPromptFromFile must parse the JSON schema."""
     ps = _powershell_exe()
     if not ps:
         pytest.skip("No pwsh or powershell on PATH")
 
-    funcs = _extract_fix_prompt_ps_functions_from_auto((_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8"))
-    harness = tmp_path / "_orch_extract_fix_json.ps1"
-    harness.write_text(
-        """param(
+    scratch = _orch_scratch("extract_json")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        funcs = _extract_fix_prompt_ps_functions_from_auto((_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8"))
+        harness = scratch / "_orch_extract_fix_json.ps1"
+        harness.write_text(
+            """param(
     [Parameter(Mandatory)][string]$ReviewPath,
     [Parameter(Mandatory)][string]$OutPath
 )
 
 """
-        + funcs
-        + """
+            + funcs
+            + """
 $r = Extract-FixPromptFromFile -ReviewFile $ReviewPath -OutputPromptFile $OutPath
 exit ($(if ($r) { 0 } else { 1 }))
 """,
-        encoding="utf-8",
-    )
+            encoding="utf-8",
+        )
 
-    review_path = tmp_path / "codex_review.md"
-    out_path = tmp_path / "next_implementer_prompt.md"
-    review_path.write_text(
-        textwrap.dedent(
-            """
-            VERDICT: FIX_REQUIRED
+        review_path = scratch / "codex_review.md"
+        out_path = scratch / "next_implementer_prompt.md"
+        review_path.write_text(
+            textwrap.dedent(
+                """
+                VERDICT: FIX_REQUIRED
 
-            FIX_PROMPT_FOR_IMPLEMENTER:
-            ```json
-            {
-              "fix_required": true,
-              "files": ["src/foo.py"],
-              "changes": [
-                { "path": "src/foo.py", "kind": "edit", "what": "Fix widget." }
-              ],
-              "acceptance": "pytest -q passes."
-            }
-            ```
+                FIX_PROMPT_FOR_IMPLEMENTER:
+                ```json
+                {
+                  "fix_required": true,
+                  "files": ["src/foo.py"],
+                  "changes": [
+                    { "path": "src/foo.py", "kind": "edit", "what": "Fix widget." }
+                  ],
+                  "acceptance": "pytest -q passes."
+                }
+                ```
 
-            FINAL_NOTE:
-            ok
-            """
-        ).strip(),
-        encoding="utf-8",
-    )
+                FINAL_NOTE:
+                ok
+                """
+            ).strip(),
+            encoding="utf-8",
+        )
 
-    proc = subprocess.run(
-        [
-            ps,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(harness),
-            str(review_path),
-            str(out_path),
-        ],
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-        check=False,
-    )
-    detail = (proc.stdout or "") + (proc.stderr or "")
-    assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(review_path),
+                str(out_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
 
-    body = out_path.read_text(encoding="utf-8")
-    assert "## Files to change" in body
-    assert "## Changes" in body
-    assert "## Acceptance" in body
-    assert "src/foo.py" in body
-    assert "Fix widget." in body
+        body = out_path.read_text(encoding="utf-8")
+        assert "## Files to change" in body
+        assert "## Changes" in body
+        assert "## Acceptance" in body
+        assert "src/foo.py" in body
+        assert "Fix widget." in body
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
-def test_extract_fix_prompt_falls_back_on_invalid_json(tmp_path: Path) -> None:
+def test_extract_fix_prompt_falls_back_on_invalid_json() -> None:
     """C03: malformed JSON must fall back to free-text regex extraction."""
     ps = _powershell_exe()
     if not ps:
         pytest.skip("No pwsh or powershell on PATH")
 
-    funcs = _extract_fix_prompt_ps_functions_from_auto((_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8"))
-    harness = tmp_path / "_orch_extract_fix_fallback.ps1"
-    harness.write_text(
-        """param(
+    scratch = _orch_scratch("extract_fallback")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        funcs = _extract_fix_prompt_ps_functions_from_auto((_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8"))
+        harness = scratch / "_orch_extract_fix_fallback.ps1"
+        harness.write_text(
+            """param(
     [Parameter(Mandatory)][string]$ReviewPath,
     [Parameter(Mandatory)][string]$OutPath
 )
 
 """
-        + funcs
-        + """
+            + funcs
+            + """
 $r = Extract-FixPromptFromFile -ReviewFile $ReviewPath -OutputPromptFile $OutPath
 exit ($(if ($r) { 0 } else { 1 }))
 """,
-        encoding="utf-8",
-    )
+            encoding="utf-8",
+        )
 
-    review_path = tmp_path / "codex_review_bad_json.md"
-    out_path = tmp_path / "next_implementer_prompt_legacy.md"
-    review_path.write_text(
-        textwrap.dedent(
-            """
-            VERDICT: FIX_REQUIRED
+        review_path = scratch / "codex_review_bad_json.md"
+        out_path = scratch / "next_implementer_prompt_legacy.md"
+        review_path.write_text(
+            textwrap.dedent(
+                """
+                VERDICT: FIX_REQUIRED
 
-            FIX_PROMPT_FOR_IMPLEMENTER:
-            ```json
-            { NOT VALID JSON
-            ```
+                FIX_PROMPT_FOR_IMPLEMENTER:
+                ```json
+                { NOT VALID JSON
+                ```
 
-            Legacy fallback body line one.
+                Legacy fallback body line one.
 
-            FINAL_NOTE:
-            done
-            """
-        ).strip(),
-        encoding="utf-8",
-    )
+                FINAL_NOTE:
+                done
+                """
+            ).strip(),
+            encoding="utf-8",
+        )
 
-    proc = subprocess.run(
-        [
-            ps,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(harness),
-            str(review_path),
-            str(out_path),
-        ],
-        cwd=str(tmp_path),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=120,
-        check=False,
-    )
-    detail = (proc.stdout or "") + (proc.stderr or "")
-    assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
-    assert "WARNING" in detail.upper(), detail
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(review_path),
+                str(out_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+        assert "WARNING" in detail.upper(), detail
 
-    body = out_path.read_text(encoding="utf-8").strip()
-    assert body
-    assert "Legacy fallback body line one." in body
+        body = out_path.read_text(encoding="utf-8").strip()
+        assert body
+        assert "Legacy fallback body line one." in body
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_codex_template_reads_test_failures_before_raw_pytest_output() -> None:
@@ -938,3 +962,108 @@ def test_ai_loop_auto_default_max_iterations_is_5() -> None:
     for name in ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1"):
         text = (_SCRIPTS / name).read_text(encoding="utf-8")
         assert pattern.search(text), f"{name}: default MaxIterations must be 5 (DD-011)"
+
+
+def test_ai_loop_plan_script_exists() -> None:
+    assert (_SCRIPTS / "ai_loop_plan.ps1").is_file()
+
+
+def test_run_claude_planner_script_exists() -> None:
+    assert (_SCRIPTS / "run_claude_planner.ps1").is_file()
+
+
+def test_planner_prompt_has_architect_framing() -> None:
+    path = _ROOT / "templates" / "planner_prompt.md"
+    assert path.is_file()
+    text = path.read_text(encoding="utf-8")
+    for needle in (
+        "Architect with final say",
+        "final say",
+        "critically evaluate",
+        "Architect note:",
+    ):
+        assert needle in text, f"missing {needle!r} in {path}"
+
+
+def test_planner_scripts_parse_cleanly() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    for name in ("ai_loop_plan.ps1", "run_claude_planner.ps1"):
+        script = _SCRIPTS / name
+        assert script.is_file(), f"missing {script}"
+        escaped = str(script.resolve()).replace("'", "''")
+        cmd = (
+            f"$errs=$null;$tok=$null;"
+            f"[void][System.Management.Automation.Language.Parser]::ParseFile('{escaped}',[ref]$tok,[ref]$errs);"
+            "if ($errs.Count) { $errs | ForEach-Object { $_.ToString() } | Write-Output; exit 1 };"
+            "exit 0"
+        )
+        proc = subprocess.run(
+            [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", cmd],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        detail = proc.stdout.strip() + proc.stderr.strip()
+        assert proc.returncode == 0, f"{name}: parser reported errors:\n{detail}"
+
+
+def test_run_claude_planner_has_no_param_block_and_no_stderr_redirect() -> None:
+    text = (_SCRIPTS / "run_claude_planner.ps1").read_text(encoding="utf-8")
+    assert "param(" not in text
+    assert "2>&1" not in text
+
+
+def test_install_copies_planner_files_and_has_self_install_guard() -> None:
+    text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
+    assert "ai_loop_plan.ps1" in text
+    assert "run_claude_planner.ps1" in text
+    assert "planner_prompt.md" in text
+    assert '.ai-loop' in text and "planner_prompt.md" in text
+    assert "Refusing to self-install" in text
+
+
+def test_gitignore_excludes_planner_artifacts() -> None:
+    text = (_ROOT / ".gitignore").read_text(encoding="utf-8")
+    assert ".ai-loop/*.bak" in text
+    assert ".ai-loop/user_ask.md" in text
+
+
+def test_ai_loop_plan_structural_invariants() -> None:
+    text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
+    assert "$script:ExitCode" in text
+    assert r"templates\planner_prompt.md" in text
+    for h in (
+        "## Goal",
+        "## Scope",
+        "## Files in scope",
+        "## Files out of scope",
+        "## Tests",
+        "## Important",
+    ):
+        assert h in text
+    assert ".tmp" in text
+    assert "repo_map.md is missing" in text
+    assert "Get-FilesInScopeSummary" in text or "Files in scope (extracted" in text
+
+
+def test_user_ask_template_exists_and_has_sections() -> None:
+    path = _ROOT / "templates" / "user_ask_template.md"
+    assert path.is_file()
+    t = path.read_text(encoding="utf-8")
+    for needle in ("## Goal", "## Affected files", "## Out-of-scope", "## Proposed approach"):
+        assert needle in t
+
+
+def test_install_copies_user_ask_template() -> None:
+    text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
+    assert (
+        'Copy-Item (Join-Path $Root "templates\\user_ask_template.md") '
+        '(Join-Path $TargetAiLoop "user_ask_template.md")' in text
+    )
+    assert (
+        'Copy-Item (Join-Path $Root "templates\\user_ask_template.md") (Join-Path $TargetAiLoop "user_ask.md")'
+        not in text
+    )

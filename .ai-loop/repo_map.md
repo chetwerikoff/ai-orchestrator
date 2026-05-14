@@ -20,12 +20,14 @@
 ## scripts/
 
 - `scripts/ai_loop_auto.ps1` — Explicit -CursorCommand wins entirely: do not read implementer.json, merge a persisted model,
+- `scripts/ai_loop_plan.ps1` — (no header summary)
 - `scripts/ai_loop_task_first.ps1` — Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
 - `scripts/build_repo_map.ps1` — Generate a deterministic `.ai-loop/repo_map.md` index for the repository tree.
 - `scripts/continue_ai_loop.ps1` — Resumes ai_loop_auto.ps1 -Resume. Optional -CursorCommand / -CursorModel override
 - `scripts/filter_pytest_failures.py` — Filter pytest -q output into a structured failures summary.
 - `scripts/install_into_project.ps1` — (no header summary)
 - `scripts/promote_session.ps1` — Draft snapshot destination: `.ai-loop/archive/rolls/` (timestamped filenames).
+- `scripts/run_claude_planner.ps1` — No param block: keeps $input available for the pipeline.
 - `scripts/run_cursor_agent.ps1` — Invoke the Cursor agent CLI (node.exe) directly, reading the prompt from stdin.
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
 - `scripts/run_opencode_scout.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
@@ -37,8 +39,10 @@
 - `templates/codex_review_prompt.md` — Codex Review Prompt
 - `templates/implementer_summary_template.md` — Implementer summary
 - `templates/opencode.json` — (no header summary)
+- `templates/planner_prompt.md` — Planner role: Architect with final say
 - `templates/project_summary.md` — Project Summary
 - `templates/task.md` — Task: <task name>
+- `templates/user_ask_template.md` — User ASK
 
 ## tests/
 

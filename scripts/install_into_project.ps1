@@ -9,6 +9,11 @@ param(
 $Root = Resolve-Path "."
 $Target = Resolve-Path $TargetProject
 
+if ($Root.Path -eq $Target.Path) {
+    Write-Error "install_into_project: source and target are the same directory. Refusing to self-install. Use a fresh temp directory for smoke tests."
+    exit 1
+}
+
 $TargetScripts = Join-Path $Target "scripts"
 $TargetAiLoop = Join-Path $Target ".ai-loop"
 
@@ -26,6 +31,8 @@ Copy-Item (Join-Path $Root "scripts\wrap_up_session.ps1") (Join-Path $TargetScri
 Copy-Item (Join-Path $Root "scripts\promote_session.ps1") (Join-Path $TargetScripts "promote_session.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\build_repo_map.ps1") (Join-Path $TargetScripts "build_repo_map.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\filter_pytest_failures.py") (Join-Path $TargetScripts "filter_pytest_failures.py") -Force
+Copy-Item (Join-Path $Root "scripts\ai_loop_plan.ps1") (Join-Path $TargetScripts "ai_loop_plan.ps1") -Force
+Copy-Item (Join-Path $Root "scripts\run_claude_planner.ps1") (Join-Path $TargetScripts "run_claude_planner.ps1") -Force
 
 $TaskTarget = Join-Path $TargetAiLoop "task.md"
 if ($OverwriteTask -or !(Test-Path $TaskTarget)) {
@@ -38,6 +45,8 @@ if ($OverwriteProjectSummary -or !(Test-Path $ProjectSummaryTarget)) {
 }
 
 Copy-Item (Join-Path $Root "templates\codex_review_prompt.md") (Join-Path $TargetAiLoop "codex_review_prompt.md") -Force
+Copy-Item (Join-Path $Root "templates\planner_prompt.md") (Join-Path $TargetAiLoop "planner_prompt.md") -Force
+Copy-Item (Join-Path $Root "templates\user_ask_template.md") (Join-Path $TargetAiLoop "user_ask_template.md") -Force
 Copy-Item (Join-Path $Root "templates\implementer_summary_template.md") (Join-Path $TargetAiLoop "implementer_summary_template.md") -Force
 
 $OpencodeTarget = Join-Path $Target "opencode.json"
