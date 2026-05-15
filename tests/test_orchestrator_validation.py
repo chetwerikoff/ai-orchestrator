@@ -1647,6 +1647,19 @@ def test_preflight_skips_paths_marked_new_with_inline_note(orch_preflight_dir: P
     assert proc.returncode == 0, out
 
 
+def test_preflight_skips_paths_marked_new_comma_optional(orch_preflight_dir: Path) -> None:
+    """Parenthetical starting with `new` after path (e.g. optional) counts as new-file marker."""
+    task = textwrap.dedent(
+        """
+        ## Files in scope
+        - not_yet_there.yaml (new, optional)
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, out
+
+
 def test_preflight_blocks_when_new_is_not_trailing(orch_preflight_dir: Path) -> None:
     task = textwrap.dedent(
         """

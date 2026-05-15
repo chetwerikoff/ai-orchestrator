@@ -328,14 +328,15 @@ function Test-TaskFilesInScopeExist {
         $token = ($bullet -split '\s+', 2)[0]
         if ([string]::IsNullOrWhiteSpace($token)) { continue }
         if ($token -match '[\*\?]' -or $token.EndsWith('/') -or $token.EndsWith('\')) { continue }
-        # (new): end-of-line (legacy) or immediately after the path token (allows same-line notes after (new)).
+        # Treat as new file if (new...) appears right after the path token, or legacy trailing " (new)" only.
+        # Supports "(new)", "(new, optional)", etc.; avoids prose like "with (new) mode" (not leading after path).
         $isNew = $false
         if ($bullet -match '\s+\(new\)\s*$') {
             $isNew = $true
         }
         elseif ($token.Length -lt $bullet.Length) {
             $afterPath = $bullet.Substring($token.Length).TrimStart()
-            if ($afterPath -match '^\(new\)(\s|$)') { $isNew = $true }
+            if ($afterPath -match '^\(\s*new\b[^)]*\)') { $isNew = $true }
         }
         if ($isNew) { continue }
         $checked++
@@ -397,7 +398,7 @@ if (-not $SkipScopeCheck) {
             Write-Host "  - $p" -ForegroundColor Red
         }
         Write-Host ""
-        Write-Host "Fix: either correct the path in $TaskPath, mark it with ' (new)' at end of line or right after the path if intentional," -ForegroundColor Yellow
+        Write-Host "Fix: either correct the path in $TaskPath, mark it with '(new...)' right after the path or trailing '(new)' if intentional," -ForegroundColor Yellow
         Write-Host "     or re-run with -SkipScopeCheck to bypass this check."
         exit 1
     }
