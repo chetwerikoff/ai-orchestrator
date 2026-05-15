@@ -46,14 +46,15 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 - Python static analysis uses `pyrightconfig.json`; run `pyright` for Python-only type checks. LSP command: `pyright-langserver --stdio`.
 - On Windows PowerShell, empty array returns can become `$null`; path-set helpers emit through the pipeline and callers wrap with `@(...)`.
 - `ai_loop.py` still carries older experimental Cursor-centric terminology and is intentionally separate from the active PowerShell loop unless a task explicitly authorizes changing it.
+- Under **pwsh**, `Join-Path $base '.ai-loop\…'` can return `$null` when the child path starts with `.`; `scripts/record_token_usage.ps1` builds the JSONL path with `[System.IO.Path]::Combine` instead. `scripts/show_token_report.ps1` still uses `Join-Path`; if console reports disappear on pwsh-only runs, mirror the same Combine pattern there.
 
 ## Current Stage
 
-Stable. Phase 1 A/B closed (2026-05-14): Cursor confirmed as permanent default implementer (DD-021 resolved). Proxy (DD-020) retired. `MaxIterations` default set to 5 (DD-011 resolved). `CLAUDE.md` added for Claude Code sessions and excluded from repo_map. All orchestrator queue tasks (O01–O06, DD-011) complete. **C07:** manual opt-in task planner; **C08:** task-first `## Files in scope` path preflight (default on; `-SkipScopeCheck` bypass); **C09:** optional planner `-WithReview` Codex loop (bounded, advisory; default off). **C10:** `## Order` section added to task template and planner prompt. `ai_loop_plan.ps1` saves numbered queue copies to `tasks/NNN_slug.md` when order is set (non-fatal); default `SafeAddPaths` includes `tasks/` so those queue specs can be safe-staged and auto-committed like other durable paths.
+Stable. Phase 1 A/B closed (2026-05-14): Cursor confirmed as permanent default implementer (DD-021 resolved). Proxy (DD-020) retired. `MaxIterations` default set to 5 (DD-011 resolved). `CLAUDE.md` added for Claude Code sessions and excluded from repo_map. All orchestrator queue tasks (O01–O06, DD-011) complete. **C07:** manual opt-in task planner; **C08:** task-first `## Files in scope` path preflight (default on; `-SkipScopeCheck` bypass); **C09:** optional planner `-WithReview` Codex loop (bounded, advisory; default off). **C10:** `## Order` section added to task template and planner prompt. `ai_loop_plan.ps1` saves numbered queue copies to `tasks/NNN_slug.md` when order is set (non-fatal); default `SafeAddPaths` includes `tasks/` so those queue specs can be safe-staged and auto-committed like other durable paths. **Token usage (1/3):** foundation in place — `scripts/record_token_usage.ps1` (`Write-TokenUsageRecord`) and `scripts/show_token_report.ps1`; `ai_loop_auto.ps1` runs the report non-fatally before each successful exit; `.ai-loop/token_usage.jsonl` is gitignored. Real token parsing and automatic record writes are deferred to step 2; config and limits to step 3.
 
 ## Last Completed Task
 
-**C10:** Optional `## Order` in planner/task templates; `ai_loop_plan.ps1` queue-save copy to `tasks/NNN_slug.md`; pytest coverage for order regex, slug derivation, and filename contract.
+Token usage foundation (task 1 of 3): JSONL recorder `Write-TokenUsageRecord`, console `show_token_report.ps1`, non-fatal hook in `ai_loop_auto.ps1`, gitignore + pytest coverage.
 
 ## Next Likely Steps
 

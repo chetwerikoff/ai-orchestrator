@@ -718,6 +718,7 @@ function Try-ResumeFromExistingReview {
             if ($WithWrapUp) {
                 & "$PSScriptRoot\wrap_up_session.ps1"
             }
+            try { & "$PSScriptRoot\show_token_report.ps1" } catch { Write-Warning "Token report failed: $_" }
             exit 0
         }
 
@@ -806,6 +807,7 @@ DETAIL: No working-tree changes before Codex review on iteration $i after the im
         if ($WithWrapUp) {
             & "$PSScriptRoot\wrap_up_session.ps1"
         }
+        try { & "$PSScriptRoot\show_token_report.ps1" } catch { Write-Warning "Token report failed: $_" }
         exit 0
     }
 

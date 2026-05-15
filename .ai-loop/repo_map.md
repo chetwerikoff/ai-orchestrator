@@ -28,12 +28,14 @@
 - `scripts/filter_pytest_failures.py` — Filter pytest -q output into a structured failures summary.
 - `scripts/install_into_project.ps1` — (no header summary)
 - `scripts/promote_session.ps1` — Draft snapshot destination: `.ai-loop/archive/rolls/` (timestamped filenames).
+- `scripts/record_token_usage.ps1` — $PSScriptRoot is empty when this file is dot-sourced from some -Command harnesses; fix to this file's directory.
 - `scripts/run_claude_planner.ps1` — No param block: keeps $input available for the pipeline.
 - `scripts/run_codex_reviewer.ps1` — No param block: keeps $input available for the pipeline.
 - `scripts/run_cursor_agent.ps1` — Invoke the Cursor agent CLI (node.exe) directly, reading the prompt from stdin.
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
 - `scripts/run_opencode_scout.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
 - `scripts/run_scout_pass.ps1` — Auto-swap opencode_agent -> opencode_scout to avoid IMPLEMENTER role conflict.
+- `scripts/show_token_report.ps1` — (no header summary)
 - `scripts/wrap_up_session.ps1` — Writes `.ai-loop\_debug\session_draft.md` via read-only ingest of orchestrator artefacts (non-fatal).
 
 ## templates/
@@ -52,3 +54,4 @@
 - `tests/test_ai_loop.py` — Unit tests for ai_loop.py pure helpers (stdlib-only module).
 - `tests/test_filter_pytest_failures.py` — Tests for scripts/filter_pytest_failures.py.
 - `tests/test_orchestrator_validation.py` — Orchestrator checks: PowerShell AST parse + path-set delta semantics (task-first gate).
+- `tests/test_token_usage.py` — Token usage JSONL recorder + console report scripts.

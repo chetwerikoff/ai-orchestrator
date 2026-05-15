@@ -28,6 +28,8 @@ __pycache__/
 .ai-loop/git_status.txt
 .ai-loop/post_fix_output.txt
 .ai-loop/implementer_result.md
+.ai-loop/token_usage.jsonl
+.ai-loop/token_usage_summary.md
 .ai-loop/claude_final_review.md
 
 # Debug artefacts (raw agent stdout, prompts)
