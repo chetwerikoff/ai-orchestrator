@@ -1609,6 +1609,19 @@ def test_preflight_skips_paths_marked_new(orch_preflight_dir: Path) -> None:
     assert proc.returncode == 0, out
 
 
+def test_preflight_skips_paths_marked_new_with_inline_note(orch_preflight_dir: Path) -> None:
+    """`(new)` may be followed by same-line description (not required to be last on the bullet)."""
+    task = textwrap.dedent(
+        """
+        ## Files in scope
+        - not_yet_there.py (new)    reviewer-scoped artifact
+        """
+    ).strip()
+    proc = _run_task_first_preflight_harness(orch_preflight_dir, task)
+    out = (proc.stdout or "") + (proc.stderr or "")
+    assert proc.returncode == 0, out
+
+
 def test_preflight_blocks_when_new_is_not_trailing(orch_preflight_dir: Path) -> None:
     task = textwrap.dedent(
         """
