@@ -17,6 +17,7 @@ README.md
 AGENTS.md
 scripts/
 docs/
+tasks/
 templates/
 ai_loop.py
 pytest.ini

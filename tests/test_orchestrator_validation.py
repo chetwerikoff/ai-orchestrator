@@ -43,6 +43,7 @@ _SAFEADD_DEFAULT_RE = re.compile(
     r"\[string\]\$SafeAddPaths\s*=\s*\"([^\"]+)\"",
     re.MULTILINE,
 )
+_AGENTS_SAFEADD_LITERAL_RE = re.compile(r"The default `SafeAddPaths` literal is `([^`]+)`")
 
 RESULT_NORM = ".ai-loop/implementer_result.md"
 
@@ -97,6 +98,21 @@ def extract_fix_prompt_from_review_text(review: str) -> str | None:
     return body
 
 
+def _default_safe_add_paths_from_agents_md() -> str:
+    text = (_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    m = _AGENTS_SAFEADD_LITERAL_RE.search(text)
+    assert m is not None, "AGENTS.md must document the default SafeAddPaths backtick literal"
+    return m.group(1).strip()
+
+
+def _default_safe_add_paths_from_safety_md() -> str:
+    t = (_ROOT / "docs" / "safety.md").read_text(encoding="utf-8")
+    m = re.search(r"```text\r?\n([\s\S]*?)\r?\n```", t)
+    assert m is not None, "docs/safety.md must contain a ```text fenced safe paths block"
+    lines = [ln.strip() for ln in m.group(1).splitlines() if ln.strip()]
+    return ",".join(lines)
+
+
 def _default_safe_add_paths_literal(script: Path) -> str:
     text = script.read_text(encoding="utf-8")
     m = _SAFEADD_DEFAULT_RE.search(text)
@@ -105,11 +121,15 @@ def _default_safe_add_paths_literal(script: Path) -> str:
 
 
 def test_default_safe_add_paths_parity_includes_docs_and_templates() -> None:
-    """Orchestrator entrypoints must agree on SafeAddPaths defaults; docs/templates must stage."""
+    """Orchestrator entrypoints must agree on SafeAddPaths defaults; AGENTS.md and docs/safety.md must match."""
     names = ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1")
     literals = [_default_safe_add_paths_literal(_SCRIPTS / n) for n in names]
     assert len(set(literals)) == 1, dict(zip(names, literals, strict=True))
-    segments = [s.strip() for s in literals[0].split(",") if s.strip()]
+    canonical = literals[0]
+    assert _default_safe_add_paths_from_agents_md() == canonical
+    assert _default_safe_add_paths_from_safety_md() == canonical
+    segments = [s.strip() for s in canonical.split(",") if s.strip()]
+    assert "tasks/" in segments
     assert "AGENTS.md" in segments
     assert "docs/" in segments
     assert "templates/" in segments

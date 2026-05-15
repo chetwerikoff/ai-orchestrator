@@ -1,121 +1,127 @@
-﻿# Task: completion-banner
+# Task: Add `tasks/` to SafeAddPaths
 
 ## Project context
 
-- `AGENTS.md`
-- `.ai-loop/task.md`
-- `.ai-loop/project_summary.md`
+Required reading before starting:
+
+1. `AGENTS.md`
+2. `.ai-loop/task.md`
+3. `.ai-loop/project_summary.md`
+4. `.ai-loop/repo_map.md`
+
+Do not read by default:
+
+- `docs/archive/`
+- `.ai-loop/_debug/`
 
 ## Goal
 
-Replace the `Write-Section "AI LOOP TASK-FIRST START"` call at the top of the main body and the `Write-Section "AI LOOP TASK-FIRST DONE"` call at the very end of `scripts/ai_loop_task_first.ps1` with versions that include the task short name parsed from the first line of `.ai-loop/task.md`. If the name cannot be read, emit the banner without it. No other behaviour, exit codes, or scripts change.
-
-Note: `Write-Section` (defined inside the script) already emits the three-line `==============================` wrapper. The only change is the string passed to it.
+Make queued task specs under `tasks/` eligible for orchestrator safe staging. C10 added optional `## Order` support and queue-copy output to `tasks/NNN_slug.md`, but `tasks/` is not currently included in the default `SafeAddPaths`, so queue files are written but not auto-committed by the orchestrator.
 
 ## Scope
 
 Allowed:
-- Edit `scripts/ai_loop_task_first.ps1` to emit the banner
-- Add one test to `tests/test_orchestrator_validation.py` verifying the banner separator string exists in the script
+- Add `tasks/` to the default `SafeAddPaths` literal everywhere it is maintained.
+- Update documentation that mirrors the safe path list.
+- Update tests that pin safe-path parity.
+- Update `.ai-loop/project_summary.md` to remove the stale follow-up note and record the durable behavior.
+- Regenerate `.ai-loop/repo_map.md` if changed files affect the map.
 
 Not allowed:
-- Changing exit codes or loop flow
-- Adding new files
-- Touching `ai_loop_auto.ps1`, `continue_ai_loop.ps1`, or any other script
-- Modifying `task.md` content (only reading it)
+- Changing queue filename generation or `## Order` parsing behavior.
+- Changing commit/push behavior beyond the safe allowlist.
+- Editing queued task content except this task file if needed.
 
 ## Files in scope
 
+- `scripts/ai_loop_auto.ps1`
 - `scripts/ai_loop_task_first.ps1`
+- `scripts/continue_ai_loop.ps1`
+- `docs/safety.md`
+- `AGENTS.md`
 - `tests/test_orchestrator_validation.py`
+- `.ai-loop/project_summary.md`
+- `.ai-loop/repo_map.md`
 
 ## Files out of scope
 
 - `docs/archive/**`
 - `.ai-loop/_debug/**`
 - `ai_loop.py`
-- All other scripts not listed above
+- `templates/**`
+- `scripts/ai_loop_plan.ps1`
 
 ## Required behavior
 
-1. Near the top of the main script body (just before or just after the `Assert-FileExists` calls, around line 347), read the first line of `$TaskPath`. If it matches `^#\s*Task:\s*(.+)`, capture the trimmed task name into `$taskName`; otherwise set `$taskName = ""`. This read must be silent/non-fatal — use `try/catch` so a missing file does not abort the script.
+1. Add `tasks/` to the default `SafeAddPaths` literal in all three scripts:
+   - `scripts/ai_loop_auto.ps1`
+   - `scripts/ai_loop_task_first.ps1`
+   - `scripts/continue_ai_loop.ps1`
 
-2. Replace `Write-Section "AI LOOP TASK-FIRST START"` (currently line 346) with:
-   - If `$taskName` is non-empty: `Write-Section "AI LOOP TASK: $taskName START"`
-   - Fallback (name empty): `Write-Section "AI LOOP TASK-FIRST START"` (unchanged)
+2. Add `tasks/` to the mirrored safe path documentation in:
+   - `AGENTS.md`
+   - `docs/safety.md`
 
-3. Replace `Write-Section "AI LOOP TASK-FIRST DONE"` (currently the last line) with:
-   - If `$taskName` is non-empty: `Write-Section "AI LOOP TASK: $taskName DONE"`
-   - Fallback: `Write-Section "AI LOOP TASK-FIRST DONE"` (unchanged)
+3. Update any safe-path parity test in `tests/test_orchestrator_validation.py` so the scripts and docs are still required to stay synchronized.
 
-4. Because both banners need `$taskName`, extract it once before the first `Write-Section` call and reuse the same variable at the end.
+4. Update `.ai-loop/project_summary.md`:
+   - remove or revise the stale note saying `tasks/` is not currently in `SafeAddPaths`;
+   - record that queued task specs are now part of the durable safe staging allowlist.
 
-5. The `Write-Section` function itself must not be modified. No colour changes. No other `Write-Section` or `Write-Host` calls change.
+5. Regenerate `.ai-loop/repo_map.md` with `scripts/build_repo_map.ps1` if the map changes.
 
 ## Tests
 
-Add two tests in `tests/test_orchestrator_validation.py`:
+Run:
 
-```python
-def test_completion_banner_separator_present():
-    """ai_loop_task_first.ps1 must contain the banner separator string."""
-    content = Path("scripts/ai_loop_task_first.ps1").read_text(encoding="utf-8")
-    assert "==============================" in content, \
-        "completion banner separator missing from ai_loop_task_first.ps1"
-
-def test_task_name_banners_present():
-    """Both START and DONE banners must reference the task name variable."""
-    content = Path("scripts/ai_loop_task_first.ps1").read_text(encoding="utf-8")
-    assert "AI LOOP TASK:" in content and "START" in content, \
-        "START banner with task name missing from ai_loop_task_first.ps1"
-    assert "AI LOOP TASK:" in content and "DONE" in content, \
-        "DONE banner with task name missing from ai_loop_task_first.ps1"
+```powershell
+python -m pytest tests\test_orchestrator_validation.py -q
 ```
 
-Run: `python -m pytest -q`
+Add or update tests for:
+
+1. `tasks/` appears in every default `SafeAddPaths` literal.
+2. `docs/safety.md` and `AGENTS.md` remain synchronized with the script defaults.
 
 ## Verification
 
+Run:
+
 ```powershell
-# 1. PowerShell parse check
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]`$null, [ref]`$null)"
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]`$null, [ref]`$null)"
-
-# 2. Confirm banner separator is present
-powershell -NoProfile -Command "if (!(Select-String -Path 'scripts\ai_loop_task_first.ps1' -Pattern '={10}')) { exit 1 }"
-
-# 3. Confirm START banner with task name is present
-powershell -NoProfile -Command "if (!(Select-String -Path 'scripts\ai_loop_task_first.ps1' -Pattern 'AI LOOP TASK:.*START')) { exit 1 }"
-
-# 4. Confirm DONE banner with task name is present
-powershell -NoProfile -Command "if (!(Select-String -Path 'scripts\ai_loop_task_first.ps1' -Pattern 'AI LOOP TASK:.*DONE')) { exit 1 }"
-
-# 5. Full test suite
-python -m pytest -q
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\continue_ai_loop.ps1', [ref]`$null, [ref]`$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\build_repo_map.ps1', [ref]`$null, [ref]`$null)"
+python -m pytest tests\test_orchestrator_validation.py -q
+pyright
 ```
 
 ## Implementer summary requirements
 
-1. Which lines in `ai_loop_task_first.ps1` were changed and what they now contain (show before/after).
-2. How the task-name extraction was written in PowerShell (the regex and try/catch structure).
-3. Test count before/after.
-4. Edge cases handled: file missing, regex no-match (confirm fallback emits original string).
-5. Remaining risks (if any).
+Update `.ai-loop/implementer_summary.md` with:
+
+1. Changed files.
+2. Test result.
+3. What was implemented.
+4. What was skipped and why.
+5. Remaining risks.
 
 ## Project summary update
 
-No update needed.
+Update `.ai-loop/project_summary.md` with durable project-level information only. Keep it concise: mention that queued task specs under `tasks/` are now included in `SafeAddPaths`, and remove the stale follow-up note.
 
 ## Output hygiene
 
-- Do not duplicate task content into the implementer summary.
+- Do not duplicate this task description into `.ai-loop/implementer_summary.md`.
 - Do not write to `.ai-loop/_debug/`.
-- Do not commit.
 - Do not write to `docs/archive/`.
+- Do not commit or push manually.
 
 ## Important
 
-- The task name extraction reads only the first line of `$TaskPath`; no full parse is needed. Failure to read must be silent (non-fatal) — the banner still emits without the name (original text).
-- `ai_loop_task_first.ps1` already reads `task.md` in `Get-TaskScopeBlocks` and `Invoke-ImplementerImplementation` using `Get-Content -LiteralPath ... -Raw -Encoding UTF8`. The implementer should use the same one-liner (`(Get-Content -LiteralPath $TaskPath -TotalCount 1 -Encoding UTF8 -ErrorAction SilentlyContinue)`) for the first-line read rather than introducing a new helper function.
-- Both `Write-Section` calls must use the same `$taskName` variable extracted once at the top of the main body, not two separate reads.
-- Architect note: fallback is the original banner text (`AI LOOP TASK-FIRST START` / `AI LOOP TASK-FIRST DONE`), not a placeholder like `UNKNOWN TASK`.
-- Architect note: the format `AI LOOP TASK: <name> START` / `AI LOOP TASK: <name> DONE` keeps output grep-friendly and unambiguous in CI logs.
+- Keep the safe path literals synchronized exactly. AGENTS.md says this list lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`.
+- This task only changes whether queued task files can be staged safely. It must not change how the planner creates queue copies or how task-first runs active tasks.
+- Adding `tasks/` means generated queue specs can be committed; runtime/debug artifacts must remain excluded.
+
+## Order
+
