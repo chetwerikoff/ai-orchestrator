@@ -1029,6 +1029,8 @@ def test_planner_prompt_has_architect_framing() -> None:
         "final say",
         "critically evaluate",
         "Architect note:",
+        "optimal architecture for the project",
+        "Cursor Draft Brief",
     ):
         assert needle in text, f"missing {needle!r} in {path}"
 
@@ -1073,6 +1075,7 @@ def test_install_copies_planner_files_and_has_self_install_guard() -> None:
     assert "ai_loop_plan.ps1" in text
     assert "run_claude_planner.ps1" in text
     assert "planner_prompt.md" in text
+    assert "draft_brief_prompt.md" in text
     assert '.ai-loop' in text and "planner_prompt.md" in text
     assert "Refusing to self-install" in text
 
@@ -1081,6 +1084,7 @@ def test_gitignore_excludes_planner_artifacts() -> None:
     text = (_ROOT / ".gitignore").read_text(encoding="utf-8")
     assert ".ai-loop/*.bak" in text
     assert ".ai-loop/user_ask.md" in text
+    assert ".ai-loop/task_draft_brief.md" in text
 
 
 def test_run_codex_reviewer_script_exists() -> None:
@@ -1156,6 +1160,8 @@ def test_no_emdash_bytes_in_ps1_scripts() -> None:
 def test_ai_loop_plan_review_invariants() -> None:
     text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
     assert "[switch]$WithReview" in text
+    assert "[switch]$WithDraft" in text
+    assert "[string]$DraftCommand" in text
     assert "[int]$MaxReviewIterations = 3" in text
     assert "[string]$ReviewerCommand" in text
     assert "[string]$ReviewerModel" in text
@@ -1320,6 +1326,114 @@ def test_ai_loop_plan_structural_invariants() -> None:
     assert ".tmp" in text
     assert "repo_map.md is missing" in text
     assert "Get-FilesInScopeSummary" in text or "Files in scope (extracted" in text
+
+
+def test_draft_brief_template_exists_nonempty() -> None:
+    path = _ROOT / "templates" / "draft_brief_prompt.md"
+    assert path.is_file()
+    assert path.read_text(encoding="utf-8").strip()
+
+
+def test_ai_loop_plan_with_draft_source_contract() -> None:
+    text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
+    assert "[switch]$WithDraft" in text
+    assert '[string]$DraftCommand = "run_cursor_agent.ps1"' in text
+    assert "task_draft_brief.md" in text
+    assert "proceeding without brief" in text
+    assert "Cursor Draft Brief" in text
+    assert "draft_brief_prompt.md" in text
+
+
+def test_ai_loop_plan_draft_command_resolves_bare_wrapper_beside_script() -> None:
+    """Bare -DraftCommand names resolve next to ai_loop_plan.ps1 ($PSScriptRoot); explicit paths unchanged."""
+    text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
+    assert '$draftBesidePlan = Join-Path $PSScriptRoot $DraftCommand' in text
+    assert "$DraftCommand -notmatch" in text and "$PSScriptRoot $DraftCommand" in text
+
+
+def test_ai_loop_plan_with_draft_nonfatal_when_draft_command_throws() -> None:
+    """Terminating draft wrapper errors warn and planning continues (non-fatal)."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("ai_loop_plan_draft_throw")
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        ai_loop = root / ".ai-loop"
+        ai_loop.mkdir(parents=True, exist_ok=True)
+        tmpl = root / "templates"
+        tmpl.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_ROOT / "AGENTS.md", root / "AGENTS.md")
+        shutil.copyfile(_ROOT / ".ai-loop" / "project_summary.md", ai_loop / "project_summary.md")
+        shutil.copyfile(_ROOT / "templates" / "planner_prompt.md", tmpl / "planner_prompt.md")
+        shutil.copyfile(_ROOT / "templates" / "draft_brief_prompt.md", tmpl / "draft_brief_prompt.md")
+        (root / "throw_draft.ps1").write_text(
+            'throw "intentional draft terminating error for harness"\n',
+            encoding="utf-8",
+        )
+        (root / "fake_planner.ps1").write_text(
+            textwrap.dedent(
+                r"""
+                $null = @($input)
+                @'
+                # Task: harness draft throw
+
+                ## Goal
+                g
+
+                ## Scope
+                s
+
+                ## Files in scope
+                - `README.md`
+
+                ## Files out of scope
+                - n/a
+
+                ## Tests
+                - none
+
+                ## Important
+                ok
+                '@
+                """
+            ).lstrip(),
+            encoding="utf-8",
+        )
+        plan_script = _SCRIPTS / "ai_loop_plan.ps1"
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(plan_script.resolve()),
+                "-Ask",
+                "harness ask",
+                "-Out",
+                ".ai-loop/task.md",
+                "-Force",
+                "-WithDraft",
+                "-DraftCommand",
+                str((root / "throw_draft.ps1").resolve()),
+                "-PlannerCommand",
+                str((root / "fake_planner.ps1").resolve()),
+            ],
+            cwd=str(root.resolve()),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        out_task = ai_loop / "task.md"
+        assert out_task.is_file()
+        body = out_task.read_text(encoding="utf-8-sig")
+        assert body.lstrip().startswith("# Task:")
+        combined = (proc.stdout or "") + (proc.stderr or "")
+        assert "proceeding without brief" in combined
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_user_ask_template_exists_and_has_sections() -> None:

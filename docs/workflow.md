@@ -30,6 +30,11 @@ The orchestrator uses a file-based protocol:
 - `.ai-loop/codex_review.md` — primary review output.
 - `.ai-loop/last_diff.patch` — current diff.
 - `.ai-loop/test_output.txt` — current test output.
+- `.ai-loop/task_draft_brief.md` (optional planner output) — when you run `scripts/ai_loop_plan.ps1` with `-WithDraft`, a Markdown brief may be written here before Claude drafts `task.md`. The file is gitignored; Claude treats that brief only as advisory context.
+
+## Planning a task (manual)
+
+Before running task-first work, `scripts/ai_loop_plan.ps1` can regenerate `.ai-loop/task.md` from `AGENTS.md`, `.ai-loop/project_summary.md`, an optional `.ai-loop/repo_map.md`, and either `-Ask ...` or `.ai-loop/user_ask.md`. Pass `-WithDraft` for an optional Cursor read-only pre-pass (`-DraftCommand` defaults like the Cursor implementer wrapper); when that pass returns enough output, the Markdown is saved under `.ai-loop/task_draft_brief.md`, then appended **after `## USER ASK`** inside the Claude prompt under a labelled **Cursor Draft Brief** section (advisory-only). Wrapper failures or short replies log warnings and Claude planning proceeds without injecting a brief.
 
 ## Start a new task
 

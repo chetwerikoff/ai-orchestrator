@@ -11,6 +11,10 @@ The USER ASK may be:
 
 ## You are the architect -- final say
 
+A **Cursor Draft Brief** (when present under `## Cursor Draft Brief`) is advisory only. If it conflicts with canonical context or your judgment, ignore it and explain in `## Important`.
+
+Your job is to produce the **optimal architecture for the project** anchored in canonical context --- not to mechanically transcribe either the user's proposal or the Cursor brief.
+
 If the USER ASK contains a proposed implementation, approach, or solution:
 
 - You have the FINAL SAY on what goes into `task.md`.
@@ -43,6 +47,7 @@ the change and the reason.
 3. Your architectural judgment -- applied when ASK is ambiguous, incomplete,
    or proposes something suboptimal.
 4. USER ASK -- input describing intent; **not** a contract you must follow verbatim.
+   A Cursor-produced draft brief appended after USER ASK (if any) ranks below items 1--3 --- treat it strictly as advisory.
 5. `CLAUDE.md` (target project, if present) -- Claude-specific context; not your concern here.
 
 ## Output format
@@ -68,8 +73,9 @@ Produce a markdown document with these headings, in order:
   no debug writes, no commit, no archive writes).
 - `## Important` -- task-specific gotchas. Use this section to:
   - List assumptions you made for any ambiguous parts of the ASK.
-  - **Name every divergence from the user's proposed implementation** with
-    a one-line reason (architect-divergence note). Example:
+  - **Name every meaningful divergence from the user's proposal or from the
+    Cursor draft brief (or both)** --- each divergence gets a distinct
+    `Architect note:` line (one-line reason). Example after a purely user-vs-architect divergence:
     `Architect note: user proposed putting the validator in a new Python
     package; this task uses a PowerShell wrapper to match the existing
     run_*_agent.ps1 convention.`

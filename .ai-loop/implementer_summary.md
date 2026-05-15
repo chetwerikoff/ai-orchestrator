@@ -2,27 +2,22 @@
 
 ## Changed files
 
-- **Deleted:** `tests/_bisect_token_cmd.py`, `tests/token_probe.ps1` — scratch probes outside token task scope (would be staged under `SafeAddPaths`).
-- **Deleted:** `tasks/001_token_usage_foundation_jsonl_record_cons.md` — duplicate queued task file not on the authorized list for the original task.
-- **Deleted:** `.tmp_delete_probe.txt` — root temporary probe artifact.
-- **Deleted:** `.claude/settings.local.json` — untracked local Cursor/Claude settings artifact from debugging.
-- **`.ai-loop/repo_map.md`** — regenerated via `scripts/build_repo_map.ps1` after deletions (`.claude/` is excluded from the map by design).
+- **`scripts/ai_loop_plan.ps1`** — `-WithDraft` draft invocation wrapped in try/catch so terminating wrapper errors emit the same non-fatal warning as a non-zero draft exit and clear the brief; after the draft block, `$global:LASTEXITCODE = 0` so a failed draft does not leave a stale exit code that breaks the subsequent planner exit check.
+- **`tests/test_orchestrator_validation.py`** — `test_ai_loop_plan_with_draft_nonfatal_when_draft_command_throws`: scratch project subprocess using a throwing `-DraftCommand` and fake planner; asserts exit 0, task written, and “proceeding without brief” in captured output.
+- **`.ai-loop/project_summary.md`** — Documented draft try/catch, LASTEXITCODE reset, and new test coverage (durable architecture note only).
 
 ## Tests
 
-- `python -m pytest -q` — **128 passed**, 1 warning (`PytestCacheWarning` on `.pytest_cache` path on Windows; pre-existing environment quirk).
-- `python -m pytest -q tests/test_token_usage.py` — **4 passed**, same cache warning.
+`python -m pytest -q` — **132 passed** (1 pytest cache warning on Windows).
 
 ## Implementation summary
 
-Codex fix-prompt cleanup only: removed out-of-scope probe and duplicate-task artifacts so the tree matches the authorized token-usage foundation scope and nothing extra would hit safe-staging paths. Repo map regenerated from the trimmed tree.
+Fix prompt: draft command errors that terminate (throw under `$ErrorActionPreference = 'Stop'`) are caught like non-zero exits, with the existing “proceeding without brief” warning. Clearing `LASTEXITCODE` after the draft phase fixes planner falsely failing when `$LASTEXITCODE` was still set from the draft wrapper (including empty/null edge cases versus `-ne 0`).
 
-## Task-specific CLI / outputs
+## Task-specific verification
 
-- **Task.md verification:** Explicit `ParseFile(...)` PowerShell one-liners were not rerun as standalone shells in this environment; the same scripts are exercised by `tests/test_token_usage.py` via `Parser::ParseFile`.
-- **`ai_loop_*`:** Not run — not requested by the fix prompt.
+- **Task `Verification` (PowerShell parse / Select-String / Test-Path):** Not re-run here; `test_planner_scripts_parse_cleanly` and the new subprocess test exercise `ai_loop_plan.ps1` in CI-equivalent ways. Direct `Parser::ParseFile` from this agent shell was not available reliably.
 
 ## Remaining risks
 
-- **Pytest cache:** Occasional `WinError 183` warning if `.pytest_cache` layout conflicts; clears if cache is deleted or ignored for CI.
-- **Task 2+:** CLI token parsing volatility and stderr/stdout split remain as in `project_summary.md` token roadmap.
+- If future code runs between the draft block and the planner and sets `LASTEXITCODE` non-zero without throwing, the reset could mask that—unlikely given current script structure.

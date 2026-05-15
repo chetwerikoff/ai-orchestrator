@@ -8,7 +8,9 @@ param(
     [switch]$WithReview,
     [int]$MaxReviewIterations = 3,
     [string]$ReviewerCommand = ".\scripts\run_codex_reviewer.ps1",
-    [string]$ReviewerModel = ""
+    [string]$ReviewerModel = "",
+    [switch]$WithDraft,
+    [string]$DraftCommand = "run_cursor_agent.ps1"
 )
 $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path ".").Path
@@ -139,7 +141,64 @@ if (Test-Path -LiteralPath $repoPath) {
 } else {
     Write-Warning "repo_map.md is missing $([char]0x2014) planner context will be limited. Run scripts/build_repo_map.ps1 first for better results."
 }
-$prompt = $planPromptBody + "`n`n## AGENTS.md`n" + $agentsBody + "`n`n## project_summary.md`n" + $summaryBody + $repoBlock + "`n`n## USER ASK`n" + $resolvedAsk
+$briefSuffix = ""
+if ($WithDraft) {
+    $draftPromptPath = Join-Path $ProjectRoot ".ai-loop\draft_brief_prompt.md"
+    if (-not (Test-Path -LiteralPath $draftPromptPath)) { $draftPromptPath = Join-Path $ProjectRoot "templates\draft_brief_prompt.md" }
+    if (-not (Test-Path -LiteralPath $draftPromptPath)) {
+        Write-Warning "Draft brief prompt not found at .ai-loop\draft_brief_prompt.md or templates\draft_brief_prompt.md."
+        exit 1
+    }
+    Write-Host "Using draft brief prompt: $draftPromptPath"
+    $draftTplBody = [System.IO.File]::ReadAllText($draftPromptPath)
+    $draftCompose = $draftTplBody + "`n`n## AGENTS.md`n" + $agentsBody + "`n`n## project_summary.md`n" + $summaryBody + $repoBlock + "`n`n## USER ASK`n" + $resolvedAsk
+    $draftCmdPath = $DraftCommand
+    if (-not (Test-Path -LiteralPath $draftCmdPath)) {
+        $reld = $DraftCommand -replace '^\.\\', ''
+        $altd = Join-Path $ProjectRoot $reld
+        if (Test-Path -LiteralPath $altd) { $draftCmdPath = $altd }
+    }
+    if (-not (Test-Path -LiteralPath $draftCmdPath) -and ($DraftCommand -notmatch '[\\/]')) {
+        $draftBesidePlan = Join-Path $PSScriptRoot $DraftCommand
+        if (Test-Path -LiteralPath $draftBesidePlan) { $draftCmdPath = $draftBesidePlan }
+    }
+    $draftBriefText = $null
+    if (-not (Test-Path -LiteralPath $draftCmdPath)) {
+        Write-Warning "[plan] -WithDraft: draft command wrapper not resolved; proceeding without brief."
+    } else {
+        $draftAgentArgs = @("--print", "--trust", "--workspace", $ProjectRoot)
+        try {
+            $draftLines = @($draftCompose | & $draftCmdPath @draftAgentArgs)
+            $draftBriefText = ($draftLines | ForEach-Object { "$_" }) -join "`n"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "[plan] -WithDraft: draft command exited with error; proceeding without brief."
+                $draftBriefText = $null
+            } elseif (($null -ne $draftBriefText) -and ([System.Text.Encoding]::UTF8.GetByteCount($draftBriefText.Trim()) -lt 50)) {
+                Write-Warning "[plan] -WithDraft: draft returned too-short output; proceeding without brief."
+                $draftBriefText = $null
+            }
+        } catch {
+            Write-Warning "[plan] -WithDraft: draft command exited with error; proceeding without brief."
+            $draftBriefText = $null
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($draftBriefText)) {
+        $draftOutPath = Join-Path $ProjectRoot ".ai-loop\task_draft_brief.md"
+        $draftParent = Split-Path -Parent $draftOutPath
+        if ($draftParent -and -not (Test-Path -LiteralPath $draftParent)) { New-Item -ItemType Directory -Force -Path $draftParent | Out-Null }
+        Set-Content -LiteralPath $draftOutPath -Value $draftBriefText -Encoding UTF8
+        Write-Host "[plan] Draft brief written to .ai-loop/task_draft_brief.md"
+        $nl = "`n"
+        $briefSuffix = "`n`n---$nl## Cursor Draft Brief (advisory - read-only pre-pass)$nl" +
+            "The section below is an advisory brief produced by a read-only Cursor draft pass.$nl" +
+            "Claude must treat it as a hint only. It does not override AGENTS.md, project_summary.md,$nl" +
+            "repo_map.md, or Claude's architectural judgment. If it conflicts with canonical context,$nl" +
+            "ignore it and note the conflict in ## Important.$nl$nl" + $draftBriefText
+    }
+    # Draft wrapper failures can leave a stale LASTEXITCODE; do not let that falsify the planner check.
+    $global:LASTEXITCODE = 0
+}
+$prompt = $planPromptBody + "`n`n## AGENTS.md`n" + $agentsBody + "`n`n## project_summary.md`n" + $summaryBody + $repoBlock + "`n`n## USER ASK`n" + $resolvedAsk + $briefSuffix
 $backupMade = $false
 if ((Test-Path -LiteralPath $Out) -and -not $Force) {
     Move-Item -Force -LiteralPath $Out -Destination "$Out.bak"
@@ -213,7 +272,7 @@ try {
 "no preamble, no fenced wrap, no HTML comments. Keep implementation under ~80 lines.", "",
 "If you believe the previous draft was already correct and reject all issues, you may output the previous draft verbatim plus the Architect",
 "notes in ## Important." )) -join "`n"
-            $revisionPrompt = @($planPromptBody, "## AGENTS.md", $agentsBody, "## project_summary.md", $summaryBody, "## repo_map.md", $repoMapBody, "## USER ASK", $resolvedAsk, "## CURRENT DRAFT", $current, "## REVIEWER ISSUES", $issues, $revisionInstructions) -join "`n`n"
+            $revisionPrompt = @($planPromptBody, "## AGENTS.md", $agentsBody, "## project_summary.md", $summaryBody, "## repo_map.md", $repoMapBody, "## USER ASK", ($resolvedAsk + $briefSuffix), "## CURRENT DRAFT", $current, "## REVIEWER ISSUES", $issues, $revisionInstructions) -join "`n`n"
             $revLines = @($revisionPrompt | & $cmdPath @pwArgs)
             $revised = ($revLines | ForEach-Object { "$_" }) -join "`n"
             if ($LASTEXITCODE -ne 0) {

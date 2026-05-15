@@ -21,7 +21,7 @@
 ## scripts/
 
 - `scripts/ai_loop_auto.ps1` — Explicit -CursorCommand wins entirely: do not read implementer.json, merge a persisted model,
-- `scripts/ai_loop_plan.ps1` — (no header summary)
+- `scripts/ai_loop_plan.ps1` — Draft wrapper failures can leave a stale LASTEXITCODE; do not let that falsify the planner check.
 - `scripts/ai_loop_task_first.ps1` — Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
 - `scripts/build_repo_map.ps1` — Generate a deterministic `.ai-loop/repo_map.md` index for the repository tree.
 - `scripts/continue_ai_loop.ps1` — Resumes ai_loop_auto.ps1 -Resume. Optional -CursorCommand / -CursorModel override
@@ -41,6 +41,7 @@
 ## templates/
 
 - `templates/codex_review_prompt.md` — Codex Review Prompt
+- `templates/draft_brief_prompt.md` — Cursor draft brief role (read-only)
 - `templates/implementer_summary_template.md` — Implementer summary
 - `templates/opencode.json` — (no header summary)
 - `templates/planner_prompt.md` — Planner role: Architect with final say

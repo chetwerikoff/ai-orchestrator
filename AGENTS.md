@@ -53,6 +53,7 @@ powershell -NoProfile -Command "[void][System.Management.Automation.Language.Par
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\continue_ai_loop.ps1', [ref]$null, [ref]$null)"
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\build_repo_map.ps1', [ref]$null, [ref]$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan.ps1', [ref]$null, [ref]$null)"
 ```
 
 ## Safe paths (committed by orchestrator)
@@ -107,7 +108,9 @@ When two solutions are equally correct, prefer:
 
 "It might be useful later" is not a justification. Splitting work into ordered subtasks beats growing one task past the ~80-line policy. Architecture proposals that add new subsystems must justify the cost against doing nothing.
 
-The planner stage (`scripts/ai_loop_plan.ps1`, `templates/planner_prompt.md`, `templates/reviewer_prompt.md`) explicitly enforces this principle for generated `.ai-loop/task.md`; the same principle applies to all agent work in this repo.
+The planner stage (`scripts/ai_loop_plan.ps1`, `templates/planner_prompt.md`, `templates/reviewer_prompt.md`) explicitly enforces this principle for generated `.ai-loop/task.md`; the same principle applies to all agent work in this repo. Optional `-WithDraft` on `scripts/ai_loop_plan.ps1` runs a **read-only** Cursor advisory pass first (stdin to `-DraftCommand`, default `run_cursor_agent.ps1` beside the repo `scripts/`); output is gitignored `.ai-loop/task_draft_brief.md` when valid and is appended **after `## USER ASK`** in the Claude planner prompt as advisory-only context. Failures or short output emit warnings and Claude planning continues without a brief.
+
+If you customize the Cursor draft wording for a target project, edit `.ai-loop/draft_brief_prompt.md`; the orchestrator prefers that path over `templates/draft_brief_prompt.md` when present.
 
 ## When in doubt
 Ask the user. Do not invent commands, paths, or behaviors not documented here or in the linked docs.
