@@ -1,155 +1,134 @@
-# Task: Fix run_codex_reviewer.ps1 — prompt via temp file + exit-code + em-dash
+﻿# Task: Add order field and task queue save to planner
 
 ## Project context
+
 - `AGENTS.md`
+- `.ai-loop/task.md` (this file)
 - `.ai-loop/project_summary.md`
 - `.ai-loop/repo_map.md`
 
 ## Goal
 
-Fix three bugs in `run_codex_reviewer.ps1` introduced in C09:
-
-1. **Command-line-too-long**: The reviewer passes the full prompt text as a positional CLI argument to `codex exec`. Windows limits command-line length to ~32 767 chars; a prompt that includes `task.md` context easily exceeds this, causing node.exe to refuse to start with *"The filename or extension is too long"*. Fix: write the prompt to a temp file and pass it via stdin or a supported file flag instead.
-
-2. **`$exitCode` not initialized**: `$exitCode` was already fixed in the current file (line 29: `$exitCode = 1` before `try`). Verify this is present; if not, add it.
-
-3. **Em-dash encoding (`?` corruption)**: Literal U+2014 characters in `.ps1` string literals and `.md` templates corrupt to `?` under Windows-1252 defaults. Replace per project convention.
+Extend the planner output format with an optional `## Order` section. When `ai_loop_plan.ps1` writes `.ai-loop/task.md` and finds a positive integer in `## Order`, it copies the file to `tasks/NNN_slug.md` (zero-padded, slug derived from the `# Task:` line). When `## Order` is absent or blank the script behaves exactly as before. The planner prompt is updated so Claude knows when and how to emit the field, allowing a series of related tasks to be queued without altering the auto-loop runtime.
 
 ## Scope
 
 Allowed:
-- Rewrite the codex invocation in `run_codex_reviewer.ps1` to use a temp file
-- Fix `$exitCode` init if missing
-- Replace literal em-dashes in `.ps1` files with `[char]0x2014`
-- Replace literal em-dashes in `.md` templates with ` -- `
-- Add `-Encoding UTF8` to `Get-Content` calls that read `.md` files in `ai_loop_plan.ps1`
-- Add targeted pytest coverage
+- Add `## Order` section to the task template and planner prompt
+- Add post-generation queue-save logic to `ai_loop_plan.ps1`
+- Add tests for order parsing and slug derivation
+- Create `tasks/` directory if it does not exist (non-fatal)
 
 Not allowed:
-- Changing function/parameter signatures
-- Modifying scripts not listed in Files in scope
-- Altering `ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, `continue_ai_loop.ps1`
+- Changing any orchestrator runtime scripts (`ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, `continue_ai_loop.ps1`)
+- Changing `SafeAddPaths` in any script or `docs/safety.md`
+- Generating automatic prerequisite lists
+- Modifying `scripts/install_into_project.ps1` (it already copies both touched templates)
+- Touching `ai_loop.py`
 
 ## Files in scope
-- `scripts/run_codex_reviewer.ps1`        — temp-file fix + $exitCode + em-dash
-- `scripts/run_claude_planner.ps1`        — em-dash (verify; fix if present)
-- `scripts/ai_loop_plan.ps1`              — em-dash in string literals + Get-Content -Encoding UTF8
-- `templates/reviewer_prompt.md`          — em-dash → ` -- `
-- `templates/planner_prompt.md`           — em-dash → ` -- `
-- `tests/test_orchestrator_validation.py` — add tests
+
+- `templates/task.md`  add `## Order` section (optional, last section)
+- `templates/planner_prompt.md`  add `## Order` to the Output format list with usage rules
+- `scripts/ai_loop_plan.ps1`  add queue-save block after the final task write (Ôëñ 18 lines)
+- `tests/test_orchestrator_validation.py`  add order-parsing and slug-derivation tests
 
 ## Files out of scope
+
 - `docs/archive/**`
 - `.ai-loop/_debug/**`
 - `ai_loop.py`
 - `scripts/ai_loop_auto.ps1`
 - `scripts/ai_loop_task_first.ps1`
 - `scripts/continue_ai_loop.ps1`
-- All scripts not listed above
+- `scripts/install_into_project.ps1`
+- `docs/safety.md`
 
 ## Required behavior
 
-### Fix 1 — prompt via temp file (run_codex_reviewer.ps1)
-
-Replace the direct `& codex @codexArgs` invocation pattern with a temp-file approach:
-
-```powershell
-# Write prompt to temp file
-$tempFile = Join-Path $env:TEMP "codex_review_$([System.IO.Path]::GetRandomFileName()).md"
-[System.IO.File]::WriteAllText($tempFile, $promptText, [System.Text.Encoding]::UTF8)
-
-try {
-    # ... Push-Location etc ...
-
-    # Check if codex exec supports --file/-f flag first:
-    #   codex exec --help
-    # If supported:
-    #   & codex @modelArgs exec --file $tempFile
-    # Otherwise fall back to stdin piping:
-    #   Get-Content $tempFile | & codex @modelArgs exec
-    # Use whichever form avoids passing the prompt as a positional arg.
-
-    $exitCode = $LASTEXITCODE
-}
-finally {
-    if ($pushed) { Pop-Location }
-    Remove-Item $tempFile -ErrorAction SilentlyContinue
-}
-```
-
-The `ConvertTo-CrtSafeArg` helper becomes unnecessary once the prompt is no longer a positional arg. Remove it if it has no other callers (check the file); otherwise leave it.
-
-**How to determine the correct codex invocation**: run `codex exec --help` in the terminal and look for a `--file` or `-f` flag. If present, use it. If not, pipe the file content to stdin: `Get-Content $tempFile -Raw | codex @modelArgs exec`.
-
-### Fix 2 — $exitCode initialization
-
-Open `scripts/run_codex_reviewer.ps1`. Confirm `$exitCode = 1` appears before the outermost `try {`. If already present (check line ~29), no change needed — document "already present" in your summary.
-
-### Fix 3 — em-dash encoding
-
-- In `.ps1` files: replace each literal em-dash byte (UTF-8: `E2 80 94`) in string literals with `$([char]0x2014)`. Example: `"advisory only $([char]0x2014) the Architect"`.
-- In `.md` templates: replace each `—` with ` -- `.
-- In `ai_loop_plan.ps1`: add `-Encoding UTF8` to any `Get-Content` call reading a `.md` file.
+1. **`templates/task.md`**: append a final `## Order` section with a one-line comment describing it as optional; default content is blank so existing tasks are unaffected.
+2. **`templates/planner_prompt.md`**: in the `## Output format` bullet list, add `## Order` as the last item. Rules for the planner: omit or leave blank for standalone tasks; for a series, set consecutive integers starting at 1; lower numbers run first; each task in a series must be self-contained (no cross-task variable references).
+3. **`scripts/ai_loop_plan.ps1`** ÔÇö after the line that writes the final `.ai-loop/task.md` (end of the review loop or direct write):
+   - Read the written task file.
+   - Match `(?m)^##\s+Order\s*\r?\n\s*(\d+)` against its content.
+   - If matched and the captured integer `$N` is ÔëÑ 1:
+     - Extract the short name from `# Task: <short name>` (first line of file).
+     - Derive slug: lowercase, collapse any run of non-alphanumeric chars to a single underscore, strip leading/trailing underscores, truncate at 40 chars.
+     - Compute `$dest = "tasks/{0:000}_{1}.md" -f $N, $slug` relative to the repo root (`Split-Path $PSScriptRoot -Parent`).
+     - Create the `tasks/` directory if absent (non-fatal `New-Item -Force -ItemType Directory`).
+     - If `$dest` already exists, emit `Write-Warning "Overwriting queue file: $dest"`.
+     - Copy the task file to `$dest` with `-Force`.
+     - Emit `Write-Host "Queue: $dest"`.
+   - If match fails or capture is not a positive integer, skip silently.
+   - Queue save errors must not set exit code; wrap in `try/catch` with `Write-Warning`.
+4. Behavior when `## Order` is absent or blank: no `tasks/` write, no warning, identical to current behavior.
+5. The `tasks/` path used is always relative to the repo root (the directory containing `scripts/`), not the caller's working directory.
+6. The write to `.ai-loop/task.md` always occurs first (normal planner behavior, unchanged). The `tasks/NNN_slug.md` write is an additional copy made immediately after; both destinations receive identical content. The planner's primary output contract ÔÇö writing `.ai-loop/task.md` ÔÇö is not altered.
 
 ## Tests
 
 Add to `tests/test_orchestrator_validation.py`:
 
-```python
-def test_codex_reviewer_no_inline_prompt_arg():
-    """Prompt must be passed via file or stdin, not as a positional CLI arg."""
-    src = Path("scripts/run_codex_reviewer.ps1").read_text(encoding="utf-8")
-    # ConvertTo-CrtSafeArg was the escaping helper for inline args — its presence
-    # is a signal that the old approach is still in use.
-    assert "ConvertTo-CrtSafeArg" not in src, (
-        "run_codex_reviewer.ps1 still uses ConvertTo-CrtSafeArg; "
-        "prompt must be passed via temp file, not as a positional arg"
-    )
-
-def test_codex_reviewer_exitcode_initialized():
-    src = Path("scripts/run_codex_reviewer.ps1").read_text(encoding="utf-8")
-    idx_init = src.find("$exitCode = 1")
-    idx_try  = src.find("try {")
-    assert idx_init != -1, "$exitCode = 1 not found"
-    assert idx_init < idx_try, "$exitCode = 1 must appear before try {"
-
-def test_no_emdash_bytes_in_ps1_scripts():
-    for name in [
-        "scripts/run_codex_reviewer.ps1",
-        "scripts/run_claude_planner.ps1",
-        "scripts/ai_loop_plan.ps1",
-    ]:
-        data = Path(name).read_bytes()
-        assert b'\xe2\x80\x94' not in data, f"Literal em-dash found in {name}"
-```
+- `test_order_regex_match`: verify the PS-equivalent Python regex `r'(?m)^##\s+Order\s*\r?\n\s*(\d+)'` matches a task string with `## Order\n2` and captures `"2"`; verify it does not match when the section is blank or absent.
+- `test_order_slug_derivation`: verify slug logic (lowercase, non-alnumÔåÆunderscore, collapse, strip, truncate) for representative inputs: `"Fix Dashboard Generation"` ÔåÆ `"fix_dashboard_generation"`, `"Add order/queue support!"` ÔåÆ `"add_order_queue_support"`, a 60-char name truncates to Ôëñ 40 chars.
+- `test_order_queue_filename_format`: verify `"{0:000}_{1}.md".format(3, "fix_x")` ÔåÆ `"003_fix_x.md"` (documents the naming contract).
+- Do **not** add a subprocess integration test for the full `ai_loop_plan.ps1` queue-save path in this task (requires a live planner CLI mock; defer to a follow-up task if needed).
 
 Run: `python -m pytest -q`
 
 ## Verification
 
 ```powershell
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\run_codex_reviewer.ps1', [ref]`$null, [ref]`$null)"
+# 1. Parse check for the modified script
 powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan.ps1', [ref]`$null, [ref]`$null)"
-python -m pytest -q
-python -c "import sys; d=open('scripts/run_codex_reviewer.ps1','rb').read(); sys.exit(0 if b'\xe2\x80\x94' not in d else 1)"
-```
 
-Then run a live end-to-end smoke test:
-```powershell
-.\scripts\ai_loop_plan.ps1 -AskFile tasks\task_add_order_queue_support.md -WithReview
+# 2. Unit tests
+python -m pytest -q
+
+# 3. Manual smoke: confirm ## Order section appears in templates/task.md
+Select-String -Path templates\task.md -Pattern '^## Order'
+
+# 4. Manual smoke: confirm planner prompt mentions ## Order
+Select-String -Path templates\planner_prompt.md -Pattern 'Order'
 ```
-Confirm no *"filename or extension is too long"* error appears.
 
 ## Implementer summary requirements
-1. List each file changed and the specific change (one line per file).
-2. State which codex invocation form was used (file flag or stdin pipe) and why.
-3. Confirm whether `$exitCode = 1` was already present or was added.
-4. State which `.ps1` files had literal em-dashes and how many were replaced.
-5. Test result: pass/fail count only.
-6. Any remaining risks.
+
+1. List every file changed with one-line description of what changed.
+2. State regex used for order parsing and slug derivation.
+3. Report test count and pass/fail result.
+4. Note any edge cases handled beyond the spec (or "none").
+5. List any remaining risks (e.g., `tasks/` not in `SafeAddPaths` ÔÇö queue files not auto-committed).
+
+## Project summary update
+
+Record: "C10: `## Order` section added to task template and planner prompt. `ai_loop_plan.ps1` saves numbered queue copies to `tasks/NNN_slug.md` when order is set. Non-fatal; auto-loop unaffected. `tasks/` is not currently in `SafeAddPaths` ÔÇö queue files are written but not auto-committed; a follow-up task is needed to extend `SafeAddPaths` if auto-commit of queue files is desired."
 
 ## Output hygiene
-- Do not duplicate task content into `.ai-loop/project_summary.md`.
-- Do not write debug output to `.ai-loop/_debug/`.
-- Do not commit — the orchestrator handles git.
+
+- Do not duplicate task content into `implementer_summary.md` (summary only).
+- Do not write to `.ai-loop/_debug/` unless debugging raw output.
+- Do not `git commit` or `git push`.
 - Do not write to `docs/archive/`.
+
+## Important
+
+**Architect notes ÔÇö divergences from user's proposed implementation and reviewer rejections:**
+
+1. **No automatic prerequisites list.** The user proposed: "if order > 1, list prerequisite tasks in the file." Dropped. Generating a correct prerequisites list requires tracking what the NÔêÆ1 task was named after slug derivation, which couples tasks at write time and adds ~30 lines with fragile state. The ordering itself (001 before 002) is the prerequisite signal; human operators read `ls tasks/`. A future task can add a `## Prerequisites` section if the need becomes concrete.
+
+2. **`## Order` is a markdown section, not a frontmatter key.** The user wrote `order=3` style. Using a section header is consistent with every other section in `task.md` and requires no YAML/TOML parser. The regex `(?m)^## Order\n\s*(\d+)` is unambiguous.
+
+3. **Order 1 also saves to `tasks/`.** Any task with `## Order` set (including 1) is a "series" task and gets queued. Omitting the section entirely is the signal for a standalone task. This is simpler than a special-case for N=1.
+
+4. **`tasks/` is not in `SafeAddPaths`.** Confirmed by reading the literal in `AGENTS.md`: `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,pyrightconfig.json,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md` ÔÇö `tasks/` does not appear. Adding it requires updating three PS1 scripts and `docs/safety.md` in sync ÔÇö a separate ~80-line task per the AGENTS.md templates contract. Queue files written to `tasks/` will exist on disk but will not be auto-committed by the orchestrator until `SafeAddPaths` is extended.
+
+5. **Assumption: repo root is `(Split-Path $PSScriptRoot -Parent)` from within `scripts/ai_loop_plan.ps1`.** The existing script already uses `$PSScriptRoot` for relative paths, so this is consistent with the current pattern.
+
+6. **`install_into_project.ps1` needs no changes** because it already copies `templates/task.md` and `templates/planner_prompt.md` verbatim; the template edits propagate on next reinstall automatically.
+
+7. **Architect note: rejected logic:step-3-contradiction** ÔÇö The reviewer claims steps 3 and 6 contradict the ASK by writing `.ai-loop/task.md` before the queue save. There is no contradiction: `.ai-loop/task.md` is the planner's normal primary output (unchanged behavior); `tasks/NNN_slug.md` is an additional copy made immediately after. Both destinations receive identical content. Step 6 in `## Required behavior` was added explicitly to document this dual-write and eliminate ambiguity. The USER ASK does not say the task should *only* go to `tasks/` ÔÇö it says the planner should "save to `tasks/`"; writing to both locations fulfils that requirement while preserving the existing contract.
+
+8. **Architect note: rejected logic:safepath-claim** ÔÇö The reviewer asserts "`tasks/` is in the default `SafeAddPaths` literal." This is factually incorrect. The literal in `AGENTS.md` does not include `tasks/`. The project summary update statement is therefore accurate as written.
+
+9. **Architect note: rejected missing:prerequisites** ÔÇö The reviewer re-raises the prerequisite list requirement already deliberated in note #1. The decision stands: generating prerequisites at write time requires fragile cross-task state tracking and contradicts the simplicity policy (AGENTS.md). The numeric filename prefix is the ordering signal.

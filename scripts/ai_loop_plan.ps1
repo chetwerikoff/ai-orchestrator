@@ -247,6 +247,32 @@ try {
     if ($outParent -and -not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Force -Path $outParent | Out-Null }
     Set-Content -LiteralPath $tmpOut -Value $writeText -Encoding UTF8
     Move-Item -Force -LiteralPath $tmpOut -Destination $Out
+    try {
+        $orchRoot = Split-Path -Parent $PSScriptRoot
+        $writtenFull = if ([System.IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path $ProjectRoot $Out }
+        $diskText = [System.IO.File]::ReadAllText($writtenFull)
+        $orderMatch = [regex]::Match($diskText, '(?m)^##\s+Order\s*\r?\n\s*(\d+)')
+        if ($orderMatch.Success) {
+            $N = [int]$orderMatch.Groups[1].Value
+            if ($N -ge 1) {
+                $taskHead = ($diskText -split "`r?`n", 2)[0].TrimStart([char]0xFEFF).TrimStart()
+                if ($taskHead -match '^#\s+Task:\s*(.+)$') {
+                    $slug = [regex]::Replace($Matches[1].Trim().ToLowerInvariant(), '[^a-z0-9]+', '_').Trim('_')
+                    if ($slug.Length -gt 40) { $slug = $slug.Substring(0, 40).TrimEnd('_') }
+                    if (-not [string]::IsNullOrWhiteSpace($slug)) {
+                        $dest = Join-Path $orchRoot ("tasks\{0:000}_{1}.md" -f $N, $slug)
+                        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) -ErrorAction SilentlyContinue | Out-Null
+                        if (Test-Path -LiteralPath $dest) { Write-Warning "Overwriting queue file: $dest" }
+                        Copy-Item -LiteralPath $writtenFull -Destination $dest -Force
+                        Write-Host "Queue: $dest"
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        Write-Warning ("Queue save skipped: " + $_.Exception.Message)
+    }
     Write-Host "Wrote $Out (no obvious structural issues found).`n`nFiles in scope (extracted from task.md $([char]0x2014) verify before running):"
     $paths = Get-FilesInScopeSummary -Text $writeText
     if ($paths.Count -eq 0) {

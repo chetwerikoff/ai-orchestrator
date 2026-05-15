@@ -2,36 +2,33 @@
 
 ## Changed files
 
-- `scripts/run_codex_reviewer.ps1` — Removed `ConvertTo-CrtSafeArg` and positional prompt to `codex exec`. Write UTF-8 prompt to `%TEMP%\codex_review_<random>.md`, probe `codex exec --help` for `--file`, then either `codex … exec --file <temp>` or `Get-Content -Raw -Encoding UTF8 | codex … exec`; `Remove-Item` temp in `finally`. Kept `$exitCode = 1` before outer `try` (already present).
-- `tests/test_orchestrator_validation.py` — `test_run_codex_reviewer_invariants` updated for temp-file design; added `test_codex_reviewer_no_inline_prompt_arg`, `test_codex_reviewer_exitcode_initialized`, `test_no_emdash_bytes_in_ps1_scripts`.
+- `templates/task.md` — appended optional final `## Order` section with HTML note; blank-by-default for standalone tasks.
+- `templates/planner_prompt.md` — documented `## Order` in Output format (series numbering rules, self-contained tasks).
+- `scripts/ai_loop_plan.ps1` — after successful `.ai-loop/task.md` write, optional queue copy to repo-root `tasks/NNN_slug.md` when `## Order` captures a positive integer; non-fatal `try/catch`.
+- `tests/test_orchestrator_validation.py` — `test_order_regex_match`, `test_order_slug_derivation`, `test_order_queue_filename_format`; extended `test_ai_loop_plan_structural_invariants` for queue-save markers.
+- `.ai-loop/project_summary.md` — C10 planner queue behavior and Current Stage / Last Completed Task updates.
 
-## Codex invocation
+## Regex / slug (mirror of planner script)
 
-**Hybrid:** capture `codex exec --help` (stdout only, no `2>&1` so the script stays compatible with `test_run_codex_reviewer_invariants`). If help text matches `--file` (case-insensitive), run `codex [--model M] exec --file <tempFile>`. Otherwise pipe file into stdin: `Get-Content -LiteralPath $tempFile -Raw -Encoding UTF8 | codex [--model M] exec`. Avoids argv length limits in both branches; `--file` used when the installed Codex CLI documents it.
-
-## `$exitCode = 1`
-
-Already present before this change; left in place before the outer `try {`.
-
-## Em-dash in `.ps1`
-
-No literal UTF-8 em-dash bytes (`E2 80 94`) in `run_codex_reviewer.ps1`, `run_claude_planner.ps1`, or `ai_loop_plan.ps1` (verified; **0** literal replacements needed). `ai_loop_plan.ps1` already uses `$([char]0x2014)` where an em dash is intended in console output.
-
-## `ai_loop_plan.ps1` / templates
-
-- No `Get-Content` calls reading `.md` in `ai_loop_plan.ps1` (planner/reviewer bodies use `[System.IO.File]::ReadAllText`); no `-Encoding UTF8` additions were applicable.
-- `templates/reviewer_prompt.md` and `templates/planner_prompt.md` already use ASCII ` -- ` for dash-like phrasing; no `?` corruption or U+2014 bytes found.
+- Order capture: `(?m)^##\s+Order\s*\r?\n\s*(\d+)`
+- Slug: lowercase → replace runs of non-alphanumeric with `_` → strip leading/trailing `_` → truncate to 40 chars and trim trailing `_`.
+- Queue filename: PowerShell ``tasks\{0:000}_{1}.md -f $N, $slug``; pytest uses Python ``"{0:03d}_{1}.md".format(...)`` (same zero-padding width; Python `{0:000}` is not the PS `-f` specifier).
 
 ## Tests
 
-`python -m pytest -q` — **119 passed** (1 pre-existing pytest cache warning on Windows).
+- Command: `python -m pytest -q`
+- Result: **122 passed** (1 unrelated pytest cache warning on Windows).
 
-## Task verification commands
+## Task-specific verification
 
-- Full pytest: run as above.
-- E2E `.\scripts\ai_loop_plan.ps1 -AskFile tasks\task_add_order_queue_support.md -WithReview` was **not run here** (automated shell blocked executing that script in this session). Run locally to confirm no “filename or extension is too long” from the reviewer step.
+- PowerShell parse: `Parser::ParseFile` on `scripts\ai_loop_plan.ps1` — **not executed here** (shell invocation rejected in this environment); repo already covers planner scripts via `test_planner_scripts_parse_cleanly` when `powershell`/`pwsh` is on PATH.
+- Manual smoke (`Select-String` on templates): skipped here; templates contain `## Order` and planner prompt mentions Order.
+
+## Edge cases beyond spec
+
+- None (empty slug after derivation skips queue write silently).
 
 ## Remaining risks
 
-- If `codex exec --help` prints only to stderr, the `--file` probe may see empty text and always use stdin (still correct, no argv overflow).
-- Stdin semantics depend on `codex exec` reading the full prompt from pipeline input; if a given Codex build ignores stdin, use a release that supports `--file` or adjust the wrapper after checking `codex exec --help` on that machine.
+- `tasks/` is not in default `SafeAddPaths`; queue files are not auto-staged by the orchestrator until that literal is extended in sync across drivers and `docs/safety.md`.
+- Queue filename derives from `# Task:` title only; duplicate titles overwrite with warning.

@@ -1153,6 +1153,40 @@ def _normalize_planner_output(output: str) -> str:
     return output
 
 
+_ORDER_SECTION_RE = re.compile(r"(?m)^##\s+Order\s*\r?\n\s*(\d+)")
+
+
+def _derive_task_slug_for_queue(name: str) -> str:
+    """Mirrors queue-save slug logic in scripts/ai_loop_plan.ps1."""
+    slug = re.sub(r"[^a-z0-9]+", "_", name.strip().lower())
+    slug = slug.strip("_")
+    if len(slug) > 40:
+        slug = slug[:40].rstrip("_")
+    return slug
+
+
+def test_order_regex_match() -> None:
+    """PS-equivalent order capture for ai_loop_plan.ps1 queue-save."""
+    body_ok = "# Task: Example\n\n## Order\n2\n"
+    m = _ORDER_SECTION_RE.search(body_ok)
+    assert m is not None
+    assert m.group(1) == "2"
+    assert _ORDER_SECTION_RE.search("# Task: Example\n\n## Order\n\n") is None
+    assert _ORDER_SECTION_RE.search("# Task: Example\n\n## Goal\nOnly.\n") is None
+
+
+def test_order_slug_derivation() -> None:
+    assert _derive_task_slug_for_queue("Fix Dashboard Generation") == "fix_dashboard_generation"
+    assert _derive_task_slug_for_queue("Add order/queue support!") == "add_order_queue_support"
+    long_alnum = "a" * 60
+    assert len(_derive_task_slug_for_queue(long_alnum)) == 40
+
+
+def test_order_queue_filename_format() -> None:
+    """Zero-padded width-3 index + underscore + slug; mirrors PS ``tasks/{0:000}_{1}.md`` (-f)."""
+    assert "{0:03d}_{1}.md".format(3, "fix_x") == "003_fix_x.md"
+
+
 @pytest.mark.parametrize(
     ("body", "expected"),
     [
@@ -1232,6 +1266,9 @@ def test_ai_loop_plan_structural_invariants() -> None:
     text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
     assert "$script:ExitCode" in text
     assert r"templates\planner_prompt.md" in text
+    assert "[regex]::Match($diskText, '(?m)^##\\s+Order\\s*\\r?\\n\\s*(\\d+)')" in text
+    assert "Split-Path -Parent $PSScriptRoot" in text
+    assert "Queue: $dest" in text
     for h in (
         "## Goal",
         "## Scope",

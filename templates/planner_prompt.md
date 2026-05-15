@@ -75,6 +75,10 @@ Produce a markdown document with these headings, in order:
     run_*_agent.ps1 convention.`
   - Surface any constraint that the implementer must respect but is not
     obvious from the rest of the file.
+- `## Order` -- optional last section; omit entirely or leave blank for standalone
+  tasks. For a related series of tasks, set consecutive positive integers starting
+  at 1 (lower numbers run first). Each task in a series must be self-contained with
+  no cross-task variable references.
 
 ## Hard rules
 

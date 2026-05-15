@@ -125,3 +125,7 @@ The implementer must not:
 ## Important
 
 Do not commit or push manually. The orchestrator handles git after Codex passes and the final test gate.
+
+## Order
+
+<!-- Optional. Leave blank for standalone tasks; the planner sets a positive integer when queuing a numbered series. -->
