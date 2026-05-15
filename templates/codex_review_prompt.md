@@ -26,6 +26,10 @@ Check:
 
 Do not request manual steps unless absolutely required. If the implementer deferred the task instead of implementing it, return `VERDICT: FIX_REQUIRED` with a concrete fix prompt.
 
+## Queued task specs (scope drift)
+
+Do not suggest deleting or modifying `tasks/*.md` unless the active `.ai-loop/task.md` includes `tasks/` or that specific file in `## Files in scope` and the task explicitly requests queue cleanup. Those files are queued task specifications maintained by the planner, not scratch or temporary outputs.
+
 ## Diff size budget
 
 If `diff_summary.txt` reports more than 300 changed lines OR more than 8 changed files, read `diff_summary.txt` first. Do not load `last_diff.patch` unless a specific finding requires it; if you need to load it, justify briefly in `FINAL_NOTE`.

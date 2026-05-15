@@ -38,6 +38,7 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 - Legacy Cursor-named alias artifacts are removed from the active PowerShell contract; summary, next-fix prompt, fix label, result marker, and debug outputs use implementer-neutral names.
 - `run_cursor_agent.ps1` remains because it is the real Cursor wrapper, not a legacy alias. `-CursorCommand` / `-CursorModel` remain as compatibility parameter names.
 - `SafeAddPaths` stages durable files only: project files plus `tasks/` (queued task specs from the planner), `.ai-loop/task.md`, `.ai-loop/implementer_summary.md`, `.ai-loop/project_summary.md`, `.ai-loop/repo_map.md`, `.ai-loop/failures.md`, `.ai-loop/archive/rolls/`, plus optional tracked `.ai-loop/_debug/session_draft.md` snippets when deliberately promoted upstream.
+- **C12 Task queue protection:** Queued specs under `tasks/` are protected in `AGENTS.md` and `templates/codex_review_prompt.md` from deletion or modification recommendations unless the active `.ai-loop/task.md` explicitly includes `tasks/` or the specific file in `## Files in scope` (and requests cleanup when applicable). `SafeAddPaths` still enforces what can be staged; the review-layer wording keeps Codex from treating the queue as disposable scratch.
 - Runtime outputs (`codex_review.md`, diffs, test logs, `implementer_result.md`, `implementer.json`, `_debug/`, final status) are gitignored and not staged by default.
 - `docs/architecture.md` is the source of truth for target design; `docs/decisions.md` is the numbered index.
 

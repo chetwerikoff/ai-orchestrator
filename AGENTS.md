@@ -81,6 +81,7 @@ Do **not** include prior-roll history, full diffs, or multi-page narratives. Tar
 - Do not commit `.ai-loop/_debug/` content, `.tmp/`, `input/`, or `output/`. Use `git mv` for renames.
 - Do not commit secrets — see `docs/safety.md` for the recommended scan.
 - **`.ai-loop/implementer.json`** is runtime-only (gitignored): local wrapper paths and model IDs for resume — not durable project documentation.
+- **Queued task specs** under `tasks/` are protected from deletion or modification unless the active `.ai-loop/task.md` explicitly includes `tasks/` or that specific file under `## Files in scope`. Untracked `tasks/*.md` files are intentional queue specs from the planner, not scratch files; do not recommend deleting them (or "cleaning them up") without explicit task scope.
 
 ## Retrieval policy
 

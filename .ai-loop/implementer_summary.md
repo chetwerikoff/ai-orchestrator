@@ -1,23 +1,26 @@
 ﻿# Implementer summary
 
-## Changed files
+## Changed files (1)
 
-- **`scripts/ai_loop_plan.ps1`** — `-WithDraft` draft invocation wrapped in try/catch so terminating wrapper errors emit the same non-fatal warning as a non-zero draft exit and clear the brief; after the draft block, `$global:LASTEXITCODE = 0` so a failed draft does not leave a stale exit code that breaks the subsequent planner exit check.
-- **`tests/test_orchestrator_validation.py`** — `test_ai_loop_plan_with_draft_nonfatal_when_draft_command_throws`: scratch project subprocess using a throwing `-DraftCommand` and fake planner; asserts exit 0, task written, and “proceeding without brief” in captured output.
-- **`.ai-loop/project_summary.md`** — Documented draft try/catch, LASTEXITCODE reset, and new test coverage (durable architecture note only).
+- `tests/test_orchestrator_validation.py` — `test_agents_protects_queued_tasks` now requires one markdown paragraph or list item that simultaneously mentions `tasks/`, `protected` or both `deletion` and `modification`, and `files in scope` or explicit `task scope` wording (so the lone Git hygiene bullet cannot be removed without failing the test).
 
-## Tests
+## Test result
 
-`python -m pytest -q` — **132 passed** (1 pytest cache warning on Windows).
+- `python -m pytest tests/test_orchestrator_validation.py::test_agents_protects_queued_tasks tests/test_orchestrator_validation.py::test_codex_prompt_protects_queued_tasks -q` — pass (2 tests)
+- `python -m pytest -q` — pass (134 tests)
 
-## Implementation summary
+## Implemented work
 
-Fix prompt: draft command errors that terminate (throw under `$ErrorActionPreference = 'Stop'`) are caught like non-zero exits, with the existing “proceeding without brief” warning. Clearing `LASTEXITCODE` after the draft phase fixes planner falsely failing when `$LASTEXITCODE` was still set from the draft wrapper (including empty/null edge cases versus `-ne 0`).
+Strengthened the AGENTS.md regression so protection language must live in a single policy unit (paragraph or `-` bullet), matching the C12 Git hygiene bullet contract; file-level `tasks/` mentions alone no longer satisfy the test.
 
-## Task-specific verification
+## Skipped items
 
-- **Task `Verification` (PowerShell parse / Select-String / Test-Path):** Not re-run here; `test_planner_scripts_parse_cleanly` and the new subprocess test exercise `ai_loop_plan.ps1` in CI-equivalent ways. Direct `Parser::ParseFile` from this agent shell was not available reliably.
+- Task.md PowerShell parse checks — not requested by the fix prompt; no orchestrator script changes.
+
+## Task-specific outputs / live-run
+
+- No task-specific CLI beyond pytest; full suite run as configured.
 
 ## Remaining risks
 
-- If future code runs between the draft block and the planner and sets `LASTEXITCODE` non-zero without throwing, the reset could mask that—unlikely given current script structure.
+- Wording refactors that keep the intent but split keywords across bullets could fail the test until copy is consolidated again (intentional guardrail).

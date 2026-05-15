@@ -121,6 +121,7 @@ The implementer must not:
 - include earlier task narrative in `.ai-loop/project_summary.md`
 - write to `.ai-loop/_debug/` or `docs/archive/`
 - commit or push (the orchestrator handles git)
+- delete queued task specs under `tasks/` unless this task explicitly lists `tasks/` or those files in `## Files in scope` and requests that cleanup
 
 ## Important
 

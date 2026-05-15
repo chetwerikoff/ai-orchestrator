@@ -626,6 +626,48 @@ def test_codex_template_uses_implementer_summary_only() -> None:
     assert "cursor_summary.md" not in t
 
 
+def _agents_md_paragraphs_and_list_items(text: str) -> list[str]:
+    """Each \\n\\n block and each markdown list line (candidate single policy units)."""
+    chunks: list[str] = []
+    for block in re.split(r"\n\s*\n", text):
+        b = block.strip()
+        if not b:
+            continue
+        chunks.append(b)
+        for line in b.split("\n"):
+            s = line.strip()
+            if re.match(r"^[-*+]\s+\S", s):
+                chunks.append(s)
+    return chunks
+
+
+def _chunk_covers_queued_task_protection(chunk: str) -> bool:
+    """One paragraph/bullet must tie tasks/ to protection language and Files in scope / scope wording."""
+    if "tasks/" not in chunk:
+        return False
+    low = chunk.lower()
+    if not ("protected" in low or ("deletion" in low and "modification" in low)):
+        return False
+    if "files in scope" not in low and "task scope" not in low:
+        return False
+    return True
+
+
+def test_agents_protects_queued_tasks() -> None:
+    text = (_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    chunks = _agents_md_paragraphs_and_list_items(text)
+    assert any(_chunk_covers_queued_task_protection(c) for c in chunks), (
+        "expected one AGENTS.md paragraph or bullet with tasks/, protected or "
+        "deletion+modification, and Files in scope or explicit task scope language"
+    )
+
+
+def test_codex_prompt_protects_queued_tasks() -> None:
+    text = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
+    assert "tasks/" in text
+    assert any("tasks/" in para and "scope" in para.lower() for para in text.split("\n\n"))
+
+
 def _extract_run_codex_review_prompt_literal(ai_loop_auto_text: str) -> str:
     """Exact Codex `$prompt` body inside `Run-CodexReview` single-quote here-string."""
     anchor = ai_loop_auto_text.index("function Run-CodexReview")
