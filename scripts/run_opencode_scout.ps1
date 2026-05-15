@@ -48,12 +48,25 @@ if ([string]::IsNullOrWhiteSpace($promptText)) {
 $tempFile = Join-Path $env:TEMP "opencode_prompt_$([System.IO.Path]::GetRandomFileName()).md"
 [System.IO.File]::WriteAllText($tempFile, $promptText, [System.Text.Encoding]::UTF8)
 
+$scriptRootOs = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRootOs)) {
+    $scriptRootOs = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
+}
+$projHintOs = ""
+if ($workspace -and (Test-Path -LiteralPath $workspace)) {
+    $projHintOs = [System.IO.Path]::GetFullPath(($workspace.Trim()))
+}
+else {
+    try { $projHintOs = (Get-Location).Path } catch { $projHintOs = "" }
+}
+
 # Brief message that instructs OpenCode to read the attached file.
 # run_opencode_scout.ps1 - scout role wrapper for OpenCode
 # Change only this line vs run_opencode_agent.ps1:
 $message = "You are the SCOUT. Read the attached instructions and output only the requested JSON block. Do NOT edit any file."
 
 $pushed = $false
+$exitCode = 1
 try {
     if ($workspace -and (Test-Path $workspace)) {
         Push-Location $workspace
@@ -67,9 +80,28 @@ try {
     # we capture exit code manually.
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    opencode run $message -f $tempFile --model $model
+    $osLines = @(opencode run $message -f $tempFile --model $model 2>&1)
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEA
+    foreach ($sl in @($osLines)) {
+        Write-Output $sl
+    }
+    try {
+        if ($exitCode -eq 0) {
+            $capOs = (@($osLines) | ForEach-Object { "$_" }) -join "`n"
+            . (Join-Path $scriptRootOs "record_token_usage.ps1")
+            Write-CliCaptureTokenUsageIfParsed `
+                -CapturedText $capOs `
+                -ScriptName "run_opencode_scout.ps1" `
+                -Provider "opencode" `
+                -Model $model `
+                -Iteration 0 `
+                -ProjectRootHint $projHintOs
+        }
+    }
+    catch {
+        Write-Warning "OpenCode scout token recording skipped (non-blocking): $($_.Exception.Message)"
+    }
 }
 finally {
     if ($pushed) { Pop-Location }

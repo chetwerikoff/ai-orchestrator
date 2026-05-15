@@ -34,6 +34,18 @@ Copy-Item (Join-Path $Root "scripts\filter_pytest_failures.py") (Join-Path $Targ
 Copy-Item (Join-Path $Root "scripts\ai_loop_plan.ps1") (Join-Path $TargetScripts "ai_loop_plan.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\run_claude_planner.ps1") (Join-Path $TargetScripts "run_claude_planner.ps1") -Force
 Copy-Item (Join-Path $Root "scripts\run_codex_reviewer.ps1") (Join-Path $TargetScripts "run_codex_reviewer.ps1") -Force
+Copy-Item (Join-Path $Root "scripts\record_token_usage.ps1") (Join-Path $TargetScripts "record_token_usage.ps1") -Force
+Copy-Item (Join-Path $Root "scripts\show_token_report.ps1") (Join-Path $TargetScripts "show_token_report.ps1") -Force
+
+$TargetConfig = Join-Path $Target "config"
+New-Item -ItemType Directory -Force -Path $TargetConfig | Out-Null
+$TokenLimitsSrc = Join-Path $Root "config\token_limits.yaml"
+$TokenLimitsDest = Join-Path $TargetConfig "token_limits.yaml"
+if (Test-Path -LiteralPath $TokenLimitsSrc) {
+    if (-not (Test-Path -LiteralPath $TokenLimitsDest)) {
+        Copy-Item -LiteralPath $TokenLimitsSrc -Destination $TokenLimitsDest -Force
+    }
+}
 
 $TaskTarget = Join-Path $TargetAiLoop "task.md"
 if ($OverwriteTask -or !(Test-Path $TaskTarget)) {

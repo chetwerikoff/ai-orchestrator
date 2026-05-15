@@ -494,6 +494,7 @@ else {
 
 Write-Section "STEP 2: CODEX REVIEW / FIX LOOP"
 Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromImplementer:$(-not $SkipInitialCursor) -WithWrapUp:$WithWrapUp -FixerCommand $CursorCommand -FixerModel $CursorModel
+try { & (Join-Path $PSScriptRoot "show_token_report.ps1") } catch { Write-Warning "Token report failed: $($_.Exception.Message)" }
 if ($taskName) {
     Write-Section "AI LOOP TASK: `"$taskName`" DONE"
 } else {

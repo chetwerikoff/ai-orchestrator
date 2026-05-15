@@ -401,5 +401,8 @@ catch {
     if ($backupMade) { Write-Warning "Restored previous $Out from backup." }
 }
 finally {
+    if ($script:ExitCode -eq 0) {
+        try { & (Join-Path $PSScriptRoot "show_token_report.ps1") } catch { Write-Warning "Token report failed: $($_.Exception.Message)" }
+    }
     exit $script:ExitCode
 }

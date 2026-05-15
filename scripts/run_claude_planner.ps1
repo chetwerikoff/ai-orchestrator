@@ -23,6 +23,19 @@ if ([string]::IsNullOrWhiteSpace($model)) {
     $model = "claude-sonnet-4-6"
 }
 
+$scriptRootPlanner = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRootPlanner)) {
+    $scriptRootPlanner = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
+}
+
+$projHintPlanner = ""
+if ($workspace -and (Test-Path -LiteralPath $workspace)) {
+    $projHintPlanner = [System.IO.Path]::GetFullPath($workspace.Trim())
+}
+else {
+    try { $projHintPlanner = (Get-Location).Path } catch { $projHintPlanner = "" }
+}
+
 $pushed = $false
 $exitCode = 1
 $systemPrompt = "Return only the final markdown document. The first byte of stdout must be '#'. Do not include analysis, status text, preambles, code fences, or tool calls."
@@ -33,9 +46,29 @@ try {
     }
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $promptText | cmd /c claude --print --model $model --tools '""' --system-prompt $systemPrompt
+    $claudeLines = @($promptText | cmd /c claude --print --model $model --tools '""' --system-prompt $systemPrompt 2>&1)
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEA
+    foreach ($ln in @($claudeLines)) {
+        Write-Output $ln
+    }
+
+    try {
+        if ($exitCode -eq 0) {
+            $cap = (@($claudeLines) | ForEach-Object { "$_" }) -join "`n"
+            . (Join-Path $scriptRootPlanner "record_token_usage.ps1")
+            Write-CliCaptureTokenUsageIfParsed `
+                -CapturedText $cap `
+                -ScriptName "run_claude_planner.ps1" `
+                -Provider "anthropic" `
+                -Model $model `
+                -Iteration 0 `
+                -ProjectRootHint $projHintPlanner
+        }
+    }
+    catch {
+        Write-Warning "Anthropic planner token recording skipped (non-blocking): $($_.Exception.Message)"
+    }
 }
 finally {
     if ($pushed) { Pop-Location }

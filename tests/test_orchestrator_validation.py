@@ -1127,10 +1127,10 @@ def test_planner_scripts_parse_cleanly() -> None:
         assert proc.returncode == 0, f"{name}: parser reported errors:\n{detail}"
 
 
-def test_run_claude_planner_has_no_param_block_and_no_stderr_redirect() -> None:
+def test_run_claude_planner_has_no_param_block_and_merges_stderr_for_capture() -> None:
     text = (_SCRIPTS / "run_claude_planner.ps1").read_text(encoding="utf-8")
     assert "param(" not in text
-    assert "2>&1" not in text
+    assert "cmd /c claude --print" in text
     assert "cmd /c claude --print" in text
     assert '--tools \'""\'' in text
     assert "--system-prompt $systemPrompt" in text
@@ -1141,6 +1141,9 @@ def test_install_copies_planner_files_and_has_self_install_guard() -> None:
     text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
     assert "ai_loop_plan.ps1" in text
     assert "run_claude_planner.ps1" in text
+    assert "record_token_usage.ps1" in text
+    assert "show_token_report.ps1" in text
+    assert "token_limits.yaml" in text
     assert "planner_prompt.md" in text
     assert "draft_brief_prompt.md" in text
     assert '.ai-loop' in text and "planner_prompt.md" in text
@@ -1152,6 +1155,7 @@ def test_gitignore_excludes_planner_artifacts() -> None:
     assert ".ai-loop/*.bak" in text
     assert ".ai-loop/user_ask.md" in text
     assert ".ai-loop/task_draft_brief.md" in text
+    assert ".ai-loop/reports/" in text
 
 
 def test_run_codex_reviewer_script_exists() -> None:
@@ -1180,13 +1184,16 @@ def test_run_codex_reviewer_invariants() -> None:
     assert "codex" in text and "exec" in text
     assert "ConvertTo-CrtSafeArg" not in text
     assert "GetRandomFileName" in text and "WriteAllText" in text
-    assert "2>&1" not in text
 
 
 def test_run_codex_reviewer_initializes_exit_code_before_try() -> None:
     text = (_SCRIPTS / "run_codex_reviewer.ps1").read_text(encoding="utf-8")
+    anchor = "$tempFile = Join-Path"
+    idx_a = text.index(anchor)
     assert "$exitCode = 1" in text
-    assert text.index("$exitCode = 1") < text.index("try {")
+    idx_init = text.index("$exitCode = 1", idx_a)
+    idx_try_main = text.index("try {", idx_a)
+    assert idx_init < idx_try_main
 
 
 def test_planner_related_ps1_has_no_utf8_em_dash_literal_bytes() -> None:
@@ -1208,10 +1215,13 @@ def test_codex_reviewer_no_inline_prompt_arg() -> None:
 
 def test_codex_reviewer_exitcode_initialized() -> None:
     src = Path("scripts/run_codex_reviewer.ps1").read_text(encoding="utf-8")
-    idx_init = src.find("$exitCode = 1")
-    idx_try = src.find("try {")
-    assert idx_init != -1, "$exitCode = 1 not found"
-    assert idx_init < idx_try, "$exitCode = 1 must appear before try {"
+    anchor = "$tempFile = Join-Path"
+    idx_a = src.index(anchor)
+    idx_init = src.find("$exitCode = 1", idx_a)
+    idx_try = src.find("try {", idx_a)
+    assert idx_init != -1, "$exitCode = 1 not found after temp file setup"
+    assert idx_try != -1, "main try { not found after temp file setup"
+    assert idx_init < idx_try, "$exitCode = 1 must appear before main try {"
 
 
 def test_no_emdash_bytes_in_ps1_scripts() -> None:

@@ -43,6 +43,35 @@ function Get-LatestCursorAgentVersion {
 
 # -------------------------------------------------------------------------------
 
+$scriptRootCa = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRootCa)) {
+    $scriptRootCa = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
+}
+
+$cursorWs = $null
+$cursorModelArg = ""
+$ai = 0
+while ($ai -lt $args.Count) {
+    if ($args[$ai] -eq "--workspace" -and ($ai + 1) -lt $args.Count) {
+        $cursorWs = $args[$ai + 1]
+        $ai += 2
+        continue
+    }
+    if ($args[$ai] -eq "--model" -and ($ai + 1) -lt $args.Count) {
+        $cursorModelArg = [string]$args[$ai + 1]
+        $ai += 2
+        continue
+    }
+    $ai++
+}
+$projHintCa = ""
+if ($cursorWs -and (Test-Path -LiteralPath $cursorWs)) {
+    $projHintCa = [System.IO.Path]::GetFullPath(($cursorWs.Trim()))
+}
+else {
+    try { $projHintCa = (Get-Location).Path } catch { $projHintCa = "" }
+}
+
 $versionDir = Get-LatestCursorAgentVersion
 $nodePath   = Join-Path $versionDir.FullName "node.exe"
 $indexPath  = Join-Path $versionDir.FullName "index.js"
@@ -53,5 +82,28 @@ if (-not (Test-Path $indexPath)) { throw "index.js not found: $indexPath" }
 # $input  = prompt from stdin (set by PowerShell from the pipeline)
 # $args   = forwarded agent flags (--print, --trust, --workspace, ...)
 # 2>&1 merges node stderr into stdout so outer redirections capture everything.
-$input | & $nodePath $indexPath @args 2>&1
-exit $LASTEXITCODE
+$capturedCa = @($input | & $nodePath $indexPath @args 2>&1)
+$exitCa = $LASTEXITCODE
+
+foreach ($row in @($capturedCa)) {
+    Write-Output $row
+}
+
+try {
+    if ($exitCa -eq 0) {
+        $capCaText = (@($capturedCa) | ForEach-Object { "$_" }) -join "`n"
+        . (Join-Path $scriptRootCa "record_token_usage.ps1")
+        Write-CliCaptureTokenUsageIfParsed `
+            -CapturedText $capCaText `
+            -ScriptName "run_cursor_agent.ps1" `
+            -Provider "cursor" `
+            -Model $(if ([string]::IsNullOrWhiteSpace($cursorModelArg)) { "" } else { $cursorModelArg }) `
+            -Iteration 0 `
+            -ProjectRootHint $projHintCa
+    }
+}
+catch {
+    Write-Warning "Cursor agent token recording skipped (non-blocking): $($_.Exception.Message)"
+}
+
+exit $exitCa

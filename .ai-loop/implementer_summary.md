@@ -1,34 +1,44 @@
 ﻿# Implementer summary
 
-## Changed files
+## Changed files (why)
 
-- `scripts/record_token_usage.ps1` — branch `(d)` in `ConvertFrom-CliTokenUsage` for Codex CLI total-only `tokens used` (same line as the number, or number on the following line); commas stripped; `InputTokens`/`OutputTokens` null; `Source` `cli_log`; `Quality` `exact`.
-- `tests/test_token_usage.py` — `test_convert_codex_tokens_used_single_line`, `test_convert_codex_tokens_used_multiline`, `test_convert_openai_json_wins_over_codex_tokens_used_text`.
-- `.ai-loop/task.md` — active task updated to `014` and includes required scope sections for task-first prompt tests.
-- `tasks/014_token_usage_codex_cli_format_fix.md` — queued task spec for this fix.
-- `tasks/015_token_usage_step3_wrappers_limits_reports.md` — queued follow-up spec for the remaining token usage work.
-- `tasks/task_token_usage_reports_and_journal.md` — restored original user ASK/reference spec.
-- `.ai-loop/project_summary.md` — token usage step 2 bullet updated for the fourth parser pattern and JSON precedence.
-- `.ai-loop/implementer_summary.md` — this file.
+- `scripts/record_token_usage.ps1` — `Get-TaskHeadingForJournal`, `Write-CliCaptureTokenUsageIfParsed` for shared non-fatal wrapper recording.
+- `scripts/show_token_report.ps1` — optional `-ExportReport` / `-LimitsYamlPath`; Limits section (rolling UTC windows; % only for numeric budgets); timestamped `.ai-loop/reports/token_usage_*.md`.
+- `config/token_limits.yaml` — committed example optional budgets (`unknown` / `not_applicable` / numeric).
+- `scripts/run_claude_planner.ps1`, `scripts/run_codex_reviewer.ps1`, `scripts/run_cursor_agent.ps1`, `scripts/run_opencode_agent.ps1`, `scripts/run_opencode_scout.ps1` — capture CLI output, merge stderr where needed, record when `ConvertFrom-CliTokenUsage` matches.
+- `scripts/ai_loop_plan.ps1`, `scripts/ai_loop_task_first.ps1` — on success invoke `show_token_report.ps1` like `ai_loop_auto.ps1`.
+- `scripts/install_into_project.ps1` — copy `record_token_usage.ps1`, `show_token_report.ps1`, install default `config/token_limits.yaml` when absent.
+- `.gitignore` — `.ai-loop/reports/`, `tests/.token_limits_scratch/`.
+- `tests/test_token_usage.py`, `tests/test_orchestrator_validation.py` — coverage for limits/export/malformed JSONL/wrapper parse; relax codex/claude invariant tests for `2>&1` capture.
+- `.ai-loop/project_summary.md` — token usage step 3 noted in Current Stage.
 
 ## Tests
 
-- `python -m pytest tests/test_token_usage.py -q` → **17 passed**.
-- `python -m pytest -q` → **158 passed**.
-- `python -m pytest tests/test_orchestrator_validation.py::test_implementer_prompt_surfaces_scope_blocks -q` → **1 passed** after adding the required scope sections to the active task spec.
+- `python -m pytest tests/test_token_usage.py -q` → **28 passed**
+- `python -m pytest tests -q` → **170 passed** (after validation test updates)
 
-## Task-specific verification
+## Wrapper recording
 
-- PowerShell `Parser::ParseFile` on `scripts/record_token_usage.ps1` passed.
+| Wrapper | Records when | Still unknown if |
+|--------|----------------|------------------|
+| `run_claude_planner.ps1` | Claude stdout/stderr matches known parsers (e.g. API JSON, `Input tokens:` / `Output tokens:`) | No usage lines in output |
+| `run_codex_reviewer.ps1` | Codex output matches JSON or `tokens used` summary | Total-only or missing lines |
+| `run_cursor_agent.ps1` | Same parsers on merged node stdout/stderr | Cursor CLI emits no recognized usage block |
+| `run_opencode_agent.ps1` / `run_opencode_scout.ps1` | OpenCode output matches same parsers | Local stack prints no parseable usage |
 
-## Codex CLI forms now parsed
+## Limits behavior
 
-1. Single line (own line): `tokens used 32,372` (case-insensitive; optional surrounding lines).
-2. Two lines: `tokens used` then a line with only the comma-grouped integer (e.g. `32,372`).
+- Numeric caps in `config/token_limits.yaml` → rolling usage vs limit with **percentage**.
+- `unknown` or missing key → **no percentage**; message states unknown / not configured.
+- `not_applicable` (or spelling variants) → **not applicable**.
+- Local heuristic (`local-` models, `local` in provider, `llama` / `ollama` in model): missing keys treated as **not applicable** unless YAML sets an explicit value (including explicit `unknown`).
 
-OpenAI/Claude JSON with input/output fields still runs first and wins when both appear in the same blob.
+## Task-specific command output
 
-## Remaining risks / limitations
+- PowerShell `Parser::ParseFile` not re-run in-summary; CI covers via pytest AST checks on touched scripts.
 
-- Total-only Codex summary cannot supply input vs output split; `input_tokens` / `output_tokens` in JSONL stay null for these records.
-- Parser expects a plain integer total (with optional `,` thousands separators), not abbreviated or non-numeric summaries.
+## Remaining risks
+
+- External CLIs change log shape; regex-first parsing can miss new formats without updates.
+- Successful `ai_loop_task_first` runs `show_token_report` after `ai_loop_auto` may already have printed a report (duplicate console block, non-fatal).
+- Rolling window labels are UTC and approximate (7-day / 30-day rolling), not provider billing cycles.

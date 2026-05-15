@@ -19,6 +19,22 @@ if ([string]::IsNullOrWhiteSpace($promptText)) {
     exit 1
 }
 
+$scriptRootReviewer = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRootReviewer)) {
+    $scriptRootReviewer = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
+}
+
+$projHintCodexRv = ""
+if ($workspace -and (Test-Path -LiteralPath $workspace)) {
+    $projHintCodexRv = [System.IO.Path]::GetFullPath(($workspace.Trim()))
+}
+else {
+    try { $projHintCodexRv = (Get-Location).Path } catch { $projHintCodexRv = "" }
+}
+
+$codexDisplayModelRv = ""
+if (-not [string]::IsNullOrWhiteSpace([string]$model)) { $codexDisplayModelRv = [string]$model }
+
 $tempFile = Join-Path $env:TEMP "codex_review_$([System.IO.Path]::GetRandomFileName()).md"
 [System.IO.File]::WriteAllText($tempFile, $promptText, [System.Text.Encoding]::UTF8)
 
@@ -47,14 +63,35 @@ try {
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
 
+    $codexLines = @()
     if ($helpText -match '(?i)--file\b') {
         $codexArgs = $codexArgs + @("--file", $tempFile)
-        & codex @codexArgs
+        $codexLines = @(& codex @codexArgs 2>&1)
     } else {
-        Get-Content -LiteralPath $tempFile -Raw -Encoding UTF8 | & codex @codexArgs
+        $codexLines = @(Get-Content -LiteralPath $tempFile -Raw -Encoding UTF8 | & codex @codexArgs 2>&1)
+    }
+
+    foreach ($seg in @($codexLines)) {
+        Write-Output $seg
     }
 
     $exitCode = $LASTEXITCODE
+    try {
+        if ($exitCode -eq 0) {
+            $capCodexRv = (@($codexLines) | ForEach-Object { "$_" }) -join "`n"
+            . (Join-Path $scriptRootReviewer "record_token_usage.ps1")
+            Write-CliCaptureTokenUsageIfParsed `
+                -CapturedText $capCodexRv `
+                -ScriptName "run_codex_reviewer.ps1" `
+                -Provider "codex" `
+                -Model $(if ([string]::IsNullOrWhiteSpace($codexDisplayModelRv)) { "codex" } else { $codexDisplayModelRv }) `
+                -Iteration 0 `
+                -ProjectRootHint $projHintCodexRv
+        }
+    }
+    catch {
+        Write-Warning "Codex reviewer token recording skipped (non-blocking): $($_.Exception.Message)"
+    }
     $ErrorActionPreference = $prevEA
 }
 finally {

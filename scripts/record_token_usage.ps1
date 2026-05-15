@@ -96,6 +96,93 @@ function ConvertFrom-CliTokenUsage {
     return $null
 }
 
+function Get-TaskHeadingForJournal {
+    param([string]$TaskFilePath)
+
+    if ([string]::IsNullOrWhiteSpace($TaskFilePath) -or -not (Test-Path -LiteralPath $TaskFilePath)) {
+        return ""
+    }
+    try {
+        foreach ($line in Get-Content -LiteralPath $TaskFilePath -ErrorAction SilentlyContinue) {
+            $t = [string]$line
+            $m = [regex]::Match($t, '^\s*#\s*(.+)$')
+            if ($m.Success) {
+                return $m.Groups[1].Value.Trim()
+            }
+        }
+        return ""
+    }
+    catch {
+        return ""
+    }
+}
+
+function Resolve-RepoRootFromProjectHint {
+    param([string]$ProjectRootHint)
+
+    if ([string]::IsNullOrWhiteSpace($ProjectRootHint)) {
+        return ""
+    }
+    try {
+        $r = [System.IO.Path]::GetFullPath(($ProjectRootHint.Trim()))
+        return $r
+    }
+    catch {
+        return ""
+    }
+}
+
+function Write-CliCaptureTokenUsageIfParsed {
+    param(
+        [AllowEmptyString()][string]$CapturedText,
+        [Parameter(Mandatory = $true)][string]$ScriptName,
+        [Parameter(Mandatory = $true)][string]$Provider,
+        [string]$Model = "",
+        [int]$Iteration = 0,
+        [string]$ProjectRootHint = ""
+    )
+
+    try {
+        if (-not $CapturedText) {
+            return
+        }
+        if ($null -eq (Get-Command -Name ConvertFrom-CliTokenUsage -ErrorAction SilentlyContinue)) {
+            return
+        }
+        $parsed = ConvertFrom-CliTokenUsage -Text $CapturedText
+        if (-not $parsed) {
+            return
+        }
+        if ($null -eq (Get-Command -Name Write-TokenUsageRecord -ErrorAction SilentlyContinue)) {
+            return
+        }
+        $taskPath = ""
+        $hint = Resolve-RepoRootFromProjectHint -ProjectRootHint $ProjectRootHint
+        if (-not [string]::IsNullOrWhiteSpace($hint)) {
+            $candidate = [System.IO.Path]::Combine($hint, ".ai-loop", "task.md")
+            if (Test-Path -LiteralPath $candidate) {
+                $taskPath = $candidate
+            }
+        }
+        $heading = Get-TaskHeadingForJournal -TaskFilePath $taskPath
+        Write-TokenUsageRecord `
+            -TaskName $heading `
+            -ScriptName $ScriptName `
+            -Iteration $Iteration `
+            -Provider $Provider `
+            -Model $Model `
+            -InputTokens $parsed.InputTokens `
+            -OutputTokens $parsed.OutputTokens `
+            -TotalTokens $parsed.TotalTokens `
+            -Confidence "unknown" `
+            -Source $parsed.Source `
+            -Quality $parsed.Quality
+    }
+    catch {
+        Write-Warning "Token usage wrapper capture skipped (non-blocking): $($_.Exception.Message)"
+    }
+}
+
 function Write-TokenUsageRecord {
     param(
         [string]$TaskName = "",

@@ -48,10 +48,23 @@ if ([string]::IsNullOrWhiteSpace($promptText)) {
 $tempFile = Join-Path $env:TEMP "opencode_prompt_$([System.IO.Path]::GetRandomFileName()).md"
 [System.IO.File]::WriteAllText($tempFile, $promptText, [System.Text.Encoding]::UTF8)
 
+$scriptRootOc = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRootOc)) {
+    $scriptRootOc = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
+}
+$projHintOc = ""
+if ($workspace -and (Test-Path -LiteralPath $workspace)) {
+    $projHintOc = [System.IO.Path]::GetFullPath(($workspace.Trim()))
+}
+else {
+    try { $projHintOc = (Get-Location).Path } catch { $projHintOc = "" }
+}
+
 # Brief message that instructs OpenCode to read the attached file.
 $message = "You are the IMPLEMENTER. Read the attached file completely and execute every instruction in it. Do not summarise or review - implement directly."
 
 $pushed = $false
+$exitCode = 1
 try {
     if ($workspace -and (Test-Path $workspace)) {
         Push-Location $workspace
@@ -65,9 +78,28 @@ try {
     # we capture exit code manually.
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    opencode run $message -f $tempFile --model $model
+    $ocLines = @(opencode run $message -f $tempFile --model $model 2>&1)
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEA
+    foreach ($ol in @($ocLines)) {
+        Write-Output $ol
+    }
+    try {
+        if ($exitCode -eq 0) {
+            $capOc = (@($ocLines) | ForEach-Object { "$_" }) -join "`n"
+            . (Join-Path $scriptRootOc "record_token_usage.ps1")
+            Write-CliCaptureTokenUsageIfParsed `
+                -CapturedText $capOc `
+                -ScriptName "run_opencode_agent.ps1" `
+                -Provider "opencode" `
+                -Model $model `
+                -Iteration 0 `
+                -ProjectRootHint $projHintOc
+        }
+    }
+    catch {
+        Write-Warning "OpenCode implementer token recording skipped (non-blocking): $($_.Exception.Message)"
+    }
 }
 finally {
     if ($pushed) { Pop-Location }

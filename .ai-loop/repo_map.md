@@ -36,7 +36,7 @@
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
 - `scripts/run_opencode_scout.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
 - `scripts/run_scout_pass.ps1` — Auto-swap opencode_agent -> opencode_scout to avoid IMPLEMENTER role conflict.
-- `scripts/show_token_report.ps1` — (no header summary)
+- `scripts/show_token_report.ps1` — --- Limits ---
 - `scripts/wrap_up_session.ps1` — Writes `.ai-loop\_debug\session_draft.md` via read-only ingest of orchestrator artefacts (non-fatal).
 
 ## templates/
