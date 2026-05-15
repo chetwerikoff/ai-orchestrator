@@ -57,10 +57,12 @@ Stable. Phase 1 A/B closed (2026-05-14): Cursor confirmed as permanent default i
 
 ## Next Likely Steps
 
-1. Validate review-loop quality on real ASKs before promoting `-WithReview` toward default.
-2. **Reinstall target projects after C08/C09:** from this repo run `.\scripts\install_into_project.ps1 -TargetProject <path>` so they pick up orchestrator scripts; verify wrappers for planner and optional reviewer (`run_codex_reviewer.ps1`) when using `-WithReview`.
-3. H2N target project cleanup: D01 (compact project_summary.md) → D02 (reinstall scripts + AGENTS.md) → D03 (compact REVIEW_STATE.md, manual).
-4. Use task-first for new work; use `continue_ai_loop.ps1` for interrupted loops; optionally pass `-WithWrapUp`, then periodically run `promote_session.ps1` to refresh `failures.md`.
+- Use task-first for new work; use `continue_ai_loop.ps1` for interrupted loops; optionally pass `-WithWrapUp`, then periodically run `promote_session.ps1` to refresh `failures.md`.
+
+## Completed / Skipped
+
+- ✅ Validate review-loop quality on real ASKs — confirmed working (2026-05-15).
+- ✅ D01/D02/D03 (H2N cleanup + reinstall) — skipped by user decision (2026-05-15).
 
 ## Notes For Future AI Sessions
 
