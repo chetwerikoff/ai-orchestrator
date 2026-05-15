@@ -1,140 +1,126 @@
-﻿# Task: Token usage step 2 ÔÇö real parsing and auto-recording
+﻿# Task: Cursor planner + Claude architecture reviewer (variant A)
 
 ## Project context
 - `AGENTS.md`
 - `.ai-loop/task.md`
 - `.ai-loop/project_summary.md`
-- `.ai-loop/implementer_summary.md` (if iteration > 1)
+- `.ai-loop/repo_map.md`
 
 ## Goal
-Implement real token-count parsing and automatic JSONL recording for the token usage system. The foundation (recorder, report script, gitignore, tests) is in place from step 1. This task adds: a `ConvertFrom-CliTokenUsage` PowerShell function that extracts token counts from CLI output text, optional `source` and `quality` fields on the JSONL schema, automatic recording of Codex review token usage inside `ai_loop_auto.ps1`, and an enhanced `show_token_report.ps1` that aggregates by model and by iteration and also writes `.ai-loop/token_usage_summary.md`. All new behavior is non-blocking.
+
+Add an opt-in planning mode where Cursor (or any `-PlannerCommand`) drafts `task.md` and Claude reviews it for architectural, scope, and safety issues. With `-WithReview -NoRevision`, the review is a single pass: if blocking issues are found the script exits 2 without writing `.ai-loop/task.md`; the human is the revision loop. Claude as default planner and the existing `-WithReview` revision loop remain completely unchanged.
 
 ## Scope
+
 Allowed:
-- Adding `ConvertFrom-CliTokenUsage` to `scripts/record_token_usage.ps1`
-- Adding optional `-Source` and `-Quality` parameters to `Write-TokenUsageRecord`
-- Parsing Codex output in `scripts/ai_loop_auto.ps1` and calling `Write-TokenUsageRecord`
-- Extending `scripts/show_token_report.ps1` for by-model / by-iteration aggregation and writing `.ai-loop/token_usage_summary.md`
-- Adding `.ai-loop/token_usage_summary.md` to `.gitignore`
-- Updating `tests/test_token_usage.py`
-- Updating `.ai-loop/project_summary.md`
+- Create `scripts/run_claude_reviewer.ps1`
+- Create `templates/claude_task_reviewer_prompt.md`
+- Modify `scripts/ai_loop_plan.ps1` (add `-NoRevision` switch, extend category regex, lighter reviewer context when `-NoRevision`, Claude reviewer prompt lookup, variant A exit behavior)
+- Modify `scripts/install_into_project.ps1` to copy `claude_task_reviewer_prompt.md` (AGENTS.md templates contract)
+- Add `tests/test_claude_reviewer.py`
+- Update `docs/workflow.md` with a brief note about the new mode
+- Update `.ai-loop/project_summary.md`
 
 Not allowed:
-- Touching implementer wrapper scripts (`run_cursor_agent.ps1`, `run_opencode_agent.ps1`, `run_opencode_scout.ps1`, `run_claude_planner.ps1`, `run_codex_reviewer.ps1`) ÔÇö deferred to step 3
-- Adding `config/token_limits.yaml` or limits display ÔÇö deferred to step 3
-- Adding `.ai-loop/reports/` or timestamped report exports ÔÇö deferred to step 3
-- Modifying `ai_loop_plan.ps1`, `ai_loop_task_first.ps1`, or `continue_ai_loop.ps1`
-- Editing `ai_loop.py`
-- Writing to `docs/archive/**`
+- Changing default `-PlannerCommand` or `-ReviewerCommand` values
+- Modifying the existing `-WithReview` revision loop (without `-NoRevision`)
+- Adding auto-revision to this variant
+- Touching `scripts/ai_loop_task_first.ps1`, `scripts/ai_loop_auto.ps1`, `scripts/continue_ai_loop.ps1`
+- Touching `scripts/run_codex_reviewer.ps1` or `scripts/run_claude_planner.ps1`
+- Touching `docs/architecture.md`
 
 ## Files in scope
-- `scripts/record_token_usage.ps1`
-- `scripts/show_token_report.ps1`
-- `scripts/ai_loop_auto.ps1`
-- `tests/test_token_usage.py`
-- `.gitignore`
+
+- `scripts/run_claude_reviewer.ps1` (new)
+- `templates/claude_task_reviewer_prompt.md` (new)
+- `scripts/ai_loop_plan.ps1`
+- `scripts/install_into_project.ps1`  add copy of `claude_task_reviewer_prompt.md` alongside `reviewer_prompt.md`
+- `tests/test_claude_reviewer.py` (new)
+- `docs/workflow.md`
 - `.ai-loop/project_summary.md`
 
 ## Files out of scope
+
+- `scripts/ai_loop_task_first.ps1`
+- `scripts/ai_loop_auto.ps1`
+- `scripts/continue_ai_loop.ps1`
+- `scripts/run_codex_reviewer.ps1`
+- `scripts/run_claude_planner.ps1`
+- `docs/architecture.md`
 - `docs/archive/**`
 - `.ai-loop/_debug/**`
 - `ai_loop.py`
-- `scripts/run_cursor_agent.ps1`
-- `scripts/run_opencode_agent.ps1`
-- `scripts/run_opencode_scout.ps1`
-- `scripts/run_claude_planner.ps1`
-- `scripts/run_codex_reviewer.ps1`
-- `scripts/ai_loop_plan.ps1`
-- `scripts/ai_loop_task_first.ps1`
-- `scripts/continue_ai_loop.ps1`
 
 ## Required behavior
 
-1. **Add `ConvertFrom-CliTokenUsage` to `record_token_usage.ps1`**:
-   - Accepts a single string parameter (raw text to parse).
-   - Tries patterns in order, returning on first match:
-     a. JSON key `"input_tokens"` + `"output_tokens"` (Claude API) ÔÇö source `api_response`, quality `exact`
-     b. JSON key `"prompt_tokens"` + `"completion_tokens"` (OpenAI/Codex API) ÔÇö source `api_response`, quality `exact`
-     c. Plain-text lines `Input tokens: N` / `Output tokens: N` (Claude CLI text) ÔÇö source `cli_log`, quality `exact`
-   - Returns a hashtable `@{ InputTokens = N; OutputTokens = N; TotalTokens = N; Source = "..."; Quality = "exact" }` on match; `$null` when no pattern matches.
-   - Pure function, no side effects, no I/O.
+1. **`scripts/run_claude_reviewer.ps1`** ÔÇö mirror `run_claude_planner.ps1` exactly: no `param()` block; reads prompt via `$input | Out-String`; parses `--model` from `$args`; default model `claude-haiku-4-5-20251001`; calls `$promptText | claude --print --model $model`; same `$ErrorActionPreference` save/restore pattern; `$exitCode = 1` before `try`, sets `$exitCode = $LASTEXITCODE` inside; `exit $exitCode`. No `ConvertTo-CrtSafeArg` needed.
 
-2. **Add `-Source` and `-Quality` optional parameters to `Write-TokenUsageRecord`**:
-   - Both default to `"unknown"` when omitted so all existing call sites continue to work without changes.
-   - Write both fields into the JSONL record on every call.
+2. **`templates/claude_task_reviewer_prompt.md`** ÔÇö role: **Architecture Reviewer**. You receive a draft `task.md` and raw user ASK. Identify blocking architectural, scope, or safety issues only. Output rules (strict): exactly one of `NO_BLOCKING_ISSUES` (bare line, nothing else) or an `ISSUES:` block where every non-blank line matches `- [architecture|scope|missing|safety|logic|complexity] <text>`. No preamble, no task rewrite, no full `task.md` echo. Flag only: wrong scope for stated goal, invented file paths, missing critical safety constraint, architectural conflict with `AGENTS.md` or `project_summary.md`, missing required behavior that makes the task unimplementable. When in doubt, prefer `NO_BLOCKING_ISSUES`.
 
-3. **Auto-record Codex token usage in `ai_loop_auto.ps1`**:
-   - After each Codex review invocation (initial review and each fix-loop iteration), retrieve the Codex text that was already captured (stdout variable or the `codex_review.md` file ÔÇö implementer must check the existing capture pattern).
-   - Call `ConvertFrom-CliTokenUsage` on that text.
-   - If a non-null result is returned, call `Write-TokenUsageRecord` with provider `"codex"`, model `"codex"` (or whatever model string is available), the current iteration number, and the parsed `InputTokens`, `OutputTokens`, `TotalTokens`, `Source`, `Quality`.
-   - Entire block must be wrapped in `try/catch`; failures emit a warning and do not affect exit codes.
+3. **`scripts/ai_loop_plan.ps1` ÔÇö change A**: add `-NoRevision` switch parameter to the `param()` block.
 
-4. **Enhance `show_token_report.ps1`**:
-   - Read `.ai-loop/token_usage.jsonl`; skip unparseable lines silently.
-   - If the file is missing or every line fails to parse, emit `"No token usage records found."` and exit 0.
-   - Derive a task name from the `task` field of the most recent record (or `"unknown"` if absent).
-   - Output sections:
-     - Header: task name, script name (from most recent record's `script` field).
-     - **Total**: summed input / output / total tokens across all records.
-     - **By model**: one line per distinct `model` value, summed tokens.
-     - **By iteration**: for each distinct `iteration` value (ascending), show model, input, output, total.
-   - After writing to console (`Write-Host`), overwrite `.ai-loop/token_usage_summary.md` with the same text (non-fatal; warn on error).
+4. **`scripts/ai_loop_plan.ps1` ÔÇö change B**: extend `Test-ReviewerOutputStrict` category regex (currently near line 104) from `(logic|complexity|scope|missing)` to `(logic|complexity|scope|missing|architecture|safety)`. This is additive; existing Codex reviewer output still passes.
 
-5. **Update `.gitignore`**:
-   - Add `.ai-loop/token_usage_summary.md` on a new line near `.ai-loop/token_usage.jsonl`.
+5. **`scripts/ai_loop_plan.ps1` ÔÇö change C**: lighter reviewer context when `-NoRevision` is set. Omit `repo_map.md` from the reviewer prompt. Reviewer receives (in order): reviewer prompt content + `## AGENTS.md` + agents content + `## Project Summary` + project summary content + `## Raw User ASK` + ask text + `## Draft task.md` + draft content. No `planner_prompt.md` included.
 
-6. **Non-blocking contract**: every new code path in `ai_loop_auto.ps1` and `show_token_report.ps1` must be guarded with `try/catch` or `-ErrorAction SilentlyContinue` such that failures produce only a warning and never change the script's exit code.
+6. **`scripts/ai_loop_plan.ps1` ÔÇö change D**: Claude task reviewer prompt lookup. When `$ReviewerCommand` contains the string `run_claude_reviewer` (case-insensitive), attempt to load: (1) `.ai-loop/claude_task_reviewer_prompt.md`, (2) `templates/claude_task_reviewer_prompt.md`. If neither found, emit `Write-Warning` and fall back to the existing reviewer prompt variable.
+
+7. **`scripts/ai_loop_plan.ps1` ÔÇö change E**: `-NoRevision` without `-WithReview` emits `Write-Warning "-NoRevision has no effect without -WithReview"` and continues normally.
+
+8. **`scripts/ai_loop_plan.ps1` ÔÇö change F**: when both `-NoRevision` and `-WithReview` are set, clamp `$MaxReviewIterations` to 1 internally before entering the reviewer block (one review pass, no revision loop).
+
+9. **`scripts/ai_loop_plan.ps1` ÔÇö change G**: variant A exit behavior. When `-NoRevision` is set and the reviewer returns `ISSUES`: write to `.ai-loop/planner_review_trace.md` the line `REVIEW_STATUS: BLOCKING_ISSUES_FOUND -- task.md was NOT written` followed by the issues list; print the issues to console with `-ForegroundColor Red`; do NOT write `.ai-loop/task.md`; `exit 2`. When `NO_BLOCKING_ISSUES`: write `task.md` as normal. When `MALFORMED`: `Write-Warning`, write `task.md` anyway (same degraded behavior as today).
+
+10. **`scripts/install_into_project.ps1`** ÔÇö add a copy step for `templates/claude_task_reviewer_prompt.md` ÔåÆ `.ai-loop/claude_task_reviewer_prompt.md` alongside the existing `reviewer_prompt.md` copy, so installed target projects get the Claude reviewer prompt.
 
 ## Tests
-Add or extend `tests/test_token_usage.py` using subprocess calls (matching existing test pattern):
 
-- `test_convert_claude_api_format`: pass JSON with `input_tokens`/`output_tokens`; assert correct token values, `source == "api_response"`, `quality == "exact"`.
-- `test_convert_openai_api_format`: pass JSON with `prompt_tokens`/`completion_tokens`; assert correct token values and source.
-- `test_convert_cli_log_format`: pass plain text `Input tokens: 42\nOutput tokens: 18`; assert `InputTokens == 42`, `OutputTokens == 18`, `source == "cli_log"`.
-- `test_convert_no_match_returns_null`: pass unrecognized text; assert `$null` return.
-- `test_write_record_default_source_quality`: call `Write-TokenUsageRecord` without `-Source`/`-Quality`; read JSONL; assert record has `"source": "unknown"` and `"quality": "unknown"`.
-- `test_write_record_explicit_source_quality`: call with `-Source api_response -Quality exact`; assert fields in written record.
-- `test_show_report_by_model`: write two JSONL records with different `model` values; run `show_token_report.ps1`; assert stdout contains both model names and their respective summed tokens.
-- `test_show_report_empty`: run `show_token_report.ps1` against missing JSONL; assert exit code 0 and "No token usage records found." in stdout.
-- `test_show_report_writes_summary_md`: write one JSONL record; run `show_token_report.ps1`; assert `.ai-loop/token_usage_summary.md` exists and contains "Total".
-- `test_codex_auto_record_chain`: via a PowerShell subprocess that dot-sources `record_token_usage.ps1`, call `ConvertFrom-CliTokenUsage` with OpenAI-style JSON (simulating Codex output), pipe the result into `Write-TokenUsageRecord` with `provider="codex"`, then read back the JSONL and assert a record with `source == "api_response"` and `provider == "codex"` was written. This exercises the full chain used by the `ai_loop_auto.ps1` hook without requiring a full orchestrator run.
+Add `tests/test_claude_reviewer.py`:
 
-Run: `python -m pytest -q`
+- **test_run_claude_reviewer_parse_check** ÔÇö `Parser::ParseFile` on `scripts/run_claude_reviewer.ps1`; assert exit code 0.
+- **test_claude_task_reviewer_prompt_exists** ÔÇö `assert Path("templates/claude_task_reviewer_prompt.md").exists()`.
+- **test_reviewer_strict_accepts_architecture_and_safety** ÔÇö dot-source `scripts/ai_loop_plan.ps1` in a subprocess; call `Test-ReviewerOutputStrict` with `"ISSUES:\n- [architecture] bad scope\n- [safety] missing guard"`; assert result equals `"ISSUES"`.
+- **test_reviewer_strict_rejects_unknown_category** ÔÇö same harness with `"ISSUES:\n- [unknown] something"`; assert result equals `"MALFORMED"`.
+- **test_claude_reviewer_default_model_is_haiku** ÔÇö read `scripts/run_claude_reviewer.ps1`; assert `"haiku"` appears in content (case-insensitive).
+
+Run: `python -m pytest -q tests/test_claude_reviewer.py`
+
+Full suite: `python -m pytest -q`
 
 ## Verification
-```
+
+```powershell
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\run_claude_reviewer.ps1', [ref]`$null, [ref]`$null)"
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan.ps1', [ref]`$null, [ref]`$null)"
+python -m pytest -q tests/test_claude_reviewer.py
 python -m pytest -q
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\record_token_usage.ps1', [ref]$null, [ref]$null)"
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\show_token_report.ps1', [ref]$null, [ref]$null)"
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"
 ```
 
 ## Implementer summary requirements
-1. List each changed file with a one-line description of the change made.
-2. Report test count and pass/fail outcome.
-3. Describe which token-count patterns are now parsed and confirm the Codex capture point used in `ai_loop_auto.ps1`.
-4. Note any specified behavior that could not be implemented as written and why.
-5. List 1ÔÇô3 remaining risks (e.g., Codex output format change breaking the pattern, `show_token_report.ps1` summary write failing silently).
+
+1. Files created and modified, one line each.
+2. Exact regex change in `Test-ReviewerOutputStrict` (before/after one-liner).
+3. How lighter reviewer context (no repo_map when `-NoRevision`) was implemented ÔÇö which code block, approximate line number.
+4. Default model for `run_claude_reviewer.ps1` confirmed.
+5. `install_into_project.ps1` copy step confirmed (template contract).
+6. Test result: pass/fail count; one or two forward risks for variant B (auto-revision).
 
 ## Project summary update
-Update "Current Stage": Token usage step 2 complete ÔÇö `ConvertFrom-CliTokenUsage` (three patterns: Claude API JSON, OpenAI API JSON, Claude CLI text), `source`/`quality` fields on JSONL schema, Codex auto-recording hooked in `ai_loop_auto.ps1`, `show_token_report.ps1` enhanced with by-model / by-iteration aggregation and `token_usage_summary.md` write. Step 3 (limits config via `config/token_limits.yaml`, per-wrapper parsing, timestamped report exports) remains.
 
-Update "Last Completed Task": Token usage step 2 ÔÇö real parsing and auto-recording.
+Add to **Current Architecture**: `scripts/run_claude_reviewer.ps1` ÔÇö Claude Haiku-based architecture reviewer for opt-in cheap planning mode; invoked with `-PlannerCommand <cursor-wrapper> -ReviewerCommand run_claude_reviewer.ps1 -WithReview -NoRevision`; variant A only (no auto-revision loop); `Test-ReviewerOutputStrict` extended with `[architecture|safety]` categories (backward compatible); reviewer context omits `repo_map.md`; `task.md` not written on blocking issues (`exit 2`). `templates/claude_task_reviewer_prompt.md` installed to `.ai-loop/claude_task_reviewer_prompt.md` by `install_into_project.ps1`.
 
 ## Output hygiene
-- Do not duplicate task content into the implementer summary.
-- Do not write to `.ai-loop/_debug/` except via existing orchestrator hooks.
-- Do not commit ÔÇö the orchestrator handles git.
+
+- Do not commit.
+- Do not write to `.ai-loop/_debug/`.
 - Do not write to `docs/archive/`.
+- Do not duplicate task detail into `project_summary.md`.
 
 ## Important
-- **Architect note**: The user's proposal spans all three steps (parsing, per-wrapper recording, limits config, timestamped report exports). This task covers step 2 only. Hooking all four wrapper scripts in one pass would touch six files and exceed the ~80-line policy; Codex output is already captured by `ai_loop_auto.ps1`, making it the lowest-risk auto-record target for this iteration. Per-wrapper extraction moves to step 3.
-- **Architect note**: `config/token_limits.yaml` and the limits display section (daily/weekly/monthly %) are deferred to step 3 as specified by `project_summary.md` ("config and limits to step 3"). They are not included here.
-- **Architect note**: `.ai-loop/reports/token_usage_<timestamp>.md` is also deferred to step 3; it introduces a new gitignored directory and timestamp-keyed filenames that add complexity without contributing to the core parsing goal of this step.
-- Reviewer issue `[logic]` accepted: `.ai-loop/project_summary.md` added to `## Files in scope`.
-- Reviewer issue `[missing]` accepted: `test_codex_auto_record_chain` added to cover the auto-recording chain without a full orchestrator harness. A full subprocess test of `ai_loop_auto.ps1` is intentionally avoided ÔÇö it requires a complete orchestrator setup. The chain test (dot-source ÔåÆ parse ÔåÆ write ÔåÆ verify JSONL) is the appropriate unit boundary.
-- **Assumption**: The Codex invocation in `ai_loop_auto.ps1` either stores stdout in a variable before writing it to `codex_review.md`, or writes the file and then reads it back. The implementer must inspect the current capture pattern and apply `ConvertFrom-CliTokenUsage` to whichever text is available ÔÇö variable preferred, file fallback acceptable.
-- **Assumption**: Existing calls to `Write-TokenUsageRecord` inside `ai_loop_auto.ps1` (the step-1 placeholder hook) pass no `-Source`/`-Quality`; they will silently default to `"unknown"` / `"unknown"`, which is correct.
-- `ConvertFrom-CliTokenUsage` must be defined in `record_token_usage.ps1` (dot-sourced by `ai_loop_auto.ps1`), not in a separate file.
-- Tests call PowerShell functions via subprocess; do not reimplement PowerShell parsing logic in Python.
-- The `$PSScriptRoot` fixup in `record_token_usage.ps1` (noted in project summary for `[System.IO.Path]::Combine`) must be preserved; do not regress it.
+
+- **SAFETY RULE**: when `-NoRevision` is set and reviewer returns `ISSUES`, `.ai-loop/task.md` MUST NOT be written. Exit 2. Human is the revision loop in variant A ÔÇö this is non-negotiable.
+- **BACKWARD COMPAT**: the existing `-WithReview` code path (without `-NoRevision`) must behave exactly as before. The only changes touching that path are: (1) the additive category regex extension in `Test-ReviewerOutputStrict` and (2) the Claude reviewer prompt lookup (falls back to existing prompt when template not found). No other existing behavior changes.
+- `run_claude_reviewer.ps1` wraps `claude --print` (same as `run_claude_planner.ps1`), NOT `codex exec`. Do not reuse the `run_codex_reviewer.ps1` invocation pattern.
+- `Test-ReviewerOutputStrict` is dot-sourced in tests; do not change its function signature.
+- **Architect note**: user's proposal omitted `scripts/install_into_project.ps1`; added to scope per AGENTS.md templates contract ÔÇö when a file is added to `templates/`, the installer must be updated to copy it into target projects.
+- The `run_claude_reviewer` string-match lookup for the Claude-specific prompt (change D) is intentionally loose (substring, case-insensitive) so that wrapper variants like `.\scripts\run_claude_reviewer.ps1` or `run_claude_reviewer` all match.

@@ -2,32 +2,40 @@
 
 ## Changed files
 
-- `scripts/record_token_usage.ps1` — Added `ConvertFrom-CliTokenUsage` (three regex-ordered patterns); added `-Quality` parameter; JSONL now includes `quality` on every record.
-- `scripts/show_token_report.ps1` — Replaced report with totals, by-model / by-iteration aggregates, `Path::Combine` paths, empty/malformed JSONL handling ("No token usage records found."), `Write-Host` output, writes `.ai-loop/token_usage_summary.md` (non-fatal on error).
-- `scripts/ai_loop_auto.ps1` — Dot-sources recorder; merges Codex stdout+stderr into `codex_review.md`; after each review iteration calls `ConvertFrom-CliTokenUsage` + `Write-TokenUsageRecord` in a non-blocking try path.
-- `tests/test_token_usage.py` — Parser test for `ai_loop_auto.ps1`; conversion/write/report/chain tests via PowerShell subprocess.
-- `.ai-loop/project_summary.md` — Current stage + last completed task + pwsh Combine note for `show_token_report.ps1`.
-- `.gitignore` — No change (`token_usage_summary.md` already listed near `token_usage.jsonl`).
+- `scripts/run_claude_reviewer.ps1` — created (stdin prompt, `--model` parse, default `claude-haiku-4-5-20251001`, `claude --print`).
+- `templates/claude_task_reviewer_prompt.md` — created (architecture reviewer strict output rules).
+- `scripts/ai_loop_plan.ps1` — `-NoRevision`, Claude reviewer prompt resolution, lighter reviewer bundle when `-NoRevision`, blocking path `exit 2`, dot-source early return for tests, extended strict categories.
+- `scripts/install_into_project.ps1` — copies `claude_task_reviewer_prompt.md` into `.ai-loop/`.
+- `tests/test_claude_reviewer.py` — created.
+- `tests/test_orchestrator_validation.py` — strict-format mirror + parse smoke list + install assert + review invariants (collateral for green full suite).
+- `docs/workflow.md` — variant A usage note.
+- `.ai-loop/project_summary.md` — current architecture / templates / installer line updates.
+
+## Test-ReviewerOutputStrict regex (one-liners)
+
+- **Before:** `'^\s*-\s*\[(logic|complexity|scope|missing)\]\s+\S'`
+- **After:** `'^\s*-\s*\[(logic|complexity|scope|missing|architecture|safety)\]\s+\S'`
+
+## Lighter reviewer context (`-NoRevision`)
+
+In `scripts/ai_loop_plan.ps1`, inside the `for` review loop (~lines 248–259): `if ($NoRevision)` builds `$reviewPrompt` from reviewer template + `## AGENTS.md` + body + `## Project Summary` + summary body + `## Raw User ASK` + ask + `## Draft task.md` + draft; the `else` branch keeps the existing bundle including `## repo_map.md` and `## GENERATED task.md`.
+
+## `run_claude_reviewer.ps1` default model
+
+Confirmed: `claude-haiku-4-5-20251001`.
+
+## `install_into_project.ps1`
+
+Confirmed: `Copy-Item` from `templates\claude_task_reviewer_prompt.md` to `(Join-Path $TargetAiLoop "claude_task_reviewer_prompt.md")`.
 
 ## Tests
 
-- `python -m pytest -q` — **144 passed** (all tests; same run includes 14 tests in `test_token_usage.py`).
+- `python -m pytest -q tests/test_claude_reviewer.py` — **5 passed**.
+- `python -m pytest -q` — **151 passed** (1 PytestCacheWarning on Windows nodeids path).
 
-## Task-specific CLI
+Task verification parses: covered via `Parser::ParseFile` in tests; direct `powershell -NoProfile -Command ParseFile(...)` not re-run here (environment rejected that invocation); parse errors would have failed the new smoke test.
 
-- Verification `ParseFile` for the three `.ps1` scripts: covered by AST parser tests inside `tests/test_token_usage.py` (`test_*_parse_clean` + `test_ai_loop_auto_ps1_parse_clean`). Separate one-liner ParseFile invocation was not run in this shell (sandbox rejected); parity with CI is via pytest harness.
+## Remaining risks (variant B: auto-revision)
 
-## Implementation notes
-
-- Parsed patterns: Claude API JSON (`input_tokens`/`output_tokens`), OpenAI/Codex-style JSON (`prompt_tokens`/`completion_tokens`), Claude CLI plain text (`Input tokens:` / `Output tokens:` lines).
-- Codex hook reads **combined capture** written to `.ai-loop/codex_review.md` immediately after `Run-CodexReview` (stdout merged with stderr via `2>&1` before `Set-Content`), then parses that text — file holds the authoritative combined capture for downstream review and tokens.
-
-## Deferred / unchanged from spec
-
-- None of the forbidden files were touched. Model string stays literal `codex` when Codex emits no finer model identifier in merged output.
-
-## Remaining risks
-
-- Codex or other CLIs changing token/logging format could stop matches until patterns are extended.
-- `show_token_report.ps1` summary write can fail disk-permissions paths; surfaced as warnings only while the script exits 0.
-- JSON with both Claude and OpenAI key names could match the Claude branch first depending on substring order.
+- A future revision loop with Claude reviewer must decide whether blocking semantics stay human-only or merge with planner revision prompts without contradicting variant A’s `exit 2` contract.
+- Sharing one strict output schema across Codex and Claude remains necessary; new categories should stay additive to avoid breaking saved traces.

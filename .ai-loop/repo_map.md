@@ -30,6 +30,7 @@
 - `scripts/promote_session.ps1` — Draft snapshot destination: `.ai-loop/archive/rolls/` (timestamped filenames).
 - `scripts/record_token_usage.ps1` — $PSScriptRoot is empty when this file is dot-sourced from some -Command harnesses; fix to this file's directory.
 - `scripts/run_claude_planner.ps1` — No param block: keeps $input available for the pipeline.
+- `scripts/run_claude_reviewer.ps1` — No param block: keeps $input available for the pipeline.
 - `scripts/run_codex_reviewer.ps1` — No param block: keeps $input available for the pipeline.
 - `scripts/run_cursor_agent.ps1` — Invoke the Cursor agent CLI (node.exe) directly, reading the prompt from stdin.
 - `scripts/run_opencode_agent.ps1` — Invoke OpenCode (opencode run) as a drop-in replacement for run_cursor_agent.ps1.
@@ -40,6 +41,7 @@
 
 ## templates/
 
+- `templates/claude_task_reviewer_prompt.md` — Architecture Reviewer
 - `templates/codex_review_prompt.md` — Codex Review Prompt
 - `templates/draft_brief_prompt.md` — Cursor draft brief role (read-only)
 - `templates/implementer_summary_template.md` — Implementer summary
@@ -53,6 +55,7 @@
 ## tests/
 
 - `tests/test_ai_loop.py` — Unit tests for ai_loop.py pure helpers (stdlib-only module).
+- `tests/test_claude_reviewer.py` — Claude task reviewer (variant A) smoke tests.
 - `tests/test_filter_pytest_failures.py` — Tests for scripts/filter_pytest_failures.py.
 - `tests/test_orchestrator_validation.py` — Orchestrator checks: PowerShell AST parse + path-set delta semantics (task-first gate).
 - `tests/test_token_usage.py` — Token usage JSONL recorder + console report scripts.

@@ -49,6 +49,7 @@ Copy-Item (Join-Path $Root "templates\codex_review_prompt.md") (Join-Path $Targe
 Copy-Item (Join-Path $Root "templates\planner_prompt.md") (Join-Path $TargetAiLoop "planner_prompt.md") -Force
 Copy-Item (Join-Path $Root "templates\draft_brief_prompt.md") (Join-Path $TargetAiLoop "draft_brief_prompt.md") -Force
 Copy-Item (Join-Path $Root "templates\reviewer_prompt.md") (Join-Path $TargetAiLoop "reviewer_prompt.md") -Force
+Copy-Item (Join-Path $Root "templates\claude_task_reviewer_prompt.md") (Join-Path $TargetAiLoop "claude_task_reviewer_prompt.md") -Force
 Copy-Item (Join-Path $Root "templates\user_ask_template.md") (Join-Path $TargetAiLoop "user_ask_template.md") -Force
 Copy-Item (Join-Path $Root "templates\implementer_summary_template.md") (Join-Path $TargetAiLoop "implementer_summary_template.md") -Force
 

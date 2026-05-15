@@ -36,6 +36,8 @@ The orchestrator uses a file-based protocol:
 
 Before running task-first work, `scripts/ai_loop_plan.ps1` can regenerate `.ai-loop/task.md` from `AGENTS.md`, `.ai-loop/project_summary.md`, an optional `.ai-loop/repo_map.md`, and either `-Ask ...` or `.ai-loop/user_ask.md`. Pass `-WithDraft` for an optional Cursor read-only pre-pass (`-DraftCommand` defaults like the Cursor implementer wrapper); when that pass returns enough output, the Markdown is saved under `.ai-loop/task_draft_brief.md`, then appended **after `## USER ASK`** inside the Claude prompt under a labelled **Cursor Draft Brief** section (advisory-only). Wrapper failures or short replies log warnings and Claude planning proceeds without injecting a brief.
 
+**Variant A (Cursor planner + Claude architecture reviewer, single pass):** pass `-PlannerCommand` to your Cursor (or other) planner wrapper, `-ReviewerCommand` to `scripts/run_claude_reviewer.ps1`, plus `-WithReview -NoRevision`. The planner draft is reviewed once with a lighter prompt (no `repo_map.md` in the reviewer bundle). If the reviewer reports well-formed `ISSUES:`, the script writes `.ai-loop/planner_review_trace.md`, prints the issues in red, does **not** write `.ai-loop/task.md`, and exits `2` so you can revise the ask or planner setup manually. `NO_BLOCKING_ISSUES` writes `task.md` as usual. Malformed reviewer output still degrades like the Codex path (warning, `task.md` written).
+
 ## Start a new task
 
 Use this when `.ai-loop/task.md` contains a new implementation task:

@@ -9,57 +9,10 @@ param(
     [int]$MaxReviewIterations = 3,
     [string]$ReviewerCommand = ".\scripts\run_codex_reviewer.ps1",
     [string]$ReviewerModel = "",
+    [switch]$NoRevision,
     [switch]$WithDraft,
     [string]$DraftCommand = "run_cursor_agent.ps1"
 )
-$ErrorActionPreference = "Stop"
-$ProjectRoot = (Resolve-Path ".").Path
-if ($MaxReviewIterations -lt 1) { Write-Warning "MaxReviewIterations ($MaxReviewIterations) is below minimum; clamping to 1."; $MaxReviewIterations = 1 }
-if ($MaxReviewIterations -gt 3) {
-    Write-Warning "MaxReviewIterations ($MaxReviewIterations) exceeds hard cap of 3; clamping to 3 to bound reviewer/planner churn (hard cap cannot be overridden)."
-    $MaxReviewIterations = 3
-}
-$resolvedAsk = ""
-if (-not [string]::IsNullOrWhiteSpace($Ask)) { $resolvedAsk = $Ask }
-elseif (Test-Path -LiteralPath $AskFile) { $resolvedAsk = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $AskFile).Path) }
-else {
-    Write-Warning "No ask provided. Use -Ask `"...`" or create $AskFile."
-    exit 1
-}
-$planPromptPath = Join-Path $ProjectRoot ".ai-loop\planner_prompt.md"
-if (-not (Test-Path -LiteralPath $planPromptPath)) { $planPromptPath = Join-Path $ProjectRoot "templates\planner_prompt.md" }
-if (-not (Test-Path -LiteralPath $planPromptPath)) {
-    Write-Warning "Planner prompt not found at .ai-loop\planner_prompt.md or templates\planner_prompt.md."
-    exit 1
-}
-Write-Host "Using planner prompt: $planPromptPath"
-$agentsPath = Join-Path $ProjectRoot "AGENTS.md"
-$summaryPath = Join-Path $ProjectRoot ".ai-loop\project_summary.md"
-$cmdPath = $PlannerCommand
-if (-not (Test-Path -LiteralPath $cmdPath)) {
-    $rel = $PlannerCommand -replace '^\.\\', ''
-    $alt = Join-Path $ProjectRoot $rel
-    if (Test-Path -LiteralPath $alt) { $cmdPath = $alt }
-}
-$reviewerCmdPath = $null
-if ($WithReview) {
-    $reviewerCmdPath = $ReviewerCommand
-    if (-not (Test-Path -LiteralPath $reviewerCmdPath)) {
-        $relr = $ReviewerCommand -replace '^\.\\', ''
-        $altr = Join-Path $ProjectRoot $relr
-        if (Test-Path -LiteralPath $altr) { $reviewerCmdPath = $altr }
-    }
-    $revHere = Join-Path $ProjectRoot ".ai-loop\reviewer_prompt.md"
-    $revTmpl = Join-Path $ProjectRoot "templates\reviewer_prompt.md"
-    if (-not (Test-Path -LiteralPath $reviewerCmdPath)) { Write-Warning "missing $ReviewerCommand Path: $reviewerCmdPath"; exit 1 }
-    if (-not ((Test-Path -LiteralPath $revHere) -or (Test-Path -LiteralPath $revTmpl))) {
-        Write-Warning "Reviewer prompt not found at .ai-loop\reviewer_prompt.md or templates\reviewer_prompt.md."
-        exit 1
-    }
-}
-if (-not (Test-Path -LiteralPath $agentsPath)) { Write-Warning "missing AGENTS.md Path: $agentsPath"; exit 1 }
-if (-not (Test-Path -LiteralPath $summaryPath)) { Write-Warning "missing .ai-loop/project_summary.md Path: $summaryPath"; exit 1 }
-if (-not (Test-Path -LiteralPath $cmdPath)) { Write-Warning "missing $PlannerCommand Path: $cmdPath"; exit 1 }
 
 function Test-PlannerOutputSanity {
     param([Parameter(Mandatory)][string]$Output)
@@ -103,7 +56,7 @@ function Test-ReviewerOutputStrict {
             }
             return @{ Ok = $false }
         }
-        if (-not ($ln -match '^\s*-\s*\[(logic|complexity|scope|missing)\]\s+\S')) {
+        if (-not ($ln -match '^\s*-\s*\[(logic|complexity|scope|missing|architecture|safety)\]\s+\S')) {
             return @{ Ok = $false }
         }
         $bullets++
@@ -129,6 +82,69 @@ function Get-FilesInScopeSummary {
     }
     return $items
 }
+
+if ($MyInvocation.InvocationName -eq '.') { return }
+
+$ErrorActionPreference = "Stop"
+$ProjectRoot = (Resolve-Path ".").Path
+if ($MaxReviewIterations -lt 1) { Write-Warning "MaxReviewIterations ($MaxReviewIterations) is below minimum; clamping to 1."; $MaxReviewIterations = 1 }
+if ($MaxReviewIterations -gt 3) {
+    Write-Warning "MaxReviewIterations ($MaxReviewIterations) exceeds hard cap of 3; clamping to 3 to bound reviewer/planner churn (hard cap cannot be overridden)."
+    $MaxReviewIterations = 3
+}
+if ($NoRevision -and -not $WithReview) { Write-Warning "-NoRevision has no effect without -WithReview" }
+$resolvedAsk = ""
+if (-not [string]::IsNullOrWhiteSpace($Ask)) { $resolvedAsk = $Ask }
+elseif (Test-Path -LiteralPath $AskFile) { $resolvedAsk = [System.IO.File]::ReadAllText((Resolve-Path -LiteralPath $AskFile).Path) }
+else {
+    Write-Warning "No ask provided. Use -Ask `"...`" or create $AskFile."
+    exit 1
+}
+$planPromptPath = Join-Path $ProjectRoot ".ai-loop\planner_prompt.md"
+if (-not (Test-Path -LiteralPath $planPromptPath)) { $planPromptPath = Join-Path $ProjectRoot "templates\planner_prompt.md" }
+if (-not (Test-Path -LiteralPath $planPromptPath)) {
+    Write-Warning "Planner prompt not found at .ai-loop\planner_prompt.md or templates\planner_prompt.md."
+    exit 1
+}
+Write-Host "Using planner prompt: $planPromptPath"
+$agentsPath = Join-Path $ProjectRoot "AGENTS.md"
+$summaryPath = Join-Path $ProjectRoot ".ai-loop\project_summary.md"
+$cmdPath = $PlannerCommand
+if (-not (Test-Path -LiteralPath $cmdPath)) {
+    $rel = $PlannerCommand -replace '^\.\\', ''
+    $alt = Join-Path $ProjectRoot $rel
+    if (Test-Path -LiteralPath $alt) { $cmdPath = $alt }
+}
+$reviewerCmdPath = $null
+if ($WithReview) {
+    $reviewerCmdPath = $ReviewerCommand
+    if (-not (Test-Path -LiteralPath $reviewerCmdPath)) {
+        $relr = $ReviewerCommand -replace '^\.\\', ''
+        $altr = Join-Path $ProjectRoot $relr
+        if (Test-Path -LiteralPath $altr) { $reviewerCmdPath = $altr }
+    }
+    if (-not (Test-Path -LiteralPath $reviewerCmdPath)) { Write-Warning "missing $ReviewerCommand Path: $reviewerCmdPath"; exit 1 }
+    $revHere = Join-Path $ProjectRoot ".ai-loop\reviewer_prompt.md"
+    $revTmpl = Join-Path $ProjectRoot "templates\reviewer_prompt.md"
+    $claudeRevHere = Join-Path $ProjectRoot ".ai-loop\claude_task_reviewer_prompt.md"
+    $claudeRevTmpl = Join-Path $ProjectRoot "templates\claude_task_reviewer_prompt.md"
+    $revPathOk = $false
+    if ($ReviewerCommand -match 'run_claude_reviewer') {
+        if (Test-Path -LiteralPath $claudeRevHere) { $revPathOk = $true }
+        elseif (Test-Path -LiteralPath $claudeRevTmpl) { $revPathOk = $true }
+        else { Write-Warning "Claude task reviewer prompt not found at .ai-loop\claude_task_reviewer_prompt.md or templates\claude_task_reviewer_prompt.md; falling back to Codex reviewer prompt files." }
+    }
+    if (-not $revPathOk) {
+        if (-not ((Test-Path -LiteralPath $revHere) -or (Test-Path -LiteralPath $revTmpl))) {
+            Write-Warning "Reviewer prompt not found at .ai-loop\reviewer_prompt.md or templates\reviewer_prompt.md."
+            exit 1
+        }
+    }
+}
+if (-not (Test-Path -LiteralPath $agentsPath)) { Write-Warning "missing AGENTS.md Path: $agentsPath"; exit 1 }
+if (-not (Test-Path -LiteralPath $summaryPath)) { Write-Warning "missing .ai-loop/project_summary.md Path: $summaryPath"; exit 1 }
+if (-not (Test-Path -LiteralPath $cmdPath)) { Write-Warning "missing $PlannerCommand Path: $cmdPath"; exit 1 }
+
 $planPromptBody = [System.IO.File]::ReadAllText($planPromptPath)
 $agentsBody = [System.IO.File]::ReadAllText($agentsPath)
 $summaryBody = [System.IO.File]::ReadAllText($summaryPath)
@@ -217,19 +233,38 @@ try {
     if (-not $sanityInit.Ok) { $script:ExitCode = 2; throw $sanityInit.Reason }
     $writeText = $output
     if ($WithReview) {
-        $reviewerPromptPath = Join-Path $ProjectRoot ".ai-loop\reviewer_prompt.md"
-        if (-not (Test-Path -LiteralPath $reviewerPromptPath)) { $reviewerPromptPath = Join-Path $ProjectRoot "templates\reviewer_prompt.md" }
+        if ($NoRevision) { $MaxReviewIterations = 1 }
+        $reviewerPromptPath = $null
+        if ($ReviewerCommand -match 'run_claude_reviewer') {
+            if (Test-Path -LiteralPath $claudeRevHere) { $reviewerPromptPath = $claudeRevHere }
+            elseif (Test-Path -LiteralPath $claudeRevTmpl) { $reviewerPromptPath = $claudeRevTmpl }
+        }
+        if (-not $reviewerPromptPath) {
+            $reviewerPromptPath = Join-Path $ProjectRoot ".ai-loop\reviewer_prompt.md"
+            if (-not (Test-Path -LiteralPath $reviewerPromptPath)) { $reviewerPromptPath = Join-Path $ProjectRoot "templates\reviewer_prompt.md" }
+        }
         Write-Host "Using reviewer prompt: $reviewerPromptPath"
         $reviewerTemplateBody = [System.IO.File]::ReadAllText($reviewerPromptPath)
         $traceLines = New-Object System.Collections.Generic.List[string]
         foreach ($tl in "# Planner review trace", "", "Iterations max: $MaxReviewIterations", "") { [void]$traceLines.Add($tl) }
         $current = $output
         $reviewLoopExitKind = "max_iterations"
+        $blockNoWrite = $false
         $revPw = @("--workspace", $ProjectRoot)
         if (-not [string]::IsNullOrWhiteSpace($ReviewerModel)) { $revPw += @("--model", $ReviewerModel) }
         for ($i = 1; $i -le $MaxReviewIterations; $i++) {
             Write-Host "Review iteration $i / $MaxReviewIterations ..."
-            $reviewPrompt = @($reviewerTemplateBody, "## AGENTS.md", $agentsBody, "## project_summary.md", $summaryBody, "## repo_map.md", $repoMapBody, "## USER ASK", $resolvedAsk, "## GENERATED task.md", $current) -join "`n`n"
+            if ($NoRevision) {
+                $reviewPrompt = @(
+                    $reviewerTemplateBody,
+                    "## AGENTS.md", $agentsBody,
+                    "## Project Summary", $summaryBody,
+                    "## Raw User ASK", $resolvedAsk,
+                    "## Draft task.md", $current
+                ) -join "`n`n"
+            } else {
+                $reviewPrompt = @($reviewerTemplateBody, "## AGENTS.md", $agentsBody, "## project_summary.md", $summaryBody, "## repo_map.md", $repoMapBody, "## USER ASK", $resolvedAsk, "## GENERATED task.md", $current) -join "`n`n"
+            }
             $issuesLines = @($reviewPrompt | & $reviewerCmdPath @revPw)
             $issues = ($issuesLines | ForEach-Object { "$_" }) -join "`n"
             if ($LASTEXITCODE -ne 0) {
@@ -243,8 +278,8 @@ try {
             $revFmt = Test-ReviewerOutputStrict -Output $issues
             if (-not $revFmt.Ok) {
                 [void]$traceLines.Add("## Iteration $i - REVIEW_STATUS: REVIEWER_OUTPUT_MALFORMED")
-                [void]$traceLines.Add("Reviewer output was not exactly NO_BLOCKING_ISSUES nor a strict ISSUES: list (each non-blank issue line must be '- [logic|complexity|scope|missing] <text>'). Keeping current draft. task.md was written WITHOUT a successful Codex verdict.")
-                Write-Warning "Reviewer output on iteration $i is MALFORMED (strict format: NO_BLOCKING_ISSUES only, or ISSUES: with only '- [logic|complexity|scope|missing] ...' lines). Keeping current draft, breaking loop. Treat as if review did not happen."
+                [void]$traceLines.Add("Reviewer output was not exactly NO_BLOCKING_ISSUES nor a strict ISSUES: list (each non-blank issue line must be '- [logic|complexity|scope|missing|architecture|safety] <text>'). Keeping current draft. task.md was written WITHOUT a successful Codex verdict.")
+                Write-Warning "Reviewer output on iteration $i is MALFORMED (strict format: NO_BLOCKING_ISSUES only, or ISSUES: with only '- [logic|complexity|scope|missing|architecture|safety] ...' lines). Keeping current draft, breaking loop. Treat as if review did not happen."
                 $reviewLoopExitKind = "degraded"
                 break
             }
@@ -252,6 +287,15 @@ try {
                 [void]$traceLines.Add("Exit: NO_BLOCKING_ISSUES at iteration $i.")
                 $reviewLoopExitKind = "no_issues"
                 Write-Host "Reviewer: NO_BLOCKING_ISSUES $([char]0x2014) exited at iteration $i."
+                break
+            }
+            if ($NoRevision) {
+                $tracePathEarly = Join-Path $ProjectRoot ".ai-loop\planner_review_trace.md"
+                $traceEarly = @("REVIEW_STATUS: BLOCKING_ISSUES_FOUND -- task.md was NOT written", $issues) -join "`n"
+                Set-Content -LiteralPath $tracePathEarly -Value $traceEarly -Encoding UTF8
+                Write-Host $issues -ForegroundColor Red
+                Write-Host "Wrote review trace: $tracePathEarly"
+                $blockNoWrite = $true
                 break
             }
             $revisionInstructions = (@(
@@ -292,6 +336,11 @@ try {
                 break
             }
             $current = $revised
+        }
+        if ($blockNoWrite) {
+            if ($backupMade) { Move-Item -Force -LiteralPath "$Out.bak" -Destination $Out }
+            $script:ExitCode = 2
+            return
         }
         if ($reviewLoopExitKind -eq "max_iterations") {
             [void]$traceLines.Add("Exit: MaxReviewIterations ($MaxReviewIterations) reached.")

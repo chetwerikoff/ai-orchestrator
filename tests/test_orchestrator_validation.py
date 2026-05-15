@@ -1081,7 +1081,7 @@ def test_planner_scripts_parse_cleanly() -> None:
     ps = _powershell_exe()
     if not ps:
         pytest.skip("No pwsh or powershell on PATH")
-    for name in ("ai_loop_plan.ps1", "run_claude_planner.ps1", "run_codex_reviewer.ps1"):
+    for name in ("ai_loop_plan.ps1", "run_claude_planner.ps1", "run_codex_reviewer.ps1", "run_claude_reviewer.ps1"):
         script = _SCRIPTS / name
         assert script.is_file(), f"missing {script}"
         escaped = str(script.resolve()).replace("'", "''")
@@ -1167,7 +1167,7 @@ def test_run_codex_reviewer_initializes_exit_code_before_try() -> None:
 def test_planner_related_ps1_has_no_utf8_em_dash_literal_bytes() -> None:
     """Planner/reviewer wrappers must not embed UTF-8 U+2014 bytes (PS 5.1 source corruption)."""
     em = b"\xe2\x80\x94"
-    for name in ("run_codex_reviewer.ps1", "run_claude_planner.ps1", "ai_loop_plan.ps1"):
+    for name in ("run_codex_reviewer.ps1", "run_claude_planner.ps1", "run_claude_reviewer.ps1", "ai_loop_plan.ps1"):
         data = (_SCRIPTS / name).read_bytes()
         assert em not in data, f"{name} must not contain literal UTF-8 em dash; use $([char]0x2014)"
 
@@ -1202,6 +1202,7 @@ def test_no_emdash_bytes_in_ps1_scripts() -> None:
 def test_ai_loop_plan_review_invariants() -> None:
     text = (_SCRIPTS / "ai_loop_plan.ps1").read_text(encoding="utf-8")
     assert "[switch]$WithReview" in text
+    assert "[switch]$NoRevision" in text
     assert "[switch]$WithDraft" in text
     assert "[string]$DraftCommand" in text
     assert "[int]$MaxReviewIterations = 3" in text
@@ -1223,6 +1224,7 @@ def test_ai_loop_plan_review_invariants() -> None:
         "REVIEW_STATUS: FAILED",
         "REVIEW_STATUS: PLANNER_REVISION_FAILED",
         "REVIEW_STATUS: REVISION_SANITY_FAILED",
+        "BLOCKING_ISSUES_FOUND",
         "Architect note:",
         "simplicity of implementation wins",
     ):
@@ -1286,7 +1288,7 @@ def test_planner_output_normalization_strips_preamble_only_when_task_exists(body
     assert _normalize_planner_output(body) == expected
 
 
-_ISSUE_BULLET_RE = re.compile(r"^\s*-\s*\[(logic|complexity|scope|missing)\]\s+\S")
+_ISSUE_BULLET_RE = re.compile(r"^\s*-\s*\[(logic|complexity|scope|missing|architecture|safety)\]\s+\S")
 
 
 def _reviewer_output_strict_ok(output: str) -> bool:
@@ -1323,6 +1325,8 @@ def _reviewer_output_strict_ok(output: str) -> bool:
         ("ISSUES:\n- [complexity] too big", True),
         ("ISSUES:\n- [scope] drift", True),
         ("ISSUES:\n- [missing] nothing", True),
+        ("ISSUES:\n- [architecture] conflict", True),
+        ("ISSUES:\n- [safety] hazard", True),
         ("ISSUES:\n- [logic]x", False),
         ('ISSUES:\n- [Logic] case', False),
         ("ISSUES:\n- [logic] ok\njunk after", False),
@@ -1338,7 +1342,7 @@ def test_install_copies_reviewer_files() -> None:
     text = (_SCRIPTS / "install_into_project.ps1").read_text(encoding="utf-8")
     assert "run_codex_reviewer.ps1" in text
     assert (
-        'Copy-Item (Join-Path $Root "templates\\reviewer_prompt.md") (Join-Path $TargetAiLoop "reviewer_prompt.md")'
+        'Copy-Item (Join-Path $Root "templates\\claude_task_reviewer_prompt.md") (Join-Path $TargetAiLoop "claude_task_reviewer_prompt.md")'
         in text
     )
 
