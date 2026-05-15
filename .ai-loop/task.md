@@ -1,134 +1,121 @@
-﻿# Task: Add order field and task queue save to planner
+﻿# Task: completion-banner
 
 ## Project context
 
 - `AGENTS.md`
-- `.ai-loop/task.md` (this file)
+- `.ai-loop/task.md`
 - `.ai-loop/project_summary.md`
-- `.ai-loop/repo_map.md`
 
 ## Goal
 
-Extend the planner output format with an optional `## Order` section. When `ai_loop_plan.ps1` writes `.ai-loop/task.md` and finds a positive integer in `## Order`, it copies the file to `tasks/NNN_slug.md` (zero-padded, slug derived from the `# Task:` line). When `## Order` is absent or blank the script behaves exactly as before. The planner prompt is updated so Claude knows when and how to emit the field, allowing a series of related tasks to be queued without altering the auto-loop runtime.
+Replace the `Write-Section "AI LOOP TASK-FIRST START"` call at the top of the main body and the `Write-Section "AI LOOP TASK-FIRST DONE"` call at the very end of `scripts/ai_loop_task_first.ps1` with versions that include the task short name parsed from the first line of `.ai-loop/task.md`. If the name cannot be read, emit the banner without it. No other behaviour, exit codes, or scripts change.
+
+Note: `Write-Section` (defined inside the script) already emits the three-line `==============================` wrapper. The only change is the string passed to it.
 
 ## Scope
 
 Allowed:
-- Add `## Order` section to the task template and planner prompt
-- Add post-generation queue-save logic to `ai_loop_plan.ps1`
-- Add tests for order parsing and slug derivation
-- Create `tasks/` directory if it does not exist (non-fatal)
+- Edit `scripts/ai_loop_task_first.ps1` to emit the banner
+- Add one test to `tests/test_orchestrator_validation.py` verifying the banner separator string exists in the script
 
 Not allowed:
-- Changing any orchestrator runtime scripts (`ai_loop_auto.ps1`, `ai_loop_task_first.ps1`, `continue_ai_loop.ps1`)
-- Changing `SafeAddPaths` in any script or `docs/safety.md`
-- Generating automatic prerequisite lists
-- Modifying `scripts/install_into_project.ps1` (it already copies both touched templates)
-- Touching `ai_loop.py`
+- Changing exit codes or loop flow
+- Adding new files
+- Touching `ai_loop_auto.ps1`, `continue_ai_loop.ps1`, or any other script
+- Modifying `task.md` content (only reading it)
 
 ## Files in scope
 
-- `templates/task.md`  add `## Order` section (optional, last section)
-- `templates/planner_prompt.md`  add `## Order` to the Output format list with usage rules
-- `scripts/ai_loop_plan.ps1`  add queue-save block after the final task write (Ôëñ 18 lines)
-- `tests/test_orchestrator_validation.py`  add order-parsing and slug-derivation tests
+- `scripts/ai_loop_task_first.ps1`
+- `tests/test_orchestrator_validation.py`
 
 ## Files out of scope
 
 - `docs/archive/**`
 - `.ai-loop/_debug/**`
 - `ai_loop.py`
-- `scripts/ai_loop_auto.ps1`
-- `scripts/ai_loop_task_first.ps1`
-- `scripts/continue_ai_loop.ps1`
-- `scripts/install_into_project.ps1`
-- `docs/safety.md`
+- All other scripts not listed above
 
 ## Required behavior
 
-1. **`templates/task.md`**: append a final `## Order` section with a one-line comment describing it as optional; default content is blank so existing tasks are unaffected.
-2. **`templates/planner_prompt.md`**: in the `## Output format` bullet list, add `## Order` as the last item. Rules for the planner: omit or leave blank for standalone tasks; for a series, set consecutive integers starting at 1; lower numbers run first; each task in a series must be self-contained (no cross-task variable references).
-3. **`scripts/ai_loop_plan.ps1`** ÔÇö after the line that writes the final `.ai-loop/task.md` (end of the review loop or direct write):
-   - Read the written task file.
-   - Match `(?m)^##\s+Order\s*\r?\n\s*(\d+)` against its content.
-   - If matched and the captured integer `$N` is ÔëÑ 1:
-     - Extract the short name from `# Task: <short name>` (first line of file).
-     - Derive slug: lowercase, collapse any run of non-alphanumeric chars to a single underscore, strip leading/trailing underscores, truncate at 40 chars.
-     - Compute `$dest = "tasks/{0:000}_{1}.md" -f $N, $slug` relative to the repo root (`Split-Path $PSScriptRoot -Parent`).
-     - Create the `tasks/` directory if absent (non-fatal `New-Item -Force -ItemType Directory`).
-     - If `$dest` already exists, emit `Write-Warning "Overwriting queue file: $dest"`.
-     - Copy the task file to `$dest` with `-Force`.
-     - Emit `Write-Host "Queue: $dest"`.
-   - If match fails or capture is not a positive integer, skip silently.
-   - Queue save errors must not set exit code; wrap in `try/catch` with `Write-Warning`.
-4. Behavior when `## Order` is absent or blank: no `tasks/` write, no warning, identical to current behavior.
-5. The `tasks/` path used is always relative to the repo root (the directory containing `scripts/`), not the caller's working directory.
-6. The write to `.ai-loop/task.md` always occurs first (normal planner behavior, unchanged). The `tasks/NNN_slug.md` write is an additional copy made immediately after; both destinations receive identical content. The planner's primary output contract ÔÇö writing `.ai-loop/task.md` ÔÇö is not altered.
+1. Near the top of the main script body (just before or just after the `Assert-FileExists` calls, around line 347), read the first line of `$TaskPath`. If it matches `^#\s*Task:\s*(.+)`, capture the trimmed task name into `$taskName`; otherwise set `$taskName = ""`. This read must be silent/non-fatal — use `try/catch` so a missing file does not abort the script.
+
+2. Replace `Write-Section "AI LOOP TASK-FIRST START"` (currently line 346) with:
+   - If `$taskName` is non-empty: `Write-Section "AI LOOP TASK: $taskName START"`
+   - Fallback (name empty): `Write-Section "AI LOOP TASK-FIRST START"` (unchanged)
+
+3. Replace `Write-Section "AI LOOP TASK-FIRST DONE"` (currently the last line) with:
+   - If `$taskName` is non-empty: `Write-Section "AI LOOP TASK: $taskName DONE"`
+   - Fallback: `Write-Section "AI LOOP TASK-FIRST DONE"` (unchanged)
+
+4. Because both banners need `$taskName`, extract it once before the first `Write-Section` call and reuse the same variable at the end.
+
+5. The `Write-Section` function itself must not be modified. No colour changes. No other `Write-Section` or `Write-Host` calls change.
 
 ## Tests
 
-Add to `tests/test_orchestrator_validation.py`:
+Add two tests in `tests/test_orchestrator_validation.py`:
 
-- `test_order_regex_match`: verify the PS-equivalent Python regex `r'(?m)^##\s+Order\s*\r?\n\s*(\d+)'` matches a task string with `## Order\n2` and captures `"2"`; verify it does not match when the section is blank or absent.
-- `test_order_slug_derivation`: verify slug logic (lowercase, non-alnumÔåÆunderscore, collapse, strip, truncate) for representative inputs: `"Fix Dashboard Generation"` ÔåÆ `"fix_dashboard_generation"`, `"Add order/queue support!"` ÔåÆ `"add_order_queue_support"`, a 60-char name truncates to Ôëñ 40 chars.
-- `test_order_queue_filename_format`: verify `"{0:000}_{1}.md".format(3, "fix_x")` ÔåÆ `"003_fix_x.md"` (documents the naming contract).
-- Do **not** add a subprocess integration test for the full `ai_loop_plan.ps1` queue-save path in this task (requires a live planner CLI mock; defer to a follow-up task if needed).
+```python
+def test_completion_banner_separator_present():
+    """ai_loop_task_first.ps1 must contain the banner separator string."""
+    content = Path("scripts/ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "==============================" in content, \
+        "completion banner separator missing from ai_loop_task_first.ps1"
+
+def test_task_name_banners_present():
+    """Both START and DONE banners must reference the task name variable."""
+    content = Path("scripts/ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "AI LOOP TASK:" in content and "START" in content, \
+        "START banner with task name missing from ai_loop_task_first.ps1"
+    assert "AI LOOP TASK:" in content and "DONE" in content, \
+        "DONE banner with task name missing from ai_loop_task_first.ps1"
+```
 
 Run: `python -m pytest -q`
 
 ## Verification
 
 ```powershell
-# 1. Parse check for the modified script
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan.ps1', [ref]`$null, [ref]`$null)"
+# 1. PowerShell parse check
+powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]`$null, [ref]`$null)"
 
-# 2. Unit tests
+# 2. Confirm banner separator is present
+powershell -NoProfile -Command "if (!(Select-String -Path 'scripts\ai_loop_task_first.ps1' -Pattern '={10}')) { exit 1 }"
+
+# 3. Confirm START banner with task name is present
+powershell -NoProfile -Command "if (!(Select-String -Path 'scripts\ai_loop_task_first.ps1' -Pattern 'AI LOOP TASK:.*START')) { exit 1 }"
+
+# 4. Confirm DONE banner with task name is present
+powershell -NoProfile -Command "if (!(Select-String -Path 'scripts\ai_loop_task_first.ps1' -Pattern 'AI LOOP TASK:.*DONE')) { exit 1 }"
+
+# 5. Full test suite
 python -m pytest -q
-
-# 3. Manual smoke: confirm ## Order section appears in templates/task.md
-Select-String -Path templates\task.md -Pattern '^## Order'
-
-# 4. Manual smoke: confirm planner prompt mentions ## Order
-Select-String -Path templates\planner_prompt.md -Pattern 'Order'
 ```
 
 ## Implementer summary requirements
 
-1. List every file changed with one-line description of what changed.
-2. State regex used for order parsing and slug derivation.
-3. Report test count and pass/fail result.
-4. Note any edge cases handled beyond the spec (or "none").
-5. List any remaining risks (e.g., `tasks/` not in `SafeAddPaths` ÔÇö queue files not auto-committed).
+1. Which lines in `ai_loop_task_first.ps1` were changed and what they now contain (show before/after).
+2. How the task-name extraction was written in PowerShell (the regex and try/catch structure).
+3. Test count before/after.
+4. Edge cases handled: file missing, regex no-match (confirm fallback emits original string).
+5. Remaining risks (if any).
 
 ## Project summary update
 
-Record: "C10: `## Order` section added to task template and planner prompt. `ai_loop_plan.ps1` saves numbered queue copies to `tasks/NNN_slug.md` when order is set. Non-fatal; auto-loop unaffected. `tasks/` is not currently in `SafeAddPaths` ÔÇö queue files are written but not auto-committed; a follow-up task is needed to extend `SafeAddPaths` if auto-commit of queue files is desired."
+No update needed.
 
 ## Output hygiene
 
-- Do not duplicate task content into `implementer_summary.md` (summary only).
-- Do not write to `.ai-loop/_debug/` unless debugging raw output.
-- Do not `git commit` or `git push`.
+- Do not duplicate task content into the implementer summary.
+- Do not write to `.ai-loop/_debug/`.
+- Do not commit.
 - Do not write to `docs/archive/`.
 
 ## Important
 
-**Architect notes ÔÇö divergences from user's proposed implementation and reviewer rejections:**
-
-1. **No automatic prerequisites list.** The user proposed: "if order > 1, list prerequisite tasks in the file." Dropped. Generating a correct prerequisites list requires tracking what the NÔêÆ1 task was named after slug derivation, which couples tasks at write time and adds ~30 lines with fragile state. The ordering itself (001 before 002) is the prerequisite signal; human operators read `ls tasks/`. A future task can add a `## Prerequisites` section if the need becomes concrete.
-
-2. **`## Order` is a markdown section, not a frontmatter key.** The user wrote `order=3` style. Using a section header is consistent with every other section in `task.md` and requires no YAML/TOML parser. The regex `(?m)^## Order\n\s*(\d+)` is unambiguous.
-
-3. **Order 1 also saves to `tasks/`.** Any task with `## Order` set (including 1) is a "series" task and gets queued. Omitting the section entirely is the signal for a standalone task. This is simpler than a special-case for N=1.
-
-4. **`tasks/` is not in `SafeAddPaths`.** Confirmed by reading the literal in `AGENTS.md`: `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,pyrightconfig.json,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md` ÔÇö `tasks/` does not appear. Adding it requires updating three PS1 scripts and `docs/safety.md` in sync ÔÇö a separate ~80-line task per the AGENTS.md templates contract. Queue files written to `tasks/` will exist on disk but will not be auto-committed by the orchestrator until `SafeAddPaths` is extended.
-
-5. **Assumption: repo root is `(Split-Path $PSScriptRoot -Parent)` from within `scripts/ai_loop_plan.ps1`.** The existing script already uses `$PSScriptRoot` for relative paths, so this is consistent with the current pattern.
-
-6. **`install_into_project.ps1` needs no changes** because it already copies `templates/task.md` and `templates/planner_prompt.md` verbatim; the template edits propagate on next reinstall automatically.
-
-7. **Architect note: rejected logic:step-3-contradiction** ÔÇö The reviewer claims steps 3 and 6 contradict the ASK by writing `.ai-loop/task.md` before the queue save. There is no contradiction: `.ai-loop/task.md` is the planner's normal primary output (unchanged behavior); `tasks/NNN_slug.md` is an additional copy made immediately after. Both destinations receive identical content. Step 6 in `## Required behavior` was added explicitly to document this dual-write and eliminate ambiguity. The USER ASK does not say the task should *only* go to `tasks/` ÔÇö it says the planner should "save to `tasks/`"; writing to both locations fulfils that requirement while preserving the existing contract.
-
-8. **Architect note: rejected logic:safepath-claim** ÔÇö The reviewer asserts "`tasks/` is in the default `SafeAddPaths` literal." This is factually incorrect. The literal in `AGENTS.md` does not include `tasks/`. The project summary update statement is therefore accurate as written.
-
-9. **Architect note: rejected missing:prerequisites** ÔÇö The reviewer re-raises the prerequisite list requirement already deliberated in note #1. The decision stands: generating prerequisites at write time requires fragile cross-task state tracking and contradicts the simplicity policy (AGENTS.md). The numeric filename prefix is the ordering signal.
+- The task name extraction reads only the first line of `$TaskPath`; no full parse is needed. Failure to read must be silent (non-fatal) — the banner still emits without the name (original text).
+- `ai_loop_task_first.ps1` already reads `task.md` in `Get-TaskScopeBlocks` and `Invoke-ImplementerImplementation` using `Get-Content -LiteralPath ... -Raw -Encoding UTF8`. The implementer should use the same one-liner (`(Get-Content -LiteralPath $TaskPath -TotalCount 1 -Encoding UTF8 -ErrorAction SilentlyContinue)`) for the first-line read rather than introducing a new helper function.
+- Both `Write-Section` calls must use the same `$taskName` variable extracted once at the top of the main body, not two separate reads.
+- Architect note: fallback is the original banner text (`AI LOOP TASK-FIRST START` / `AI LOOP TASK-FIRST DONE`), not a placeholder like `UNKNOWN TASK`.
+- Architect note: the format `AI LOOP TASK: <name> START` / `AI LOOP TASK: <name> DONE` keeps output grep-friendly and unambiguous in CI logs.

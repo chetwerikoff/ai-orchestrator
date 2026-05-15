@@ -1,34 +1,47 @@
-﻿# Implementer summary
+﻿# Implementer summary — completion-banner
 
 ## Changed files
 
-- `templates/task.md` — appended optional final `## Order` section with HTML note; blank-by-default for standalone tasks.
-- `templates/planner_prompt.md` — documented `## Order` in Output format (series numbering rules, self-contained tasks).
-- `scripts/ai_loop_plan.ps1` — after successful `.ai-loop/task.md` write, optional queue copy to repo-root `tasks/NNN_slug.md` when `## Order` captures a positive integer; non-fatal `try/catch`.
-- `tests/test_orchestrator_validation.py` — `test_order_regex_match`, `test_order_slug_derivation`, `test_order_queue_filename_format`; extended `test_ai_loop_plan_structural_invariants` for queue-save markers.
-- `.ai-loop/project_summary.md` — C10 planner queue behavior and Current Stage / Last Completed Task updates.
+- `scripts/ai_loop_task_first.ps1` — task short name from first line of `$TaskPath`; conditional START/DONE `Write-Section` strings; `$taskName` extracted once and reused.
+- `tests/test_orchestrator_validation.py` — `test_completion_banner_separator_present`, `test_task_name_banners_present`; C02 harness truncates after `$ResultPathRelative = ".ai-loop/implementer_result.md"` (replacing `Write-Section "AI LOOP TASK-FIRST START"` anchor, which no longer appears only once).
 
-## Regex / slug (mirror of planner script)
+## `ai_loop_task_first.ps1` (before → after)
 
-- Order capture: `(?m)^##\s+Order\s*\r?\n\s*(\d+)`
-- Slug: lowercase → replace runs of non-alphanumeric with `_` → strip leading/trailing `_` → truncate to 40 chars and trim trailing `_`.
-- Queue filename: PowerShell ``tasks\{0:000}_{1}.md -f $N, $slug``; pytest uses Python ``"{0:03d}_{1}.md".format(...)`` (same zero-padding width; Python `{0:000}` is not the PS `-f` specifier).
+1. **After** `$ResultPathRelative = ...` **(new block)**  
+   - Before: *(absent)*  
+   - After: `$taskName = ""` → `try { $firstLine = Get-Content -LiteralPath $TaskPath -TotalCount 1 -Encoding UTF8 -ErrorAction SilentlyContinue; if ($null -ne $firstLine -and [string]$firstLine -match '^\s*#\s*Task:\s*(.+)$') { $taskName = $Matches[1].Trim() } } catch { $taskName = "" }`
+
+2. **START banner** (formerly line 346)  
+   - Before: `Write-Section "AI LOOP TASK-FIRST START"`  
+   - After: `if ($taskName) { Write-Section "AI LOOP TASK: $taskName START" } else { Write-Section "AI LOOP TASK-FIRST START" }`
+
+3. **DONE banner** (final lines)  
+   - Before: `Write-Section "AI LOOP TASK-FIRST DONE"`  
+   - After: `if ($taskName) { Write-Section "AI LOOP TASK: $taskName DONE" } else { Write-Section "AI LOOP TASK-FIRST DONE" }`
+
+## Task-name extraction (PowerShell)
+
+- Read: `Get-Content -LiteralPath $TaskPath -TotalCount 1 -Encoding UTF8 -ErrorAction SilentlyContinue`
+- Regex: `^\s*#\s*Task:\s*(.+)$` on `[string]$firstLine`; group 1 `.Trim()`
+- Outer `try/catch`: any throw → `$taskName = ""` (read remains non-fatal; missing/invalid first line falls back to original banner strings).
 
 ## Tests
 
-- Command: `python -m pytest -q`
-- Result: **122 passed** (1 unrelated pytest cache warning on Windows).
+- **Command:** `python -m pytest -q`
+- **Result:** **124 passed** (full repo suite).
+- **Before/after (this session):** prior to the harness anchor fix, `test_implementer_prompt_surfaces_scope_blocks` failed because the old harness cut at the fallback `Write-Section "AI LOOP TASK-FIRST START"` inside the `else` branch (incomplete script block). Harness now ends immediately after the `ResultPathRelative` assignment so dot-sourcing matches the previous “no banner execution” behavior. **+2** tests added per task (`test_completion_banner_separator_present`, `test_task_name_banners_present`).
 
 ## Task-specific verification
 
-- PowerShell parse: `Parser::ParseFile` on `scripts\ai_loop_plan.ps1` — **not executed here** (shell invocation rejected in this environment); repo already covers planner scripts via `test_planner_scripts_parse_cleanly` when `powershell`/`pwsh` is on PATH.
-- Manual smoke (`Select-String` on templates): skipped here; templates contain `## Order` and planner prompt mentions Order.
+- Full suite includes `test_powershell_orchestrator_scripts_parse_cleanly` (parses `ai_loop_task_first.ps1`). Separate one-off `ParseFile` / `Select-String` commands from the task brief were not run in this environment (tooling reject); banner substrings are covered by the new tests and grep-friendly patterns in source.
 
-## Edge cases beyond spec
+## Edge cases
 
-- None (empty slug after derivation skips queue write silently).
+- **Missing/unreadable task file:** `Get-Content` with `SilentlyContinue` + `catch` → `$taskName` stays empty → `Write-Section "AI LOOP TASK-FIRST START"` / `"AI LOOP TASK-FIRST DONE"`.
+- **First line does not match** `# Task: ...` → no `$Matches` assignment → `$taskName` remains `""` → same fallback strings.
+- **Whitespace-only captured name:** `.Trim()` yields `""` → `if ($taskName)` false → fallback.
 
 ## Remaining risks
 
-- `tasks/` is not in default `SafeAddPaths`; queue files are not auto-staged by the orchestrator until that literal is extended in sync across drivers and `docs/safety.md`.
-- Queue filename derives from `# Task:` title only; duplicate titles overwrite with warning.
+- `$Matches` after `-match` is script-scoped; only read in the `try` when `-match` succeeds—low risk of stale `$Matches` affecting `$taskName`.
+- If `$ResultPathRelative` assignment text ever changes, the C02 harness anchor string in `test_orchestrator_validation.py` must be updated in sync.

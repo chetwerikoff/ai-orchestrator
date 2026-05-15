@@ -343,7 +343,21 @@ $ProjectRoot = (Resolve-Path ".").Path
 $AiLoop = Join-Path $ProjectRoot ".ai-loop"
 $ResultPathRelative = ".ai-loop/implementer_result.md"
 
-Write-Section "AI LOOP TASK-FIRST START"
+$taskName = ""
+try {
+    $firstLine = Get-Content -LiteralPath $TaskPath -TotalCount 1 -Encoding UTF8 -ErrorAction SilentlyContinue
+    if ($null -ne $firstLine -and [string]$firstLine -match '^\s*#\s*Task:\s*(.+)$') {
+        $taskName = $Matches[1].Trim()
+    }
+} catch {
+    $taskName = ""
+}
+
+if ($taskName) {
+    Write-Section "AI LOOP TASK: $taskName START"
+} else {
+    Write-Section "AI LOOP TASK-FIRST START"
+}
 Assert-FileExists -Path $TaskPath -Message "Task file was not found."
 Assert-FileExists -Path $AutoLoopScript -Message "Existing auto loop script was not found."
 Write-Host "Project root: $ProjectRoot  Task: $TaskPath  Implementer (-CursorCommand): $CursorCommand  Iterations: $MaxIterations  NoPush: $NoPush  Tests: $TestCommand  SafeAdd: $SafeAddPaths"
@@ -470,4 +484,8 @@ else {
 
 Write-Section "STEP 2: CODEX REVIEW / FIX LOOP"
 Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromImplementer:$(-not $SkipInitialCursor) -WithWrapUp:$WithWrapUp -FixerCommand $CursorCommand -FixerModel $CursorModel
-Write-Section "AI LOOP TASK-FIRST DONE"
+if ($taskName) {
+    Write-Section "AI LOOP TASK: $taskName DONE"
+} else {
+    Write-Section "AI LOOP TASK-FIRST DONE"
+}

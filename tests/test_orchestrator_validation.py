@@ -121,6 +121,25 @@ def test_task_first_porcelain_uses_untracked_files_all() -> None:
     assert "git status --porcelain --untracked-files=all" in text
 
 
+def test_completion_banner_separator_present() -> None:
+    """ai_loop_task_first.ps1 must contain the banner separator string."""
+    content = Path("scripts/ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "==============================" in content, (
+        "completion banner separator missing from ai_loop_task_first.ps1"
+    )
+
+
+def test_task_name_banners_present() -> None:
+    """Both START and DONE banners must reference the task name variable."""
+    content = Path("scripts/ai_loop_task_first.ps1").read_text(encoding="utf-8")
+    assert "AI LOOP TASK:" in content and "START" in content, (
+        "START banner with task name missing from ai_loop_task_first.ps1"
+    )
+    assert "AI LOOP TASK:" in content and "DONE" in content, (
+        "DONE banner with task name missing from ai_loop_task_first.ps1"
+    )
+
+
 def test_auto_porcelain_uses_untracked_files_all_for_noop_guard() -> None:
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert "git status --porcelain --untracked-files=all" in text
@@ -149,8 +168,8 @@ def _powershell_build_implementer_prompt_from_task_first_script(
         pytest.skip("No pwsh or powershell on PATH")
 
     script_text = (_SCRIPTS / "ai_loop_task_first.ps1").read_text(encoding="utf-8")
-    marker = 'Write-Section "AI LOOP TASK-FIRST START"'
-    assert marker in script_text, "ai_loop_task_first.ps1 must keep the task-first entry marker for harness loading"
+    anchor = '$ResultPathRelative = ".ai-loop/implementer_result.md"'
+    assert anchor in script_text, "ai_loop_task_first.ps1 must keep ResultPathRelative line for harness loading"
     assembly = _extract_implementer_prompt_assembly_from_task_first(script_text)
 
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -168,10 +187,10 @@ def _powershell_build_implementer_prompt_from_task_first_script(
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 $src = [System.IO.File]::ReadAllText([System.IO.Path]::Combine($args[0], 'scripts', 'ai_loop_task_first.ps1'))
-$marker = 'Write-Section "AI LOOP TASK-FIRST START"'
-$idx = $src.IndexOf($marker)
-if ($idx -lt 0) {{ throw "Marker not found: $marker" }}
-$head = $src.Substring(0, $idx)
+$anchor = '$ResultPathRelative = ".ai-loop/implementer_result.md"'
+$idx = $src.IndexOf($anchor)
+if ($idx -lt 0) {{ throw "Anchor not found: $anchor" }}
+$head = $src.Substring(0, $idx + $anchor.Length)
 . ([scriptblock]::Create($head))
 $TaskFile = [System.IO.Path]::Combine($ProjectRoot, '.ai-loop', 'task.md')
 $RelevantFiles = @()
