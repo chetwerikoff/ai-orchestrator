@@ -1,32 +1,34 @@
 ﻿# Implementer summary
 
-## Changed files (7 total)
+## Changed files
 
-1. **New:** `templates/reviewer_context.md`
-2. **Edited:** `scripts/ai_loop_auto.ps1` (Run-CodexReview `$prompt` here-string only: reading list + diff/test policy text)
-3. **Edited:** `templates/codex_review_prompt.md` (reading list + diff/test rules)
-4. **Edited:** `scripts/install_into_project.ps1` (Copy-Item for `reviewer_context.md`)
-5. **Edited:** `tests/test_orchestrator_validation.py` (three new tests)
-6. **Edited:** `.ai-loop/implementer_summary.md` (this file)
-7. **Edited:** `.ai-loop/project_summary.md` (C13 bullet, stage, last task)
+- `scripts/record_token_usage.ps1` — branch `(d)` in `ConvertFrom-CliTokenUsage` for Codex CLI total-only `tokens used` (same line as the number, or number on the following line); commas stripped; `InputTokens`/`OutputTokens` null; `Source` `cli_log`; `Quality` `exact`.
+- `tests/test_token_usage.py` — `test_convert_codex_tokens_used_single_line`, `test_convert_codex_tokens_used_multiline`, `test_convert_openai_json_wins_over_codex_tokens_used_text`.
+- `.ai-loop/task.md` — active task updated to `014` and includes required scope sections for task-first prompt tests.
+- `tasks/014_token_usage_codex_cli_format_fix.md` — queued task spec for this fix.
+- `tasks/015_token_usage_step3_wrappers_limits_reports.md` — queued follow-up spec for the remaining token usage work.
+- `tasks/task_token_usage_reports_and_journal.md` — restored original user ASK/reference spec.
+- `.ai-loop/project_summary.md` — token usage step 2 bullet updated for the fourth parser pattern and JSON precedence.
+- `.ai-loop/implementer_summary.md` — this file.
 
 ## Tests
 
-- `python -m pytest tests/test_orchestrator_validation.py -q` — pass (includes `test_reviewer_context_template_exists`, `test_embedded_prompt_uses_reviewer_context_not_agents_as_default`, `test_codex_template_skips_test_output_when_failures_summary_present`).
-- `python -m pytest -q` — **155 passed** (full repo).
-- PowerShell AST: `ai_loop_auto.ps1` is covered by `test_powershell_orchestrator_scripts_parse_cleanly`; task checklist `Parser::ParseFile` on `install_into_project.ps1` was not re-run in this session (copy-only edit; low risk).
+- `python -m pytest tests/test_token_usage.py -q` → **17 passed**.
+- `python -m pytest -q` → **158 passed**.
+- `python -m pytest tests/test_orchestrator_validation.py::test_implementer_prompt_surfaces_scope_blocks -q` → **1 passed** after adding the required scope sections to the active task spec.
 
-## Implementation
+## Task-specific verification
 
-- Added bounded reviewer rules template (≤40 lines) covering editable paths, `tasks/` protection, `SafeAddPaths`, `project_summary.md` discipline, and test policy.
-- Embedded Codex prompt and `codex_review_prompt.md` now read `reviewer_context.md` before `AGENTS.md`; conditional wording for `test_output.txt` vs `test_failures_summary.md`; strengthened diff guidance (prefer changed files over full patch).
-- Installer copies `reviewer_context.md` into target `.ai-loop/`.
+- PowerShell `Parser::ParseFile` on `scripts/record_token_usage.ps1` passed.
 
-## Skipped
+## Codex CLI forms now parsed
 
-- `.ai-loop/implementer_result.md` — not needed (task completed in-repo).
+1. Single line (own line): `tokens used 32,372` (case-insensitive; optional surrounding lines).
+2. Two lines: `tokens used` then a line with only the comma-grouped integer (e.g. `32,372`).
 
-## Remaining risks
+OpenAI/Claude JSON with input/output fields still runs first and wins when both appear in the same blob.
 
-- Models may still open `AGENTS.md` early despite ordering; item 9 keeps an explicit fallback path.
-- Existing installs lack `reviewer_context.md` until reinstall or manual copy; `install_into_project.ps1` seeds it for new installs.
+## Remaining risks / limitations
+
+- Total-only Codex summary cannot supply input vs output split; `input_tokens` / `output_tokens` in JSONL stay null for these records.
+- Parser expects a plain integer total (with optional `,` thousands separators), not abbreviated or non-numeric summaries.

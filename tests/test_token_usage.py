@@ -148,6 +148,69 @@ def test_convert_openai_api_format() -> None:
     assert lines[:5] == ["72", "9", "81", "api_response", "exact"]
 
 
+def test_convert_codex_tokens_used_single_line() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    snippet = "Summary line before\r\ntokens used 32,372\r\nfooter"
+    b64 = base64.b64encode(snippet.encode("utf-16le")).decode("ascii")
+    cmd = (
+        ". .\\scripts\\record_token_usage.ps1; "
+        f"$t = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{b64}')); "
+        "$r = ConvertFrom-CliTokenUsage -Text $t; "
+        "if ($null -ne $r.InputTokens) { 'BAD_IN' }; "
+        "if ($null -ne $r.OutputTokens) { 'BAD_OUT' }; "
+        "$r.TotalTokens; $r.Source; $r.Quality"
+    )
+    code, stdout, stderr = _run_ps_capture(cmd)
+    assert code == 0, stderr
+    lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
+    assert "BAD_IN" not in stdout
+    assert "BAD_OUT" not in stdout
+    assert lines[:3] == ["32372", "cli_log", "exact"]
+
+
+def test_convert_codex_tokens_used_multiline() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    snippet = "start\r\ntokens used\r\n32,372\r\ndone"
+    b64 = base64.b64encode(snippet.encode("utf-16le")).decode("ascii")
+    cmd = (
+        ". .\\scripts\\record_token_usage.ps1; "
+        f"$t = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{b64}')); "
+        "$r = ConvertFrom-CliTokenUsage -Text $t; "
+        "if ($null -ne $r.InputTokens) { 'BAD_IN' }; "
+        "if ($null -ne $r.OutputTokens) { 'BAD_OUT' }; "
+        "$r.TotalTokens; $r.Source; $r.Quality"
+    )
+    code, stdout, stderr = _run_ps_capture(cmd)
+    assert code == 0, stderr
+    assert "BAD_IN" not in stdout
+    assert "BAD_OUT" not in stdout
+    lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
+    assert lines[:3] == ["32372", "cli_log", "exact"]
+
+
+def test_convert_openai_json_wins_over_codex_tokens_used_text() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    # Second line would parse as Codex total-only if JSON branches did not run first.
+    snippet = '{"prompt_tokens":72,"completion_tokens":9}\r\ntokens used 999999\r\n'
+    b64 = base64.b64encode(snippet.encode("utf-16le")).decode("ascii")
+    cmd = (
+        ". .\\scripts\\record_token_usage.ps1; "
+        f"$t = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{b64}')); "
+        "$r = ConvertFrom-CliTokenUsage -Text $t; "
+        "$r.InputTokens; $r.OutputTokens; $r.TotalTokens; $r.Source; $r.Quality"
+    )
+    code, stdout, stderr = _run_ps_capture(cmd)
+    assert code == 0, stderr
+    lines = [ln.strip() for ln in stdout.splitlines() if ln.strip()]
+    assert lines[:5] == ["72", "9", "81", "api_response", "exact"]
+
+
 def test_convert_cli_log_format() -> None:
     ps = _powershell_exe()
     if not ps:

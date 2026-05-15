@@ -62,6 +62,37 @@ function ConvertFrom-CliTokenUsage {
         }
     }
 
+    # (d) Codex CLI summary — total-only "tokens used" (same line or next line)
+    $mCodex1 = [regex]::Match($Text, '(?im)(?:^|\r?\n)\s*tokens\s+used\s+([\d,]+)\s*(?:\r?\n|$)')
+    if ($mCodex1.Success) {
+        $totalStr = ($mCodex1.Groups[1].Value -replace ',', '').Trim()
+        if ($totalStr -match '^\d+$') {
+            $totalTok = [long]$totalStr
+            return @{
+                InputTokens  = $null
+                OutputTokens = $null
+                TotalTokens  = $totalTok
+                Source       = "cli_log"
+                Quality      = "exact"
+            }
+        }
+    }
+
+    $mCodex2 = [regex]::Match($Text, '(?im)(?:^|\r?\n)\s*tokens\s+used\s*\r?\n\s*([\d,]+)\s*(?:\r?\n|$)')
+    if ($mCodex2.Success) {
+        $totalStr = ($mCodex2.Groups[1].Value -replace ',', '').Trim()
+        if ($totalStr -match '^\d+$') {
+            $totalTok = [long]$totalStr
+            return @{
+                InputTokens  = $null
+                OutputTokens = $null
+                TotalTokens  = $totalTok
+                Source       = "cli_log"
+                Quality      = "exact"
+            }
+        }
+    }
+
     return $null
 }
 
