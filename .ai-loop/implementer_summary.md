@@ -1,41 +1,32 @@
 ﻿# Implementer summary
 
-## Changed files
+## Changed files (7 total)
 
-- `scripts/run_claude_reviewer.ps1` — created (stdin prompt, `--model` parse, default `claude-haiku-4-5-20251001`, `claude --print`).
-- `templates/claude_task_reviewer_prompt.md` — created (architecture reviewer strict output rules).
-- `scripts/ai_loop_plan.ps1` — `-NoRevision`, Claude reviewer prompt resolution, lighter reviewer bundle when `-NoRevision`, blocking path `exit 2`, dot-source early return for tests, extended strict categories.
-- `scripts/install_into_project.ps1` — copies `claude_task_reviewer_prompt.md` into `.ai-loop/`.
-- `tests/test_claude_reviewer.py` — created.
-- `tests/test_orchestrator_validation.py` — strict-format mirror + parse smoke list + install assert + review invariants (collateral for green full suite).
-- `docs/workflow.md` — variant A usage note.
-- `.ai-loop/project_summary.md` — current architecture / templates / installer line updates.
-
-## Test-ReviewerOutputStrict regex (one-liners)
-
-- **Before:** `'^\s*-\s*\[(logic|complexity|scope|missing)\]\s+\S'`
-- **After:** `'^\s*-\s*\[(logic|complexity|scope|missing|architecture|safety)\]\s+\S'`
-
-## Lighter reviewer context (`-NoRevision`)
-
-In `scripts/ai_loop_plan.ps1`, inside the `for` review loop (~lines 248–259): `if ($NoRevision)` builds `$reviewPrompt` from reviewer template + `## AGENTS.md` + body + `## Project Summary` + summary body + `## Raw User ASK` + ask + `## Draft task.md` + draft; the `else` branch keeps the existing bundle including `## repo_map.md` and `## GENERATED task.md`.
-
-## `run_claude_reviewer.ps1` default model
-
-Confirmed: `claude-haiku-4-5-20251001`.
-
-## `install_into_project.ps1`
-
-Confirmed: `Copy-Item` from `templates\claude_task_reviewer_prompt.md` to `(Join-Path $TargetAiLoop "claude_task_reviewer_prompt.md")`.
+1. **New:** `templates/reviewer_context.md`
+2. **Edited:** `scripts/ai_loop_auto.ps1` (Run-CodexReview `$prompt` here-string only: reading list + diff/test policy text)
+3. **Edited:** `templates/codex_review_prompt.md` (reading list + diff/test rules)
+4. **Edited:** `scripts/install_into_project.ps1` (Copy-Item for `reviewer_context.md`)
+5. **Edited:** `tests/test_orchestrator_validation.py` (three new tests)
+6. **Edited:** `.ai-loop/implementer_summary.md` (this file)
+7. **Edited:** `.ai-loop/project_summary.md` (C13 bullet, stage, last task)
 
 ## Tests
 
-- `python -m pytest -q tests/test_claude_reviewer.py` — **5 passed**.
-- `python -m pytest -q` — **151 passed** (1 PytestCacheWarning on Windows nodeids path).
+- `python -m pytest tests/test_orchestrator_validation.py -q` — pass (includes `test_reviewer_context_template_exists`, `test_embedded_prompt_uses_reviewer_context_not_agents_as_default`, `test_codex_template_skips_test_output_when_failures_summary_present`).
+- `python -m pytest -q` — **155 passed** (full repo).
+- PowerShell AST: `ai_loop_auto.ps1` is covered by `test_powershell_orchestrator_scripts_parse_cleanly`; task checklist `Parser::ParseFile` on `install_into_project.ps1` was not re-run in this session (copy-only edit; low risk).
 
-Task verification parses: covered via `Parser::ParseFile` in tests; direct `powershell -NoProfile -Command ParseFile(...)` not re-run here (environment rejected that invocation); parse errors would have failed the new smoke test.
+## Implementation
 
-## Remaining risks (variant B: auto-revision)
+- Added bounded reviewer rules template (≤40 lines) covering editable paths, `tasks/` protection, `SafeAddPaths`, `project_summary.md` discipline, and test policy.
+- Embedded Codex prompt and `codex_review_prompt.md` now read `reviewer_context.md` before `AGENTS.md`; conditional wording for `test_output.txt` vs `test_failures_summary.md`; strengthened diff guidance (prefer changed files over full patch).
+- Installer copies `reviewer_context.md` into target `.ai-loop/`.
 
-- A future revision loop with Claude reviewer must decide whether blocking semantics stay human-only or merge with planner revision prompts without contradicting variant A’s `exit 2` contract.
-- Sharing one strict output schema across Codex and Claude remains necessary; new categories should stay additive to avoid breaking saved traces.
+## Skipped
+
+- `.ai-loop/implementer_result.md` — not needed (task completed in-repo).
+
+## Remaining risks
+
+- Models may still open `AGENTS.md` early despite ordering; item 9 keeps an explicit fallback path.
+- Existing installs lack `reviewer_context.md` until reinstall or manual copy; `install_into_project.ps1` seeds it for new installs.

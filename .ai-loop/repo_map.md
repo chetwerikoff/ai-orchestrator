@@ -48,6 +48,7 @@
 - `templates/opencode.json` — (no header summary)
 - `templates/planner_prompt.md` — Planner role: Architect with final say
 - `templates/project_summary.md` — Project Summary
+- `templates/reviewer_context.md` — Reviewer context (bounded)
 - `templates/reviewer_prompt.md` — Reviewer role
 - `templates/task.md` — Task: <task name>
 - `templates/user_ask_template.md` — User ASK

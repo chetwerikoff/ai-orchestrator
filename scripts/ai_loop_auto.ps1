@@ -397,14 +397,14 @@ You are the reviewer in an authenticated development loop.
 Read in this priority order (stop reading once verdict is clear):
 
 1. `.ai-loop/task.md` — current task contract
-2. `.ai-loop/project_summary.md` — durable project orientation
-3. `AGENTS.md` at repo root — working rules
-4. `.ai-loop/implementer_summary.md` — implementer's report on the latest iteration
-5. `.ai-loop/diff_summary.txt` — short `git diff --stat`; if it reports more than 300 changed lines OR more than 8 changed files, read this before loading large diffs.
-6. `.ai-loop/test_failures_summary.md` — filtered failures (**read this before** raw pytest output when present; generated only when pytest fails)
-7. `.ai-loop/test_output.txt` — pytest output (the orchestrator already ran tests; use when item 6 is absent or you need full session output)
-8. `.ai-loop/last_diff.patch` — full git diff (only when items above are not sufficient)
-9. `.ai-loop/git_status.txt` — short porcelain status
+2. `.ai-loop/reviewer_context.md` — bounded working-rules summary (preferred over AGENTS.md)
+3. `.ai-loop/implementer_summary.md` — implementer's report on the latest iteration
+4. `.ai-loop/diff_summary.txt` — short git diff --stat
+5. `.ai-loop/test_failures_summary.md` — filtered failures (read when present; do not read test_output.txt unless this summary is absent or insufficient)
+6. `.ai-loop/last_diff.patch` — full diff only when exact patch context is required for a specific finding; prefer reading only the changed files relevant to that finding
+7. `.ai-loop/test_output.txt` — raw pytest output (read only when test_failures_summary.md is absent or insufficient)
+8. `.ai-loop/git_status.txt` — short porcelain status
+9. `AGENTS.md` — full working rules (read only when reviewer_context.md is insufficient)
 
 Review the latest changes.
 
@@ -425,11 +425,11 @@ Check:
 
 ## Diff size budget
 
-If `diff_summary.txt` reports more than 300 changed lines OR more than 8 changed files, read `diff_summary.txt` first. Do not load `last_diff.patch` unless a specific finding requires it; if you need to load it, justify briefly in `FINAL_NOTE`.
+If `diff_summary.txt` reports more than 300 changed lines OR more than 8 changed files, read `diff_summary.txt` first. Prefer opening only the repository files changed for the relevant finding instead of loading all of `last_diff.patch`. Load `last_diff.patch` only when exact patch context is required; if you load it, justify briefly in `FINAL_NOTE`.
 
 ## Test execution policy
 
-The orchestrator already ran `pytest` before this review; results are in `.ai-loop/test_output.txt` (and, on failure, `.ai-loop/test_failures_summary.md`). Do not re-run the full test suite. A targeted run of a single test file or a single test (`python -m pytest -q path/to/test_file.py::test_name`) is allowed only when a specific finding in this review requires direct verification. If you run any tests, state in one line in `FINAL_NOTE` exactly what you ran and why.
+The orchestrator already ran `pytest` before this review. Prefer `.ai-loop/test_failures_summary.md` when present; do not read `.ai-loop/test_output.txt` unless that summary is absent or insufficient for your finding. Do not re-run the full test suite. A targeted run of a single test file or test (`python -m pytest -q path/to/test_file.py::test_name`) is allowed only when a specific finding in this review requires direct verification. If you run any tests, state in one line in `FINAL_NOTE` exactly what you ran and why.
 
 Return exactly:
 

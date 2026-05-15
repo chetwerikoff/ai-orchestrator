@@ -862,6 +862,31 @@ def test_codex_template_reads_test_failures_before_raw_pytest_output() -> None:
     assert t.index("test_failures_summary.md") < t.index("test_output.txt")
 
 
+def test_reviewer_context_template_exists() -> None:
+    path = _ROOT / "templates" / "reviewer_context.md"
+    assert path.is_file()
+    body = path.read_text(encoding="utf-8")
+    assert len(body.strip()) > 0
+    assert len(body.splitlines()) <= 40
+
+
+def test_embedded_prompt_uses_reviewer_context_not_agents_as_default() -> None:
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    literal = _extract_run_codex_review_prompt_literal(text)
+    assert "reviewer_context.md" in literal
+    assert literal.index("reviewer_context.md") < literal.index("AGENTS.md")
+
+
+def test_codex_template_skips_test_output_when_failures_summary_present() -> None:
+    t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
+    assert t.index("test_failures_summary.md") < t.index("test_output.txt")
+    lines = t.splitlines()
+    idx_out = next(i for i, ln in enumerate(lines) if "test_output.txt" in ln)
+    window = "\n".join(lines[max(0, idx_out - 3) : min(len(lines), idx_out + 4)])
+    lowered = window.lower()
+    assert any(k in lowered for k in ("absent", "insufficient", "only when"))
+
+
 def test_extract_fix_prompt_for_implementer_label() -> None:
     review = (
         "VERDICT: FIX_REQUIRED\n\n"
