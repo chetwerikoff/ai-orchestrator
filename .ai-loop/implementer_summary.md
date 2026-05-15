@@ -1,26 +1,33 @@
 ﻿# Implementer summary
 
-## Changed files (1)
+## Changed files
 
-- `tests/test_orchestrator_validation.py` — `test_agents_protects_queued_tasks` now requires one markdown paragraph or list item that simultaneously mentions `tasks/`, `protected` or both `deletion` and `modification`, and `files in scope` or explicit `task scope` wording (so the lone Git hygiene bullet cannot be removed without failing the test).
+- `scripts/record_token_usage.ps1` — Added `ConvertFrom-CliTokenUsage` (three regex-ordered patterns); added `-Quality` parameter; JSONL now includes `quality` on every record.
+- `scripts/show_token_report.ps1` — Replaced report with totals, by-model / by-iteration aggregates, `Path::Combine` paths, empty/malformed JSONL handling ("No token usage records found."), `Write-Host` output, writes `.ai-loop/token_usage_summary.md` (non-fatal on error).
+- `scripts/ai_loop_auto.ps1` — Dot-sources recorder; merges Codex stdout+stderr into `codex_review.md`; after each review iteration calls `ConvertFrom-CliTokenUsage` + `Write-TokenUsageRecord` in a non-blocking try path.
+- `tests/test_token_usage.py` — Parser test for `ai_loop_auto.ps1`; conversion/write/report/chain tests via PowerShell subprocess.
+- `.ai-loop/project_summary.md` — Current stage + last completed task + pwsh Combine note for `show_token_report.ps1`.
+- `.gitignore` — No change (`token_usage_summary.md` already listed near `token_usage.jsonl`).
 
-## Test result
+## Tests
 
-- `python -m pytest tests/test_orchestrator_validation.py::test_agents_protects_queued_tasks tests/test_orchestrator_validation.py::test_codex_prompt_protects_queued_tasks -q` — pass (2 tests)
-- `python -m pytest -q` — pass (134 tests)
+- `python -m pytest -q` — **144 passed** (all tests; same run includes 14 tests in `test_token_usage.py`).
 
-## Implemented work
+## Task-specific CLI
 
-Strengthened the AGENTS.md regression so protection language must live in a single policy unit (paragraph or `-` bullet), matching the C12 Git hygiene bullet contract; file-level `tasks/` mentions alone no longer satisfy the test.
+- Verification `ParseFile` for the three `.ps1` scripts: covered by AST parser tests inside `tests/test_token_usage.py` (`test_*_parse_clean` + `test_ai_loop_auto_ps1_parse_clean`). Separate one-liner ParseFile invocation was not run in this shell (sandbox rejected); parity with CI is via pytest harness.
 
-## Skipped items
+## Implementation notes
 
-- Task.md PowerShell parse checks — not requested by the fix prompt; no orchestrator script changes.
+- Parsed patterns: Claude API JSON (`input_tokens`/`output_tokens`), OpenAI/Codex-style JSON (`prompt_tokens`/`completion_tokens`), Claude CLI plain text (`Input tokens:` / `Output tokens:` lines).
+- Codex hook reads **combined capture** written to `.ai-loop/codex_review.md` immediately after `Run-CodexReview` (stdout merged with stderr via `2>&1` before `Set-Content`), then parses that text — file holds the authoritative combined capture for downstream review and tokens.
 
-## Task-specific outputs / live-run
+## Deferred / unchanged from spec
 
-- No task-specific CLI beyond pytest; full suite run as configured.
+- None of the forbidden files were touched. Model string stays literal `codex` when Codex emits no finer model identifier in merged output.
 
 ## Remaining risks
 
-- Wording refactors that keep the intent but split keywords across bullets could fail the test until copy is consolidated again (intentional guardrail).
+- Codex or other CLIs changing token/logging format could stop matches until patterns are extended.
+- `show_token_report.ps1` summary write can fail disk-permissions paths; surfaced as warnings only while the script exits 0.
+- JSON with both Claude and OpenAI key names could match the Claude branch first depending on substring order.

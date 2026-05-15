@@ -4,6 +4,67 @@ if ([string]::IsNullOrWhiteSpace($script:_RecordTokenUsageScriptDir)) {
     $script:_RecordTokenUsageScriptDir = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
 }
 
+function ConvertFrom-CliTokenUsage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Text
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Text)) {
+        return $null
+    }
+
+    # (a) Claude API JSON — input_tokens + output_tokens
+    $rxInApi = '"input_tokens"\s*:\s*(\d+)'
+    $rxOutApi = '"output_tokens"\s*:\s*(\d+)'
+    $mInA = [regex]::Match($Text, $rxInApi)
+    $mOutA = [regex]::Match($Text, $rxOutApi)
+    if ($mInA.Success -and $mOutA.Success) {
+        $inTok = [long]$mInA.Groups[1].Value
+        $outTok = [long]$mOutA.Groups[1].Value
+        return @{
+            InputTokens  = $inTok
+            OutputTokens = $outTok
+            TotalTokens  = $inTok + $outTok
+            Source       = "api_response"
+            Quality      = "exact"
+        }
+    }
+
+    # (b) OpenAI / Codex API JSON — prompt_tokens + completion_tokens
+    $mInB = [regex]::Match($Text, '"prompt_tokens"\s*:\s*(\d+)')
+    $mOutB = [regex]::Match($Text, '"completion_tokens"\s*:\s*(\d+)')
+    if ($mInB.Success -and $mOutB.Success) {
+        $inTok = [long]$mInB.Groups[1].Value
+        $outTok = [long]$mOutB.Groups[1].Value
+        return @{
+            InputTokens  = $inTok
+            OutputTokens = $outTok
+            TotalTokens  = $inTok + $outTok
+            Source       = "api_response"
+            Quality      = "exact"
+        }
+    }
+
+    # (c) Claude CLI plain-text log lines
+    $mInC = [regex]::Match($Text, '(?im)^\s*Input\s+tokens:\s*(\d+)\s*$')
+    $mOutC = [regex]::Match($Text, '(?im)^\s*Output\s+tokens:\s*(\d+)\s*$')
+    if ($mInC.Success -and $mOutC.Success) {
+        $inTok = [long]$mInC.Groups[1].Value
+        $outTok = [long]$mOutC.Groups[1].Value
+        return @{
+            InputTokens  = $inTok
+            OutputTokens = $outTok
+            TotalTokens  = $inTok + $outTok
+            Source       = "cli_log"
+            Quality      = "exact"
+        }
+    }
+
+    return $null
+}
+
 function Write-TokenUsageRecord {
     param(
         [string]$TaskName = "",
@@ -16,7 +77,8 @@ function Write-TokenUsageRecord {
         $TotalTokens = $null,
         $EstimatedCostUsd = $null,
         [string]$Confidence = "unknown",
-        [string]$Source = "unknown"
+        [string]$Source = "unknown",
+        [string]$Quality = "unknown"
     )
 
     $scriptDir = ([string]$script:_RecordTokenUsageScriptDir).Trim()
@@ -54,6 +116,7 @@ function Write-TokenUsageRecord {
             estimated_cost_usd  = $EstimatedCostUsd
             confidence          = $Confidence
             source              = $Source
+            quality             = $Quality
             timestamp           = [datetime]::UtcNow.ToString("o")
         }
 

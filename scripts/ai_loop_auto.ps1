@@ -17,6 +17,13 @@ $ProjectRoot = (Resolve-Path ".").Path
 $AiLoop = Join-Path $ProjectRoot ".ai-loop"
 $Tmp = Join-Path $ProjectRoot ".tmp"
 
+try {
+    . (Join-Path $PSScriptRoot "record_token_usage.ps1")
+}
+catch {
+    Write-Warning "record_token_usage.ps1 load failed (token recording disabled): $($_.Exception.Message)"
+}
+
 New-Item -ItemType Directory -Force -Path $AiLoop | Out-Null
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
@@ -323,6 +330,64 @@ function Run-PostFixCommand {
     return $LASTEXITCODE
 }
 
+function Get-TaskHeadingForTokenUsage {
+    param([string]$TaskFilePath)
+
+    try {
+        if (-not (Test-Path -LiteralPath $TaskFilePath)) {
+            return ""
+        }
+        foreach ($line in Get-Content -LiteralPath $TaskFilePath -ErrorAction SilentlyContinue) {
+            $t = [string]$line
+            $m = [regex]::Match($t, '^\s*#\s*(.+)$')
+            if ($m.Success) {
+                return $m.Groups[1].Value.Trim()
+            }
+        }
+        return ""
+    }
+    catch {
+        return ""
+    }
+}
+
+function Register-CodexTokenUsageAttempt {
+    param(
+        [string]$CodexText,
+        [int]$Iteration,
+        [string]$TaskMdPath
+    )
+
+    try {
+        if ($null -eq (Get-Command -Name ConvertFrom-CliTokenUsage -ErrorAction SilentlyContinue)) {
+            return
+        }
+        $parsed = ConvertFrom-CliTokenUsage -Text $CodexText
+        if (-not $parsed) {
+            return
+        }
+        if ($null -eq (Get-Command -Name Write-TokenUsageRecord -ErrorAction SilentlyContinue)) {
+            return
+        }
+        $heading = Get-TaskHeadingForTokenUsage -TaskFilePath $TaskMdPath
+        Write-TokenUsageRecord `
+            -TaskName $heading `
+            -ScriptName "ai_loop_auto.ps1" `
+            -Iteration $Iteration `
+            -Provider "codex" `
+            -Model "codex" `
+            -InputTokens $parsed.InputTokens `
+            -OutputTokens $parsed.OutputTokens `
+            -TotalTokens $parsed.TotalTokens `
+            -Confidence "unknown" `
+            -Source $parsed.Source `
+            -Quality $parsed.Quality
+    }
+    catch {
+        Write-Warning "Codex token usage recording failed (non-blocking): $($_.Exception.Message)"
+    }
+}
+
 function Run-CodexReview {
     Ensure-AiLoopFiles
 
@@ -408,8 +473,35 @@ Brief summary.
     Write-Host "Running Codex review..."
 
     $codexArgs = @("exec", (ConvertTo-CrtSafeArg -Value $prompt))
-    & codex @codexArgs > (Join-Path $AiLoop "codex_review.md")
-    return $LASTEXITCODE
+    $codexOutPath = Join-Path $AiLoop "codex_review.md"
+
+    try {
+        $codexStdoutStderr = @(& codex @codexArgs 2>&1)
+        $codexExit = $LASTEXITCODE
+
+        $textLines = foreach ($item in $codexStdoutStderr) {
+            if ($item -is [System.Management.Automation.ErrorRecord]) {
+                $item.ToString()
+            }
+            else {
+                [string]$item
+            }
+        }
+        $joinedOut = ($textLines -join [Environment]::NewLine).TrimEnd()
+        $joinedOut | Set-Content -LiteralPath $codexOutPath -Encoding UTF8 -ErrorAction SilentlyContinue
+
+        return $codexExit
+    }
+    catch {
+        Write-Warning "Codex invocation error (token capture may be incomplete): $($_.Exception.Message)"
+        try {
+            & codex @codexArgs 2>&1 | Out-File -LiteralPath $codexOutPath -Encoding utf8
+        }
+        catch {
+            Write-Warning "Codex fallback redirect failed: $($_.Exception.Message)"
+        }
+        return $LASTEXITCODE
+    }
 }
 
 function Get-ReviewVerdict {
@@ -785,6 +877,18 @@ DETAIL: No working-tree changes before Codex review on iteration $i after the im
     }
 
     Run-CodexReview | Out-Null
+
+    try {
+        $codexMd = Join-Path $AiLoop "codex_review.md"
+        $combinedCodexCapture = ""
+        if (Test-Path -LiteralPath $codexMd) {
+            $combinedCodexCapture = Get-Content -LiteralPath $codexMd -Raw -ErrorAction SilentlyContinue
+        }
+        Register-CodexTokenUsageAttempt -CodexText $combinedCodexCapture -Iteration $i -TaskMdPath (Join-Path $AiLoop "task.md")
+    }
+    catch {
+        Write-Warning "Codex token usage hook skipped: $($_.Exception.Message)"
+    }
 
     $codexVerdict = Get-CodexVerdict
 
