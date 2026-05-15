@@ -354,7 +354,7 @@ try {
 }
 
 if ($taskName) {
-    Write-Section "AI LOOP TASK: $taskName START"
+    Write-Section "AI LOOP TASK: `"$taskName`" START"
 } else {
     Write-Section "AI LOOP TASK-FIRST START"
 }
@@ -485,7 +485,7 @@ else {
 Write-Section "STEP 2: CODEX REVIEW / FIX LOOP"
 Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromImplementer:$(-not $SkipInitialCursor) -WithWrapUp:$WithWrapUp -FixerCommand $CursorCommand -FixerModel $CursorModel
 if ($taskName) {
-    Write-Section "AI LOOP TASK: $taskName DONE"
+    Write-Section "AI LOOP TASK: `"$taskName`" DONE"
 } else {
     Write-Section "AI LOOP TASK-FIRST DONE"
 }

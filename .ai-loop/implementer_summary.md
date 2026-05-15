@@ -2,26 +2,35 @@
 
 ## Changed files
 
-- **Removed** (working tree cleanup per `.ai-loop/next_implementer_prompt.md`):
-  - `tasks/task_add_order_queue_support.md`
-  - `tasks/task_add_tasks_to_safeaddpaths.md`
-  - `tasks/task_dynamic_done_header.md`  
-  Unrelated/duplicate untracked drafts deleted so they cannot be swept into safe-staged commits.
+- `scripts/ai_loop_task_first.ps1` — quoted `$taskName` in START/DONE `Write-Section` banners when a task title is present; fallback branches unchanged.
 
-## Test result
+## Before / after (exact lines)
 
-- `python -m pytest -q` — **124 passed** (1 PytestCacheWarning re: `.pytest_cache` on Windows)
-- `python -m pytest tests\test_orchestrator_validation.py -q` — **117 passed** (same cache warning)
+**START banner (when `$taskName` is non-empty)**
+
+- Before: `Write-Section "AI LOOP TASK: $taskName START"`
+- After: `Write-Section "AI LOOP TASK: `"$taskName`" START"`
+
+**DONE banner (when `$taskName` is non-empty)**
+
+- Before: `Write-Section "AI LOOP TASK: $taskName DONE"`
+- After: `Write-Section "AI LOOP TASK: `"$taskName`" DONE"`
+
+## Tests
+
+- `python -m pytest -q` — **124 passed** (1 PytestCacheWarning: nodeids cache path on Windows).
+
+## Task-specific verification
+
+- **PowerShell parse** (`Parser::ParseFile` on `scripts\ai_loop_task_first.ps1`): not run in this environment (nested `powershell -Command …` invocations from the agent shell were rejected or mis-parsed). Run locally:
+
+  `powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_task_first.ps1', [ref]$null, [ref]$null)"`
 
 ## Implementation summary
 
-- Carried out the next-implementer fix prompt only: removed three untracked files under `tasks/` that were not part of the active safe-paths task and could have been auto-staged with `tasks/` on the allowlist.
-
-## Task-specific outputs / skipped live-run
-
-- `python -m pyright` — **0 errors, 0 warnings, 0 informations**
-- Task.md verification PowerShell `[Parser]::ParseFile(...)` one-liners for the four scripts were not executed directly in this session (shell policy rejected bare `powershell` / `git` invocations); orchestrator script parse coverage remains via `test_powershell_orchestrator_scripts_parse_cleanly` in `tests/test_orchestrator_validation.py`.
+- When `task.md`’s first-line title is present, START/DONE banners now show the title in double quotes (e.g. `AI LOOP TASK: "My task" START`).
+- When no task name is parsed, behavior is unchanged (`AI LOOP TASK-FIRST START` / `DONE`).
 
 ## Remaining risks
 
-- None material to this cleanup; authors should still keep `tasks/` content intentional now that it is safe-staged by default.
+- None identified for this UI-only banner change; confirm the parse command above once if your review pipeline requires it.
