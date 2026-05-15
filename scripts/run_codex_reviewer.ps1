@@ -1,12 +1,6 @@
 # No param block: keeps $input available for the pipeline.
 # $input = piped prompt; $args = forwarded flags (--workspace, --model).
 
-function ConvertTo-CrtSafeArg {
-    # Omit top-level/param syntax per wrapper contract tests.
-    $Value = $args[0]
-    return [regex]::Replace([string]$Value, '(\\*)"', { ($args[0].Groups[1].Value * 2) + '\"' })
-}
-
 $workspace = $null
 $model = ""
 
@@ -25,6 +19,9 @@ if ([string]::IsNullOrWhiteSpace($promptText)) {
     exit 1
 }
 
+$tempFile = Join-Path $env:TEMP "codex_review_$([System.IO.Path]::GetRandomFileName()).md"
+[System.IO.File]::WriteAllText($tempFile, $promptText, [System.Text.Encoding]::UTF8)
+
 $pushed = $false
 $exitCode = 1
 try {
@@ -32,18 +29,37 @@ try {
         Push-Location $workspace
         $pushed = $true
     }
-    $codexArgs = @("exec", (ConvertTo-CrtSafeArg $promptText))
+
+    $helpText = ""
+    try {
+        $prevProbeEA = $ErrorActionPreference
+        $ErrorActionPreference = "SilentlyContinue"
+        $helpText = (& codex exec --help | Out-String)
+        $ErrorActionPreference = $prevProbeEA
+    } catch { }
+
+    $codexArgs = @()
     if (-not [string]::IsNullOrWhiteSpace($model)) {
-        $codexArgs = @("--model", $model) + $codexArgs
+        $codexArgs = @("--model", $model)
     }
+    $codexArgs = $codexArgs + @("exec")
+
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    & codex @codexArgs
+
+    if ($helpText -match '(?i)--file\b') {
+        $codexArgs = $codexArgs + @("--file", $tempFile)
+        & codex @codexArgs
+    } else {
+        Get-Content -LiteralPath $tempFile -Raw -Encoding UTF8 | & codex @codexArgs
+    }
+
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEA
 }
 finally {
     if ($pushed) { Pop-Location }
+    Remove-Item -LiteralPath $tempFile -Force -ErrorAction SilentlyContinue
 }
 
 exit $exitCode

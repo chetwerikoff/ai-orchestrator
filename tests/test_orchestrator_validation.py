@@ -1068,7 +1068,8 @@ def test_run_codex_reviewer_invariants() -> None:
     text = (_SCRIPTS / "run_codex_reviewer.ps1").read_text(encoding="utf-8")
     assert "param(" not in text
     assert "codex" in text and "exec" in text
-    assert "function ConvertTo-CrtSafeArg" in text
+    assert "ConvertTo-CrtSafeArg" not in text
+    assert "GetRandomFileName" in text and "WriteAllText" in text
     assert "2>&1" not in text
 
 
@@ -1084,6 +1085,33 @@ def test_planner_related_ps1_has_no_utf8_em_dash_literal_bytes() -> None:
     for name in ("run_codex_reviewer.ps1", "run_claude_planner.ps1", "ai_loop_plan.ps1"):
         data = (_SCRIPTS / name).read_bytes()
         assert em not in data, f"{name} must not contain literal UTF-8 em dash; use $([char]0x2014)"
+
+
+def test_codex_reviewer_no_inline_prompt_arg() -> None:
+    """Prompt must be passed via file or stdin, not as a positional CLI arg."""
+    src = Path("scripts/run_codex_reviewer.ps1").read_text(encoding="utf-8")
+    assert "ConvertTo-CrtSafeArg" not in src, (
+        "run_codex_reviewer.ps1 still uses ConvertTo-CrtSafeArg; "
+        "prompt must be passed via temp file, not as a positional arg"
+    )
+
+
+def test_codex_reviewer_exitcode_initialized() -> None:
+    src = Path("scripts/run_codex_reviewer.ps1").read_text(encoding="utf-8")
+    idx_init = src.find("$exitCode = 1")
+    idx_try = src.find("try {")
+    assert idx_init != -1, "$exitCode = 1 not found"
+    assert idx_init < idx_try, "$exitCode = 1 must appear before try {"
+
+
+def test_no_emdash_bytes_in_ps1_scripts() -> None:
+    for name in [
+        "scripts/run_codex_reviewer.ps1",
+        "scripts/run_claude_planner.ps1",
+        "scripts/ai_loop_plan.ps1",
+    ]:
+        data = Path(name).read_bytes()
+        assert b"\xe2\x80\x94" not in data, f"Literal em-dash found in {name}"
 
 
 def test_ai_loop_plan_review_invariants() -> None:
