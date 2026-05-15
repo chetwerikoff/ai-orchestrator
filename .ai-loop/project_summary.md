@@ -43,6 +43,7 @@ Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last
 ## Known Risks / Constraints
 
 - External CLIs (`codex`, Cursor Agent, OpenCode, local llama.cpp servers) must be installed and authenticated/configured where used.
+- Python static analysis uses `pyrightconfig.json`; run `pyright` for Python-only type checks. LSP command: `pyright-langserver --stdio`.
 - On Windows PowerShell, empty array returns can become `$null`; path-set helpers emit through the pipeline and callers wrap with `@(...)`.
 - `ai_loop.py` still carries older experimental Cursor-centric terminology and is intentionally separate from the active PowerShell loop unless a task explicitly authorizes changing it.
 

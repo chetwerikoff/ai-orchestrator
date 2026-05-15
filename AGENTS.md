@@ -44,7 +44,7 @@ Do not read by default:
 - `.ai-loop/_debug/` — human debugging only
 
 ## Commands
-Test: `python -m pytest -q` · Test with traceback: `python -m pytest -q --tb=short`
+Test: `python -m pytest -q` · Test with traceback: `python -m pytest -q --tb=short` · Type check: `pyright` · LSP: `pyright-langserver --stdio`
 
 PowerShell parse check:
 
@@ -56,7 +56,7 @@ powershell -NoProfile -Command "[void][System.Management.Automation.Language.Par
 ```
 
 ## Safe paths (committed by orchestrator)
-The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
+The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,docs/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,pyrightconfig.json,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md`. It lives in `scripts/ai_loop_auto.ps1`, `scripts/ai_loop_task_first.ps1`, `scripts/continue_ai_loop.ps1`, and `docs/safety.md`; keep them in sync when adding an always-commit path.
 
 ## Templates contract
 When you add or remove a file in `templates/`, also check `scripts/install_into_project.ps1` so auto-copied target files stay correct.

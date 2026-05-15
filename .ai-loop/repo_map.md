@@ -7,6 +7,7 @@
 
 - `AGENTS.md` — AGENTS.md
 - `ai_loop.py` — ai_loop.py - Experimental GitHub PR orchestrator for AI coding loops
+- `pyrightconfig.json` — (no header summary)
 - `pytest.ini` — Only collect from tests/ so repo-root temp/runtime trees are never scanned.
 - `README.md` — AI Orchestrator
 

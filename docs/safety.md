@@ -24,6 +24,7 @@ pytest.ini
 requirements.txt
 pyproject.toml
 setup.cfg
+pyrightconfig.json
 .ai-loop/task.md
 .ai-loop/implementer_summary.md
 .ai-loop/project_summary.md

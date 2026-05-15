@@ -1,0 +1,22 @@
+{
+  "include": [
+    "ai_loop.py",
+    "scripts",
+    "tests"
+  ],
+  "ignore": [
+    "ai_loop.py"
+  ],
+  "exclude": [
+    ".ai-loop",
+    ".claude",
+    ".git",
+    ".pytest_cache",
+    ".tmp",
+    "__pycache__",
+    "node_modules"
+  ],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic",
+  "reportMissingTypeStubs": "none"
+}

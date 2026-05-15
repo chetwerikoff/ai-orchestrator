@@ -128,7 +128,7 @@ try {
     $seen = @{}
     $collected = New-Object System.Collections.Generic.List[object]
 
-    $rootExts = @('.md', '.py', '.ps1', '.ini', '.cfg', '.toml')
+    $rootExts = @('.md', '.py', '.ps1', '.ini', '.cfg', '.toml', '.json')
     foreach ($f in Get-ChildItem -LiteralPath $RepoRoot -File -Force) {
         $ext = $f.Extension.ToLowerInvariant()
         if ($rootExts -notcontains $ext) { continue }
