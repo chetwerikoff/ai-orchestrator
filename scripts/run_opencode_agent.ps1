@@ -88,13 +88,28 @@ try {
         if ($exitCode -eq 0) {
             $capOc = (@($ocLines) | ForEach-Object { "$_" }) -join "`n"
             . (Join-Path $scriptRootOc "record_token_usage.ps1")
+            $pbOc = 0
+            try {
+                $pbOc = [System.Text.Encoding]::UTF8.GetByteCount($promptText)
+            }
+            catch {
+                $pbOc = 0
+            }
+            $fiOc = -1
+            if ($null -ne $env:AI_LOOP_TOKEN_FIX_ITER -and ([string]$env:AI_LOOP_TOKEN_FIX_ITER -match '^-?\d+$')) {
+                $fiOc = [int]$env:AI_LOOP_TOKEN_FIX_ITER
+            }
             Write-CliCaptureTokenUsageIfParsed `
                 -CapturedText $capOc `
                 -ScriptName "run_opencode_agent.ps1" `
                 -Provider "opencode" `
                 -Model $model `
                 -Iteration 0 `
-                -ProjectRootHint $projHintOc
+                -ProjectRootHint $projHintOc `
+                -Phase $(if ($null -ne $env:AI_LOOP_TOKEN_PHASE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_PHASE)) { [string]$env:AI_LOOP_TOKEN_PHASE } else { "" }) `
+                -Role $(if ($null -ne $env:AI_LOOP_TOKEN_ROLE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_ROLE)) { [string]$env:AI_LOOP_TOKEN_ROLE } else { "" }) `
+                -FixIterationIndex $fiOc `
+                -PromptBytes $pbOc
         }
     }
     catch {

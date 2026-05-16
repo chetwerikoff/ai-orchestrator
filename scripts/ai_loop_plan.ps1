@@ -11,7 +11,8 @@ param(
     [string]$ReviewerModel = "",
     [switch]$NoRevision,
     [switch]$WithDraft,
-    [string]$DraftCommand = "run_cursor_agent.ps1"
+    [string]$DraftCommand = "run_cursor_agent.ps1",
+    [switch]$ForceNewChain
 )
 
 function Test-PlannerOutputSanity {
@@ -175,6 +176,36 @@ if (-not (Test-Path -LiteralPath $agentsPath)) { Write-Warning "missing AGENTS.m
 if (-not (Test-Path -LiteralPath $summaryPath)) { Write-Warning "missing .ai-loop/project_summary.md Path: $summaryPath"; exit 1 }
 if (-not (Test-Path -LiteralPath $cmdPath)) { Write-Warning "missing $PlannerCommand Path: $cmdPath"; exit 1 }
 
+try {
+    . (Join-Path $PSScriptRoot "record_token_usage.ps1")
+    $plLeafInit = [System.IO.Path]::GetFileName($cmdPath)
+    $revLeafInit = "none"
+    if ($WithReview -and ($null -ne $reviewerCmdPath) -and (Test-Path -LiteralPath $reviewerCmdPath)) {
+        $revLeafInit = [System.IO.Path]::GetFileName($reviewerCmdPath)
+    }
+    $mriInit = 0
+    if ($WithReview) { $mriInit = $MaxReviewIterations }
+    $nrInit = [bool]$NoRevision
+    $script:PlanChainWrote = $false
+    $initCh = Initialize-AiLoopPlannerChain `
+        -ProjectRoot $ProjectRoot `
+        -ForceNewChain:$ForceNewChain `
+        -PlannerCommand $plLeafInit `
+        -PlannerModel $PlannerModel `
+        -ReviewerCommand $revLeafInit `
+        -ReviewerModel $ReviewerModel `
+        -MaxReviewIters $mriInit `
+        -NoRevision $nrInit `
+        -TaskFileRelative ".ai-loop/task.md"
+    if ($null -ne $initCh) {
+        $script:PlanChainWrote = [bool]$initCh.Wrote
+    }
+}
+catch {
+    Write-Warning "[chain] planner chain init skipped (non-blocking): $($_.Exception.Message)"
+    $script:PlanChainWrote = $false
+}
+
 $planPromptBody = [System.IO.File]::ReadAllText($planPromptPath)
 $agentsBody = [System.IO.File]::ReadAllText($agentsPath)
 $summaryBody = [System.IO.File]::ReadAllText($summaryPath)
@@ -255,6 +286,11 @@ $script:ExitCode = 0
 try {
     $pwArgs = @("--workspace", $ProjectRoot)
     if (-not [string]::IsNullOrWhiteSpace($PlannerModel)) { $pwArgs += @("--model", $PlannerModel) }
+    $env:AI_LOOP_TOKEN_PHASE = "planning"
+    Remove-Item Env:\AI_LOOP_TOKEN_FIX_ITER -ErrorAction SilentlyContinue
+    Remove-Item Env:\AI_LOOP_TOKEN_ROLE -ErrorAction SilentlyContinue
+    $env:AI_LOOP_PLANNER_ROLE = "planner"
+    $env:AI_LOOP_TOKEN_ROLE = "planner"
     $rawLines = @($prompt | & $cmdPath @pwArgs)
     $output = ($rawLines | ForEach-Object { "$_" }) -join "`n"
     if ($LASTEXITCODE -ne 0) { $script:ExitCode = 1; throw "Planner wrapper exited with code $LASTEXITCODE." }
@@ -284,6 +320,10 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($ReviewerModel)) { $revPw += @("--model", $ReviewerModel) }
         for ($i = 1; $i -le $MaxReviewIterations; $i++) {
             Write-Host "Review iteration $i / $MaxReviewIterations ..."
+            $env:AI_LOOP_TOKEN_PHASE = "planning"
+            Remove-Item Env:\AI_LOOP_PLANNER_ROLE -ErrorAction SilentlyContinue
+            Remove-Item Env:\AI_LOOP_TOKEN_FIX_ITER -ErrorAction SilentlyContinue
+            $env:AI_LOOP_TOKEN_ROLE = "planner_review"
             if ($NoRevision) {
                 $reviewPrompt = @(
                     $reviewerTemplateBody,
@@ -297,6 +337,7 @@ try {
             }
             $issuesLines = @($reviewPrompt | & $reviewerCmdPath @revPw)
             $issues = ($issuesLines | ForEach-Object { "$_" }) -join "`n"
+            Remove-Item Env:\AI_LOOP_TOKEN_ROLE -ErrorAction SilentlyContinue
             if ($LASTEXITCODE -ne 0) {
                 [void]$traceLines.Add("## Iteration $i - REVIEW_STATUS: FAILED (reviewer exit $LASTEXITCODE)")
                 [void]$traceLines.Add("task.md was written WITHOUT successful Codex review.")
@@ -350,6 +391,11 @@ try {
 "If you believe the previous draft was already correct and reject all issues, you may output the previous draft verbatim plus the Architect",
 "notes in ## Important." )) -join "`n"
             $revisionPrompt = @($planPromptBody, "## AGENTS.md", $agentsBody, "## project_summary.md", $summaryBody, "## repo_map.md", $repoMapBody, "## USER ASK", ($resolvedAsk + $briefSuffix), "## CURRENT DRAFT", $current, "## REVIEWER ISSUES", $issuesNorm, $revisionInstructions) -join "`n`n"
+            Remove-Item Env:\AI_LOOP_TOKEN_ROLE -ErrorAction SilentlyContinue
+            $env:AI_LOOP_PLANNER_ROLE = "planner_revision"
+            $env:AI_LOOP_TOKEN_ROLE = "planner_revision"
+            $env:AI_LOOP_TOKEN_PHASE = "planning"
+            Remove-Item Env:\AI_LOOP_TOKEN_FIX_ITER -ErrorAction SilentlyContinue
             $revLines = @($revisionPrompt | & $cmdPath @pwArgs)
             $revised = ($revLines | ForEach-Object { "$_" }) -join "`n"
             if ($LASTEXITCODE -ne 0) {
@@ -388,6 +434,15 @@ try {
     if ($outParent -and -not (Test-Path -LiteralPath $outParent)) { New-Item -ItemType Directory -Force -Path $outParent | Out-Null }
     Set-Content -LiteralPath $tmpOut -Value $writeText -Encoding UTF8
     Move-Item -Force -LiteralPath $tmpOut -Destination $Out
+    $writtenFullForChain = if ([System.IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path $ProjectRoot $Out }
+    if ($script:PlanChainWrote) {
+        try {
+            Update-AiLoopPlannerChainTaskName -ProjectRoot $ProjectRoot -TaskFilePath $writtenFullForChain
+        }
+        catch {
+            Write-Warning "[chain] task_name update skipped (non-blocking): $($_.Exception.Message)"
+        }
+    }
     try {
         $orchRoot = Split-Path -Parent $PSScriptRoot
         $writtenFull = if ([System.IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path $ProjectRoot $Out }
@@ -434,6 +489,18 @@ catch {
     if ($backupMade) { Write-Warning "Restored previous $Out from backup." }
 }
 finally {
+    Remove-Item Env:\AI_LOOP_TOKEN_PHASE -ErrorAction SilentlyContinue
+    Remove-Item Env:\AI_LOOP_TOKEN_ROLE -ErrorAction SilentlyContinue
+    Remove-Item Env:\AI_LOOP_PLANNER_ROLE -ErrorAction SilentlyContinue
+    Remove-Item Env:\AI_LOOP_TOKEN_FIX_ITER -ErrorAction SilentlyContinue
+    if ($script:ExitCode -ne 0 -and $script:PlanChainWrote) {
+        try {
+            Archive-AiLoopChainIfPresent -ProjectRoot $ProjectRoot
+        }
+        catch {
+            Write-Warning "[chain] planner failure chain archive skipped: $($_.Exception.Message)"
+        }
+    }
     if ($script:ExitCode -eq 0) {
         try { & (Join-Path $PSScriptRoot "show_token_report.ps1") } catch { Write-Warning "Token report failed: $($_.Exception.Message)" }
     }

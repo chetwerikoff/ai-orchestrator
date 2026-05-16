@@ -223,7 +223,11 @@ def main() -> int:
     p.add_argument("--input", required=True)
     p.add_argument("--output", required=True)
     args = p.parse_args()
-    text = Path(args.input).read_text(encoding="utf-8", errors="replace")
+    raw = Path(args.input).read_bytes()
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        text = raw.decode("utf-16")
+    else:
+        text = raw.decode("utf-8", errors="replace")
     failures = parse_failures(text)
     summary_line = parse_summary_line(text)
     Path(args.output).write_text(render(failures, summary_line), encoding="utf-8")

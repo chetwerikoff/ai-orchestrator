@@ -18,8 +18,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 tests/.token_limits_scratch/
+tests/.orch_*/
 
 # AI loop runtime artifacts
+.ai-loop/chain.json
 .ai-loop/test_output.txt
 .ai-loop/test_output_before_commit.txt
 .ai-loop/last_diff.patch

@@ -80,13 +80,24 @@ try {
         if ($exitCode -eq 0) {
             $capCodexRv = (@($codexLines) | ForEach-Object { "$_" }) -join "`n"
             . (Join-Path $scriptRootReviewer "record_token_usage.ps1")
+            $pbRv = 0
+            try {
+                $pbRv = [System.Text.Encoding]::UTF8.GetByteCount($promptText)
+            }
+            catch {
+                $pbRv = 0
+            }
             Write-CliCaptureTokenUsageIfParsed `
                 -CapturedText $capCodexRv `
                 -ScriptName "run_codex_reviewer.ps1" `
                 -Provider "codex" `
                 -Model $(if ([string]::IsNullOrWhiteSpace($codexDisplayModelRv)) { "codex" } else { $codexDisplayModelRv }) `
                 -Iteration 0 `
-                -ProjectRootHint $projHintCodexRv
+                -ProjectRootHint $projHintCodexRv `
+                -Phase $(if ($null -ne $env:AI_LOOP_TOKEN_PHASE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_PHASE)) { [string]$env:AI_LOOP_TOKEN_PHASE } else { "" }) `
+                -Role $(if ($null -ne $env:AI_LOOP_TOKEN_ROLE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_ROLE)) { [string]$env:AI_LOOP_TOKEN_ROLE } else { "" }) `
+                -FixIterationIndex -1 `
+                -PromptBytes $pbRv
         }
     }
     catch {

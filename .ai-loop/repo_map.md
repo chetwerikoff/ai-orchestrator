@@ -55,6 +55,24 @@
 
 ## tests/
 
+- `tests/.token_limits_scratch/chain_title_65cca5c3bb26417ea7aff0b67545bf5c/.ai-loop/chain.json` — (no header summary)
+- `tests/.token_limits_scratch/chain_title_65cca5c3bb26417ea7aff0b67545bf5c/.ai-loop/task.md` — Task: Generated title after pretend planner
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/.ai-loop/chain.json` — (no header summary)
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/.ai-loop/implementer.json` — (no header summary)
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/.ai-loop/implementer_summary.md` — Implementer summary
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/.ai-loop/task.md` — Task: pytest noop implementer chain
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/fake_auto_loop.ps1` — (no header summary)
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/noop_implementer.ps1` — (no header summary)
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/scripts/ai_loop_task_first.ps1` — Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
+- `tests/.token_limits_scratch/tf_preserve_c47c283e29c44d4c80deed5b668e6d6c/scripts/record_token_usage.ps1` — $PSScriptRoot is empty when this file is dot-sourced from some -Command harnesses; fix to this file's directory.
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/.ai-loop/chain.json` — (no header summary)
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/.ai-loop/implementer.json` — (no header summary)
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/.ai-loop/implementer_summary.md` — Implementer summary
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/.ai-loop/task.md` — Task: pytest noop implementer chain
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/fake_auto_loop.ps1` — (no header summary)
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/noop_implementer.ps1` — (no header summary)
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/scripts/ai_loop_task_first.ps1` — Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
+- `tests/.token_limits_scratch/tf_term_b314aafb2a5c4dfebee4a5db74cb4b31/scripts/record_token_usage.ps1` — $PSScriptRoot is empty when this file is dot-sourced from some -Command harnesses; fix to this file's directory.
 - `tests/test_ai_loop.py` — Unit tests for ai_loop.py pure helpers (stdlib-only module).
 - `tests/test_claude_reviewer.py` — Claude task reviewer (variant A) smoke tests.
 - `tests/test_filter_pytest_failures.py` — Tests for scripts/filter_pytest_failures.py.

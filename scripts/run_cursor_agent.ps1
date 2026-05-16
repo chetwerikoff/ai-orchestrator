@@ -82,7 +82,8 @@ if (-not (Test-Path $indexPath)) { throw "index.js not found: $indexPath" }
 # $input  = prompt from stdin (set by PowerShell from the pipeline)
 # $args   = forwarded agent flags (--print, --trust, --workspace, ...)
 # 2>&1 merges node stderr into stdout so outer redirections capture everything.
-$capturedCa = @($input | & $nodePath $indexPath @args 2>&1)
+$promptTextCa = ($input | Out-String).TrimEnd()
+$capturedCa = @($promptTextCa | & $nodePath $indexPath @args 2>&1)
 $exitCa = $LASTEXITCODE
 
 foreach ($row in @($capturedCa)) {
@@ -93,13 +94,39 @@ try {
     if ($exitCa -eq 0) {
         $capCaText = (@($capturedCa) | ForEach-Object { "$_" }) -join "`n"
         . (Join-Path $scriptRootCa "record_token_usage.ps1")
+        $pbCa = 0
+        try {
+            $pbCa = [System.Text.Encoding]::UTF8.GetByteCount($promptTextCa)
+        }
+        catch {
+            $pbCa = 0
+        }
+        $fiCa = -1
+        if ($null -ne $env:AI_LOOP_TOKEN_FIX_ITER -and ([string]$env:AI_LOOP_TOKEN_FIX_ITER -match '^-?\d+$')) {
+            $fiCa = [int]$env:AI_LOOP_TOKEN_FIX_ITER
+        }
+        $phaseCa = ""
+        if ($null -ne $env:AI_LOOP_TOKEN_PHASE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_PHASE)) {
+            $phaseCa = [string]$env:AI_LOOP_TOKEN_PHASE
+        }
+        $roleCa = ""
+        if ($null -ne $env:AI_LOOP_TOKEN_ROLE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_ROLE)) {
+            $roleCa = [string]$env:AI_LOOP_TOKEN_ROLE
+        }
+        elseif ($phaseCa -eq "planning" -and $null -ne $env:AI_LOOP_PLANNER_ROLE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_PLANNER_ROLE)) {
+            $roleCa = [string]$env:AI_LOOP_PLANNER_ROLE
+        }
         Write-CliCaptureTokenUsageIfParsed `
             -CapturedText $capCaText `
             -ScriptName "run_cursor_agent.ps1" `
             -Provider "cursor" `
             -Model $(if ([string]::IsNullOrWhiteSpace($cursorModelArg)) { "" } else { $cursorModelArg }) `
             -Iteration 0 `
-            -ProjectRootHint $projHintCa
+            -ProjectRootHint $projHintCa `
+            -Phase $phaseCa `
+            -Role $roleCa `
+            -FixIterationIndex $fiCa `
+            -PromptBytes $pbCa
     }
 }
 catch {

@@ -308,9 +308,8 @@ function Invoke-CommandToFile {
         [string]$Command,
         [string]$OutputFile
     )
-
     Write-Host "Running: $Command"
-    powershell -NoProfile -Command $Command *> $OutputFile
+    powershell -NoProfile -Command $Command 2>&1 | Out-File -LiteralPath $OutputFile -Encoding utf8
     return $LASTEXITCODE
 }
 
@@ -962,7 +961,30 @@ function Format-CodexTokenSummaryLines {
     if ($null -eq (Get-Command -Name ConvertFrom-CliTokenUsage -ErrorAction SilentlyContinue)) {
         return @()
     }
-    $parsed = ConvertFrom-CliTokenUsage -Text $Markdown
+    $tail = ($Markdown -split "`r?`n" | Select-Object -Last 25) -join "`n"
+
+    # When diff bodies embed `{"prompt_tokens":...}` earlier in the tail, `ConvertFrom-CliTokenUsage`
+    # still prefers that API shape. Prefer the real Codex CLI footer when it appears in the tail.
+    $footerTotal = $null
+    foreach ($rx in @(
+            '(?im)(?:^|\r?\n)\s*tokens\s+used\s+([\d,]+)\s*(?:\r?\n|$)',
+            '(?im)(?:^|\r?\n)\s*tokens\s+used\s*\r?\n\s*([\d,]+)\s*(?:\r?\n|$)'
+        )) {
+        $mx = [regex]::Matches($tail, $rx)
+        if ($mx.Count -gt 0) {
+            $totalStr = ($mx[$mx.Count - 1].Groups[1].Value -replace ',', '').Trim()
+            if ($totalStr -match '^\d+$') {
+                $footerTotal = [long]$totalStr
+            }
+            break
+        }
+    }
+    if ($null -ne $footerTotal) {
+        $base = ('Codex tokens: ' + (Format-LocaleNeutralThousands -Value $footerTotal))
+        return @($base)
+    }
+
+    $parsed = ConvertFrom-CliTokenUsage -Text $tail
     if (-not $parsed -or $null -eq $parsed.TotalTokens) {
         return @()
     }
@@ -992,7 +1014,12 @@ function Show-CodexReviewConsoleSummary {
     )
 
     Write-Host ""
-    Write-Host "Codex verdict: $Verdict"
+    if ($Verdict -eq 'PASS') {
+        Write-Host 'Codex verdict: PASS'
+    }
+    else {
+        Write-Host 'Codex verdict: FIX_REQUIRED'
+    }
 
     if ($Verdict -eq 'FIX_REQUIRED') {
         $snip = Get-CodexSeverityReasonSnippet -Markdown $ReviewMarkdownRaw
@@ -1814,7 +1841,16 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         Write-Host ""
         Write-Host "Tests failed - skipping Codex review and sending directly to implementer fix." -ForegroundColor Yellow
         $failSummary = Join-Path $AiLoop "test_failures_summary.md"
-        $failText = if (Test-Path $failSummary) { Get-Content $failSummary -Raw } else { Get-Content (Join-Path $AiLoop "test_output.txt") -Raw -ErrorAction SilentlyContinue }
+        $testOut = Join-Path $AiLoop "test_output.txt"
+        $failText = ""
+        if (Test-Path -LiteralPath $failSummary) {
+            $failText = Get-Content -LiteralPath $failSummary -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+        if ($null -eq $failText) { $failText = "" }
+        if ([string]::IsNullOrWhiteSpace($failText) -and (Test-Path -LiteralPath $testOut)) {
+            $failText = Get-Content -LiteralPath $testOut -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+            if ($null -eq $failText) { $failText = "" }
+        }
         $fixPrompt = "Tests are failing. Fix them before any other changes.`n`n$failText"
         Write-NextImplementerPrompt -PromptText $fixPrompt.TrimEnd()
         Run-ImplementerFix -FixIterationIndex $i | Out-Null

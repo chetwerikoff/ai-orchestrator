@@ -1,6 +1,8 @@
 param(
     [switch]$ExportReport,
-    [string]$LimitsYamlPath = ""
+    [string]$LimitsYamlPath = "",
+    [switch]$ByChain,
+    [switch]$GroupByChain
 )
 
 $ErrorActionPreference = "Continue"
@@ -74,6 +76,120 @@ function Sum-TokensForRecord {
         Out = $outTok
         Tot = $totTok
     }
+}
+
+function Get-RecordIntField {
+    param(
+        $Record,
+        [string]$Name
+    )
+    foreach ($p in $Record.PSObject.Properties) {
+        if ($p.Name -eq $Name -and $null -ne $p.Value) {
+            try {
+                return [long]$p.Value
+            }
+            catch {
+                return 0L
+            }
+        }
+    }
+    return 0L
+}
+
+function Format-PlannerFormDecomposedLines {
+    param($GroupRecords)
+
+    $plRow = $null
+    $revRow = $null
+    foreach ($r in $GroupRecords) {
+        $rlc = (Get-RecordField -Record $r -Name "role").ToLowerInvariant()
+        if ($null -eq $plRow -and ($rlc -eq "planner" -or $rlc -eq "planner_revision")) {
+            $plRow = $r
+        }
+        if ($null -eq $revRow -and $rlc -eq "planner_review") {
+            $revRow = $r
+        }
+        if ($null -ne $plRow -and $null -ne $revRow) {
+            break
+        }
+    }
+
+    $plCmd = ""
+    if ($null -ne $plRow) {
+        $plCmd = Get-RecordField -Record $plRow -Name "planner_command"
+    }
+    if ([string]::IsNullOrWhiteSpace($plCmd)) { $plCmd = "(unknown)" }
+
+    $revCmdPl = ""
+    if ($null -ne $plRow) {
+        $revCmdPl = Get-RecordField -Record $plRow -Name "reviewer_command"
+    }
+    $revCmdRv = ""
+    if ($null -ne $revRow) {
+        $revCmdRv = Get-RecordField -Record $revRow -Name "reviewer_command"
+    }
+    $revCmd = $revCmdPl
+    if ([string]::IsNullOrWhiteSpace($revCmd)) {
+        $revCmd = $revCmdRv
+    }
+    if ([string]::IsNullOrWhiteSpace($revCmd)) { $revCmd = "(unknown)" }
+
+    $maxRev = $null
+    $noRevTxt = "(unknown)"
+    if ($null -ne $plRow) {
+        foreach ($pr in $plRow.PSObject.Properties) {
+            if ($pr.Name -eq "max_review_iters" -and $null -ne $pr.Value) {
+                try {
+                    $maxRev = [int]$pr.Value
+                }
+                catch {
+                    $maxRev = $null
+                }
+            }
+            if ($pr.Name -eq "no_revision" -and $null -ne $pr.Value) {
+                try {
+                    $noRevTxt = [string][bool]$pr.Value
+                }
+                catch {
+                    $noRevTxt = "(unknown)"
+                }
+            }
+        }
+    }
+    if ($null -eq $maxRev) {
+        $maxRevDisp = "(unknown)"
+    }
+    else {
+        $maxRevDisp = [string]$maxRev
+    }
+
+    $plProv = "(unknown)"
+    $plMod = "(unknown)"
+    if ($null -ne $plRow) {
+        $pp = Get-RecordField -Record $plRow -Name "provider"
+        $pm = Get-RecordField -Record $plRow -Name "model"
+        if (-not [string]::IsNullOrWhiteSpace($pp)) { $plProv = $pp }
+        if (-not [string]::IsNullOrWhiteSpace($pm)) { $plMod = $pm }
+    }
+
+    $rvProv = "(unknown)"
+    $rvMod = "(unknown)"
+    if ($null -ne $revRow) {
+        $rp = Get-RecordField -Record $revRow -Name "provider"
+        $rm = Get-RecordField -Record $revRow -Name "model"
+        if (-not [string]::IsNullOrWhiteSpace($rp)) { $rvProv = $rp }
+        if (-not [string]::IsNullOrWhiteSpace($rm)) { $rvMod = $rm }
+    }
+
+    $lines = New-Object System.Collections.Generic.List[string]
+    [void]$lines.Add("planner_form (decomposed):")
+    [void]$lines.Add("  planner_command: $plCmd")
+    [void]$lines.Add("  planner provider/model: $plProv / $plMod")
+    [void]$lines.Add("  reviewer_command: $revCmd")
+    [void]$lines.Add("  reviewer provider/model: $rvProv / $rvMod")
+    [void]$lines.Add("  max_review_iters: $maxRevDisp")
+    [void]$lines.Add("  no_revision: $noRevTxt")
+    return $lines
 }
 
 function Get-RecordField {
@@ -321,6 +437,82 @@ try {
             $consoleLines.Add("No token usage records found.")
         }
         else {
+            if ($ByChain -or $GroupByChain) {
+                $groupMap = @{}
+                foreach ($rec in $records) {
+                    $cid = Get-RecordField -Record $rec -Name "planner_chain_id"
+                    if ([string]::IsNullOrWhiteSpace($cid)) { $cid = "<no chain>" }
+                    if (-not $groupMap.ContainsKey($cid)) {
+                        $groupMap[$cid] = New-Object System.Collections.ArrayList
+                    }
+                    [void]$groupMap[$cid].Add($rec)
+                }
+                $consoleLines.Add("==============================")
+                $consoleLines.Add("TOKEN USAGE BY CHAIN")
+                $consoleLines.Add("==============================")
+                $chainIdsSorted = New-Object System.Collections.Generic.List[string]
+                foreach ($gk in $groupMap.Keys) {
+                    [void]$chainIdsSorted.Add([string]$gk)
+                }
+                $chainIdsSorted.Sort()
+                foreach ($cid in $chainIdsSorted) {
+                    $grp = @($groupMap[$cid])
+                    $tnChain = "unknown"
+                    foreach ($r0 in $grp) {
+                        $t0 = Get-RecordField -Record $r0 -Name "task_name"
+                        if (-not [string]::IsNullOrWhiteSpace($t0)) { $tnChain = $t0; break }
+                    }
+                    $consoleLines.Add("")
+                    $consoleLines.Add("--- Chain: $cid ---")
+                    $consoleLines.Add("task_name: $tnChain")
+                    foreach ($pfl in (Format-PlannerFormDecomposedLines -GroupRecords $grp)) {
+                        $consoleLines.Add($pfl)
+                    }
+
+                    $roleAgg = @{}
+                    $pbAgg = @{}
+                    $maxFix = [long]-1
+                    foreach ($rr in $grp) {
+                        $rl = Get-RecordField -Record $rr -Name "role"
+                        if ([string]::IsNullOrWhiteSpace($rl)) { $rl = "(no role)" }
+                        if (-not $roleAgg.ContainsKey($rl)) {
+                            $roleAgg[$rl] = @{ In = 0L; Out = 0L; Tot = 0L }
+                            $pbAgg[$rl] = 0L
+                        }
+                        $sx = Sum-TokensForRecord -Record $rr
+                        $roleAgg[$rl].In += $sx.In
+                        $roleAgg[$rl].Out += $sx.Out
+                        $roleAgg[$rl].Tot += $sx.Tot
+                        $pbAgg[$rl] += Get-RecordIntField -Record $rr -Name "prompt_bytes"
+                        $rlc = $rl.ToLowerInvariant()
+                        if ($rlc -eq "implementer") {
+                            foreach ($pp in $rr.PSObject.Properties) {
+                                if ($pp.Name -eq "fix_iteration_index" -and $null -ne $pp.Value) {
+                                    try {
+                                        $fv = [long]$pp.Value
+                                        if ($fv -gt $maxFix) { $maxFix = $fv }
+                                    }
+                                    catch { }
+                                }
+                            }
+                        }
+                    }
+                    foreach ($rk in ($roleAgg.Keys | Sort-Object)) {
+                        $va = $roleAgg[$rk]
+                        $pbv = $pbAgg[$rk]
+                        $consoleLines.Add("  role $rk  tokens in:$($va.In) out:$($va.Out) total:$($va.Tot)  prompt_bytes:$pbv")
+                    }
+                    if ($maxFix -ge 0) {
+                        $consoleLines.Add("  fix_iters (max fix_iteration_index for implementer): $maxFix")
+                    }
+                    else {
+                        $consoleLines.Add("  fix_iters (max fix_iteration_index for implementer): 0")
+                    }
+                }
+                $consoleLines.Add("")
+                $consoleLines.Add("==============================")
+            }
+            else {
             $taskName = "unknown"
             $scriptName = "unknown"
             $bestTs = ""
@@ -489,6 +681,7 @@ try {
             }
 
             $consoleLines.Add("==============================")
+            }
         }
     }
 }

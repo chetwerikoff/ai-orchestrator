@@ -12,7 +12,8 @@ param(
     [switch]$WithWrapUp,
     [string]$TestCommand = "python -m pytest",
     [string]$PostFixCommand = "",
-    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,tasks/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,pyrightconfig.json,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md"
+    [string]$SafeAddPaths = "src/,tests/,README.md,AGENTS.md,scripts/,docs/,tasks/,templates/,ai_loop.py,pytest.ini,.gitignore,requirements.txt,pyproject.toml,setup.cfg,pyrightconfig.json,.ai-loop/task.md,.ai-loop/implementer_summary.md,.ai-loop/project_summary.md,.ai-loop/repo_map.md,.ai-loop/failures.md,.ai-loop/archive/rolls/,.ai-loop/_debug/session_draft.md",
+    [switch]$ForceNewChain
 )
 $ErrorActionPreference = "Stop"
 $STABLE_PREAMBLE = @"
@@ -257,9 +258,19 @@ function Invoke-ImplementerImplementation {
     if (-not [string]::IsNullOrWhiteSpace($Model)) { $agentArgs += @("--model", $Model) }
     # Prompt via stdin to avoid cmd.exe ~8 191-char batch-line limit (ERROR_ACCESS_DENIED).
     # run_cursor_agent.ps1 calls node.exe directly so stdin is never dropped mid-chain.
-    $prompt | & $CommandName @agentArgs *> $outputPath
-    if ($LASTEXITCODE -ne 0) {
-        throw "Implementer run failed with exit code $LASTEXITCODE. See: $outputPath"
+    $env:AI_LOOP_TOKEN_PHASE = "implementation"
+    $env:AI_LOOP_TOKEN_ROLE = "implementer"
+    $env:AI_LOOP_TOKEN_FIX_ITER = "0"
+    try {
+        $prompt | & $CommandName @agentArgs *> $outputPath
+        if ($LASTEXITCODE -ne 0) {
+            throw "Implementer run failed with exit code $LASTEXITCODE. See: $outputPath"
+        }
+    }
+    finally {
+        Remove-Item Env:\AI_LOOP_TOKEN_PHASE -ErrorAction SilentlyContinue
+        Remove-Item Env:\AI_LOOP_TOKEN_ROLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\AI_LOOP_TOKEN_FIX_ITER -ErrorAction SilentlyContinue
     }
     Write-Host "Implementer finished. See: $outputPath"
     $afterPaths = @(Get-ImplementationDeltaPaths)
@@ -348,6 +359,20 @@ function Test-TaskFilesInScopeExist {
     return @{ Invented = @($invented); Checked = $checked; SectionFound = $true }
 }
 
+function Invoke-ArchiveTaskFirstChainIfWrote {
+    try {
+        if (-not $script:TaskFirstChainWrote) {
+            return
+        }
+        if (Get-Command -Name Archive-AiLoopChainIfPresent -ErrorAction SilentlyContinue) {
+            Archive-AiLoopChainIfPresent -ProjectRoot $ProjectRoot
+        }
+    }
+    catch {
+        Write-Warning "[chain] task-first archive skipped (non-blocking): $($_.Exception.Message)"
+    }
+}
+
 # Dot-source guard: load helper definitions only when dot-sourcing this file.
 if ($MyInvocation.InvocationName -eq '.') { return }
 
@@ -409,6 +434,23 @@ if (-not $SkipScopeCheck) {
     }
 }
 
+$script:TaskFirstChainWrote = $false
+try {
+    . (Join-Path $PSScriptRoot "record_token_usage.ps1")
+    $initTf = Initialize-AiLoopPlannerChain `
+        -ProjectRoot $ProjectRoot `
+        -ForceNewChain:$ForceNewChain `
+        -Manual `
+        -TaskFileRelative (($TaskPath -replace '/', '\').TrimStart('.\'))
+    if ($null -ne $initTf) {
+        $script:TaskFirstChainWrote = [bool]$initTf.Wrote
+    }
+}
+catch {
+    Write-Warning "[chain] manual task-first chain init skipped (non-blocking): $($_.Exception.Message)"
+    $script:TaskFirstChainWrote = $false
+}
+
 if (-not $SkipInitialCursor) {
     Clear-AiLoopRuntimeState
     Initialize-ImplementerSummaryForImplementation
@@ -464,6 +506,7 @@ Also update .ai-loop/implementer_summary.md (see initial instructions): changed 
     if (-not $implOutcome.HadAgentSideEffects) {
         Write-NoChangesFinalStatus
         Write-Host "NO_CHANGES_AFTER_IMPLEMENTER: Implementer produced no repo changes after two attempts. Codex review was skipped. See .ai-loop\final_status.md" -ForegroundColor Red
+        Invoke-ArchiveTaskFirstChainIfWrote
         exit 1
     }
     $resultFull = Join-Path $ProjectRoot ".ai-loop\implementer_result.md"
@@ -486,6 +529,7 @@ DETAIL: Only .ai-loop/implementer_result.md changed in the implementer pass delt
             $detail | Set-Content -Path (Join-Path $AiLoop "final_status.md") -Encoding UTF8
             Write-Host ""
             Write-Host $msg -ForegroundColor Red
+            Invoke-ArchiveTaskFirstChainIfWrote
             exit 1
         }
     }

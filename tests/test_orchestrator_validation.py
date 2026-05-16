@@ -107,11 +107,19 @@ def _extract_get_review_verdict_from_auto(ps1_text: str) -> str:
     return ps1_text[start:end]
 
 
-def _extract_codex_review_console_summarizers_from_auto(ps1_text: str) -> str:
-    """Console summary helpers (`Get-ReviewVerdictLineScanResult` through `Show-CodexReviewConsoleSummary`)."""
+def _extract_codex_console_summary_helpers(ps1_text: str) -> str:
+    """Console summary stack: line scan + locale fmt + reason snippet + token lines + Show."""
     start = ps1_text.index("function Get-ReviewVerdictLineScanResult")
     end = ps1_text.index("function Format-FixPromptFromObject", start)
     return ps1_text[start:end]
+
+
+def _extract_run_codex_review_prompt_literal(ai_loop_auto_text: str) -> str:
+    """Exact Codex `$prompt` body inside `Run-CodexReview` single-quote here-string."""
+    anchor = ai_loop_auto_text.index("function Run-CodexReview")
+    open_idx = ai_loop_auto_text.index("$prompt = @'", anchor) + len("$prompt = @'")
+    close_idx = ai_loop_auto_text.index("\n'@", open_idx)
+    return ai_loop_auto_text[open_idx:close_idx]
 
 
 def extract_fix_prompt_from_review_text(review: str) -> str | None:
@@ -1368,401 +1376,6 @@ def test_ai_loop_auto_resume_explicit_cursor_command_skips_persisted_implementer
     assert cmd_gate < chunk.index("Read-ImplementerStateObject")
 
 
-def test_ai_loop_auto_announces_fix_required_before_extract_fix_prompt() -> None:
-    """Non-PASS path mirrors PASS visibility: summary (verdict) before Extract-FixPrompt."""
-    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    extract_ann = 'Write-Host "Extracting fix prompt for implementer..."'
-    assert extract_ann in text
-    _, _, main_iteration = text.partition("for ($i = 1; $i -le $MaxIterations; $i++)")
-    verdict_in_main = main_iteration.index("$codexVerdict = Get-CodexVerdict")
-    summary_in_main = main_iteration.index("Show-CodexReviewConsoleSummary", verdict_in_main)
-    extract_in_main = main_iteration.index(extract_ann, summary_in_main)
-    assert summary_in_main < extract_in_main
-
-
-def test_codex_review_console_summary_reason_priority_and_tokens_harness() -> None:
-    """Reason line from CRITICAL/HIGH/MEDIUM bullets; token line via shared ConvertFrom-CliTokenUsage."""
-    ps = _powershell_exe()
-    if not ps:
-        pytest.skip("No pwsh or powershell on PATH")
-
-    scratch = _orch_scratch("codex_console_summary")
-    scratch.mkdir(parents=True, exist_ok=True)
-    try:
-        auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-        funcs = _extract_codex_review_console_summarizers_from_auto(auto_text)
-        harness_path = scratch / "_orch_codex_console_summary.ps1"
-        harness_path.write_text(
-            """param(
-    [Parameter(Mandatory)][string]$FixturePath,
-    [Parameter(Mandatory)][string]$RepoRoot
-)
-
-$md = Get-Content -LiteralPath $FixturePath -Raw -Encoding UTF8 -ErrorAction Stop
-if ($null -eq $md) {
-    $md = ""
-}
-
-$rtu = Join-Path (Join-Path $RepoRoot 'scripts') 'record_token_usage.ps1'
-. $rtu
-
-"""
-            + funcs
-            + """
-$reason = Get-CodexSeverityReasonSnippet -Markdown $md
-$tok = @(Format-CodexTokenSummaryLines -Markdown $md)
-$tokEnc = [string]::Join("`t", $tok)
-Write-Output ("REASON`t" + $reason)
-Write-Output ("TOKENS`t" + $tokEnc)
-""",
-            encoding="utf-8",
-        )
-
-        def _run(fixture: str) -> tuple[str, list[str]]:
-            p = scratch / "fixture.md"
-            p.write_text(textwrap.dedent(fixture).strip() + "\n", encoding="utf-8")
-            proc = subprocess.run(
-                [
-                    ps,
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(harness_path),
-                    str(p),
-                    str(_ROOT),
-                ],
-                cwd=str(_ROOT),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=120,
-                check=False,
-            )
-            detail = (proc.stdout or "") + (proc.stderr or "")
-            assert proc.returncode == 0, detail
-            lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
-            reason = ""
-            toks: list[str] = []
-            for ln in lines:
-                if ln.startswith("REASON\t"):
-                    reason = ln.split("\t", 1)[1]
-                elif ln.startswith("TOKENS\t"):
-                    tail = ln.split("\t", 1)[1]
-                    toks = [x for x in tail.split("\t") if x]
-            return reason, toks
-
-        r1, _t1 = _run(
-            """
-            VERDICT: FIX_REQUIRED
-
-            CRITICAL:
-            - Alpha from critical
-
-            HIGH:
-            - Beta high only
-            """
-        )
-        assert "Alpha from critical" in r1
-        assert "Beta" not in r1
-
-        r2, _t2 = _run(
-            """
-            VERDICT: FIX_REQUIRED
-
-            CRITICAL:
-            - none
-
-            HIGH:
-            - take this high bullet
-            """
-        )
-        assert "take this high" in r2
-
-        r3, _t3 = _run(
-            """
-            VERDICT: FIX_REQUIRED
-
-            MEDIUM:
-            - none
-
-            FIX_PROMPT_FOR_IMPLEMENTER:
-            Free text with no severity bullets.
-            """
-        )
-        assert r3 == ""
-
-        r3b, _t3b = _run(
-            """
-            VERDICT: FIX_REQUIRED
-
-            HIGH:
-
-            OBSERVATIONS:
-            - This bullet must not become the Codex reason (empty HIGH above).
-            """
-        )
-        assert r3b == ""
-
-        _r4, t4 = _run(
-            """
-            VERDICT: PASS
-
-            Some narrative.
-
-            tokens used
-            12,345
-            """
-        )
-        assert t4 and t4[0] == "Codex tokens: 12 345"
-
-        _r5, t5 = _run(
-            """
-            VERDICT: PASS
-
-            No token usage block in this artifact.
-            """
-        )
-        assert t5 == []
-
-        long_body = "x" * 280
-        r6, _t6 = _run(
-            f"""
-            VERDICT: FIX_REQUIRED
-
-            HIGH:
-            - {long_body}
-            """
-        )
-        assert r6.endswith("...")
-        assert len(r6) <= 240
-
-        u_ellipsis = "\u2026"
-        r7, _t7 = _run(
-            textwrap.dedent(
-                f"""
-                ## Prompt-style preamble
-
-                CRITICAL:
-                - ...
-                - none
-
-                HIGH:
-                - must ignore bullets above final verdict
-
-                MEDIUM:
-                - {u_ellipsis}
-
-                VERDICT: FIX_REQUIRED
-
-                HIGH:
-                - legitimate finding after verdict
-                """
-            ).strip()
-            + "\n"
-        )
-        assert "legitimate finding after verdict" in r7
-        assert "must ignore bullets above final verdict" not in r7
-
-        r8, _t8 = _run(
-            """
-            VERDICT: FIX_REQUIRED
-
-            HIGH:
-            - ...
-            - use this substantive bullet
-            """
-        )
-        assert "use this substantive bullet" in r8
-
-        r8b, _t8b = _run(
-            f"""
-            VERDICT: FIX_REQUIRED
-
-            HIGH:
-            - {u_ellipsis}
-            - real bullet after unicode ellipsis placeholder
-            """
-        )
-        assert "real bullet after unicode ellipsis" in r8b
-
-        r9, _t9 = _run(
-            """
-            VERDICT: FIX_REQUIRED
-
-            Narrative only — no CRITICAL/HIGH/MEDIUM severity buckets here.
-            """
-        )
-        assert r9 == ""
-
-        r10, _t10 = _run(
-            """
-            CRITICAL:
-            - would dominate if reasons scanned the full transcript
-
-            HIGH:
-            - plausible bullet but no exact anchored VERDICT line exists
-            """
-        )
-        assert r10 == ""
-
-        r11, _t11 = _run(
-            """
-            VERDICT: FIX_REQUIRED (instructional; not whole-line anchored)
-
-            HIGH:
-            - must not surface without an exact VERDICT line match
-            """
-        )
-        assert r11 == ""
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-
-
-def test_codex_review_console_summary_skips_codex_reason_line_when_snippet_empty() -> None:
-    """FIX_REQUIRED + empty snippet must not emit `Codex reason:` (host captures transcript output)."""
-    ps = _powershell_exe()
-    if not ps:
-        pytest.skip("No pwsh or powershell on PATH")
-
-    scratch = _orch_scratch("codex_console_summary_transcript")
-    scratch.mkdir(parents=True, exist_ok=True)
-    try:
-        auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-        funcs = _extract_codex_review_console_summarizers_from_auto(auto_text)
-        harness_path = scratch / "_orch_codex_console_transcript.ps1"
-        harness_path.write_text(
-            """param(
-    [Parameter(Mandatory)][string]$FixturePath,
-    [Parameter(Mandatory)][string]$RepoRoot
-)
-
-$md = Get-Content -LiteralPath $FixturePath -Raw -Encoding UTF8 -ErrorAction Stop
-if ($null -eq $md) {
-    $md = ""
-}
-
-$rtu = Join-Path (Join-Path $RepoRoot 'scripts') 'record_token_usage.ps1'
-. $rtu
-
-"""
-            + funcs
-            + """
-$trans = Join-Path $PSScriptRoot '_orch_summary_transcript.txt'
-Start-Transcript -LiteralPath $trans -Force | Out-Null
-try {
-    Show-CodexReviewConsoleSummary -Verdict 'FIX_REQUIRED' -ReviewMarkdownRaw $md
-}
-finally {
-    try {
-        Stop-Transcript | Out-Null
-    }
-    catch {
-        # non-fatal: transcript stop failures must not hide harness exit issues
-    }
-}
-$captured = Get-Content -LiteralPath $trans -Raw -ErrorAction SilentlyContinue
-if ($null -eq $captured) {
-    $captured = ''
-}
-Write-Output $captured
-""",
-            encoding="utf-8",
-        )
-
-        fixtures: list[tuple[str, str]] = [
-            (
-                "post_verdict_empty_snippet",
-                textwrap.dedent(
-                    """
-                    VERDICT: FIX_REQUIRED
-
-                    HIGH:
-                    - ...
-
-                    Leading preamble placeholders without buckets:
-
-                    CRITICAL:
-                    - none
-
-                    VERDICT: FIX_REQUIRED
-
-                    Closing prose without severity headings again.
-                    """
-                ).strip()
-                + "\n",
-            ),
-            (
-                "no_anchored_verdict_only_placeholders",
-                textwrap.dedent(
-                    """
-                    ## Prompt-style preamble
-
-                    CRITICAL:
-                    - ...
-                    - none
-
-                    HIGH:
-                    - would leak into console if file were scanned without a verdict tail
-
-                    MEDIUM:
-                    - filler that is not ignorable by bullet rules alone
-                    """
-                ).strip()
-                + "\n",
-            ),
-        ]
-
-        for _label, fixture_body in fixtures:
-            p = scratch / "fixture.md"
-            p.write_text(fixture_body, encoding="utf-8")
-
-            proc = subprocess.run(
-                [
-                    ps,
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(harness_path),
-                    str(p),
-                    str(_ROOT),
-                ],
-                cwd=str(_ROOT),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=120,
-                check=False,
-            )
-            detail = (proc.stdout or "") + (proc.stderr or "")
-            assert proc.returncode == 0, detail
-            combined = detail
-            assert "Codex verdict:" in combined
-            assert "Codex reason:" not in combined
-            assert ".ai-loop" in combined and "codex_review.md" in combined
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
-
-
-def test_ai_loop_auto_resume_shows_console_summary_before_existing_pass_message() -> None:
-    t = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    resume_block = t[t.index("function Try-ResumeFromExistingReview") :]
-    a = resume_block.index('if ($codexVerdict -eq "PASS") {')
-    sub = resume_block[a:]
-    b = sub.index('Write-Host "Existing Codex verdict is PASS.')
-    sidx = sub.index("Show-CodexReviewConsoleSummary")
-    assert sidx < b
-
-
-def test_ai_loop_auto_resume_fix_branch_uses_console_summary() -> None:
-    t = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    needle = 'Show-CodexReviewConsoleSummary -Verdict "FIX_REQUIRED"'
-    assert needle in t
-
-
 def test_safety_doc_documents_implementer_json_runtime_policy() -> None:
     t = (_ROOT / "docs" / "safety.md").read_text(encoding="utf-8")
     assert "implementer.json" in t
@@ -1814,54 +1427,6 @@ def test_codex_prompt_protects_queued_tasks() -> None:
     text = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
     assert "tasks/" in text
     assert any("tasks/" in para and "scope" in para.lower() for para in text.split("\n\n"))
-
-
-def _extract_run_codex_review_prompt_literal(ai_loop_auto_text: str) -> str:
-    """Exact Codex `$prompt` body inside `Run-CodexReview` single-quote here-string."""
-    anchor = ai_loop_auto_text.index("function Run-CodexReview")
-    open_idx = ai_loop_auto_text.index("$prompt = @'", anchor) + len("$prompt = @'")
-    close_idx = ai_loop_auto_text.index("\n'@", open_idx)
-    return ai_loop_auto_text[open_idx:close_idx]
-
-
-def test_run_codex_review_prompt_preserves_literal_json_fence() -> None:
-    """Run-CodexReview prompt must retain ```json fences (expandable `"@` strips/alters backticks)."""
-    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    anchor = text.index("function Run-CodexReview")
-    snippet = text[anchor : text.index("function Get-ReviewVerdict", anchor)]
-    assert '$prompt = @"' not in snippet
-    assert "$prompt = @'" in snippet
-    literal = _extract_run_codex_review_prompt_literal(text)
-    assert "```json\n" in literal
-    assert "\n```\n\nRules:" in literal
-
-
-def test_run_codex_review_joined_capture_invokes_token_hook() -> None:
-    """Run-CodexReview must record usage from the in-process joined capture with dedupe id."""
-    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    anchor = text.index("function Run-CodexReview")
-    end = text.index("function Get-ReviewVerdictLineScanResult", anchor)
-    body = text[anchor:end]
-    assert "param([int]$Iteration = 1)" in body
-    assert "Write-CliCaptureTokenUsageIfParsed" in body
-    assert "ai_loop_auto.codex_review" in body
-    assert '-DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration)' in body
-
-
-def test_review_loop_calls_run_codex_review_with_iteration_only() -> None:
-    """Iteration token hook lives inside Run-CodexReview — not duplicated in the outer loop body."""
-    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    loop_anchor = text.index("for ($i = 1; $i -le $MaxIterations; $i++)")
-    fix_anchor = text.index('Write-Host "Extracting fix prompt for implementer..."', loop_anchor)
-    loop_seg = text[loop_anchor:fix_anchor]
-    assert "Run-CodexReview -Iteration $i" in loop_seg
-    assert "Write-CliCaptureTokenUsageIfParsed" not in loop_seg
-
-
-def test_pass_skips_show_token_report_when_chained_from_task_first() -> None:
-    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    assert '$env:AI_LOOP_CHAIN_FROM_TASK_FIRST -ne "1"' in text
-    assert text.count('$env:AI_LOOP_CHAIN_FROM_TASK_FIRST -ne "1"') >= 2
 
 
 def test_get_review_verdict_exact_line_matching_and_last_exact_wins() -> None:
@@ -1973,6 +1538,243 @@ Write-Output $r
         combined_b = (proc_b.stdout or "") + (proc_b.stderr or "")
         assert proc_b.returncode == 0, combined_b
         assert proc_b.stdout.strip() == "PASS"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_format_codex_token_summary_lines_footer_wins_over_embedded_fixture() -> None:
+    """CLI `tokens used` footer must win over diff-embedded `prompt_tokens` JSON (last-25-line tail)."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    helpers = _extract_codex_console_summary_helpers(auto_text)
+    rec = str((_SCRIPTS / "record_token_usage.ps1").resolve())
+    scratch = _orch_scratch("codex_token_fmt")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        md_path = scratch / "review.md"
+        md_path.write_text(
+            '```diff\n+{"prompt_tokens":1,"completion_tokens":2}\n```\n\n'
+            "VERDICT: PASS\n\n"
+            "tokens used\n36088\n",
+            encoding="utf-8",
+        )
+        harness = scratch / "_orch_codex_token_fmt.ps1"
+        rec_q = rec.replace("'", "''")
+        harness.write_text(
+            textwrap.dedent(
+                """
+                param([Parameter(Mandatory)][string]$MarkdownPath)
+                $ErrorActionPreference = 'Stop'
+                . '__REC__'
+                __HELPERS__
+                $raw = Get-Content -LiteralPath $MarkdownPath -Raw -Encoding utf8
+                foreach ($ln in @(Format-CodexTokenSummaryLines -Markdown $raw)) {
+                    Write-Output $ln
+                }
+                """
+            )
+            .strip()
+            .replace("__REC__", rec_q)
+            .replace("__HELPERS__", helpers),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(md_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        out = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, out
+        lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+        assert any("36 088" in ln for ln in lines), f"expected grouped thousands in output, got {lines!r}"
+        assert not any("in 1 / out 2" in ln for ln in lines), f"false-positive split totals, got {lines!r}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_format_codex_token_summary_lines_empty_without_footer() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    helpers = _extract_codex_console_summary_helpers(auto_text)
+    rec = str((_SCRIPTS / "record_token_usage.ps1").resolve())
+    scratch = _orch_scratch("codex_token_fmt_empty")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        md_path = scratch / "review.md"
+        md_path.write_text("VERDICT: PASS\n", encoding="utf-8")
+        harness = scratch / "_orch_codex_token_empty.ps1"
+        rec_q = rec.replace("'", "''")
+        harness.write_text(
+            textwrap.dedent(
+                """
+                param([Parameter(Mandatory)][string]$MarkdownPath)
+                $ErrorActionPreference = 'Stop'
+                . '__REC__'
+                __HELPERS__
+                $raw = Get-Content -LiteralPath $MarkdownPath -Raw -Encoding utf8
+                if (@(Format-CodexTokenSummaryLines -Markdown $raw).Count -ne 0) { exit 2 }
+                Write-Output 'ok'
+                """
+            )
+            .strip()
+            .replace("__REC__", rec_q)
+            .replace("__HELPERS__", helpers),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(md_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, detail
+        assert (proc.stdout or "").strip() == "ok"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_show_codex_review_console_summary_lines_no_severity_prefix() -> None:
+    """Codex console summary prints plain verdict lines (no [PASS] / [HIGH] prefixes)."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    helpers = _extract_codex_console_summary_helpers(auto_text)
+    rec = str((_SCRIPTS / "record_token_usage.ps1").resolve())
+    scratch = _orch_scratch("codex_show_summary")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        cap = scratch / "cap.txt"
+        pass_md = scratch / "pass.md"
+        pass_md.write_text("VERDICT: PASS\n", encoding="utf-8")
+        fix_md = scratch / "fix.md"
+        fix_md.write_text(
+            textwrap.dedent(
+                """
+                VERDICT: FIX_REQUIRED
+
+                HIGH:
+                - Widget frobnication regression in scope filter.
+
+                FINAL_NOTE:
+                fix it
+                """
+            ).strip(),
+            encoding="utf-8",
+        )
+        harness = scratch / "_orch_codex_show.ps1"
+        rec_q = rec.replace("'", "''")
+        harness.write_text(
+            textwrap.dedent(
+                """
+                param(
+                    [Parameter(Mandatory)][string]$CapturePath,
+                    [Parameter(Mandatory)][ValidateSet('PASS','FIX_REQUIRED')][string]$Verdict,
+                    [Parameter(Mandatory)][string]$MarkdownPath
+                )
+                $ErrorActionPreference = 'Stop'
+                if (Test-Path -LiteralPath $CapturePath) { Remove-Item -LiteralPath $CapturePath -Force }
+                function global:Write-Host {
+                    param([object]$Object = '')
+                    Add-Content -LiteralPath $CapturePath -Value ([string]$Object)
+                }
+                . '__REC__'
+                __HELPERS__
+                $raw = Get-Content -LiteralPath $MarkdownPath -Raw -Encoding utf8
+                Show-CodexReviewConsoleSummary -Verdict $Verdict -ReviewMarkdownRaw $raw
+                """
+            )
+            .strip()
+            .replace("__REC__", rec_q)
+            .replace("__HELPERS__", helpers),
+            encoding="utf-8",
+        )
+
+        proc_pass = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(cap),
+                "PASS",
+                str(pass_md),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        assert proc_pass.returncode == 0, (proc_pass.stdout or "") + (proc_pass.stderr or "")
+        pass_cap = cap.read_text(encoding="utf-8", errors="replace")
+        assert "Codex verdict: PASS" in pass_cap
+        assert "[PASS]" not in pass_cap
+
+        if cap.exists():
+            cap.unlink()
+        proc_fix = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(cap),
+                "FIX_REQUIRED",
+                str(fix_md),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        assert proc_fix.returncode == 0, (proc_fix.stdout or "") + (proc_fix.stderr or "")
+        fix_cap = cap.read_text(encoding="utf-8", errors="replace")
+        assert "Codex verdict: FIX_REQUIRED" in fix_cap
+        assert "[HIGH]" not in fix_cap
+        assert "Codex reason:" in fix_cap
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
@@ -3419,6 +3221,7 @@ def test_ai_loop_plan_with_draft_nonfatal_when_draft_command_throws() -> None:
             capture_output=True,
             text=True,
             encoding="utf-8",
+            errors="replace",
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
         out_task = ai_loop / "task.md"

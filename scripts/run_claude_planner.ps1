@@ -57,13 +57,28 @@ try {
         if ($exitCode -eq 0) {
             $cap = (@($claudeLines) | ForEach-Object { "$_" }) -join "`n"
             . (Join-Path $scriptRootPlanner "record_token_usage.ps1")
+            $rolePl = [string]$env:AI_LOOP_PLANNER_ROLE
+            if ([string]::IsNullOrWhiteSpace($rolePl)) {
+                $rolePl = "planner"
+            }
+            $pbPl = 0
+            try {
+                $pbPl = [System.Text.Encoding]::UTF8.GetByteCount($promptText)
+            }
+            catch {
+                $pbPl = 0
+            }
             Write-CliCaptureTokenUsageIfParsed `
                 -CapturedText $cap `
                 -ScriptName "run_claude_planner.ps1" `
                 -Provider "anthropic" `
                 -Model $model `
                 -Iteration 0 `
-                -ProjectRootHint $projHintPlanner
+                -ProjectRootHint $projHintPlanner `
+                -Phase "planning" `
+                -Role $rolePl `
+                -FixIterationIndex -1 `
+                -PromptBytes $pbPl
         }
     }
     catch {

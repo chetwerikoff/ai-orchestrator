@@ -64,13 +64,24 @@ try {
         if ($exitCode -eq 0) {
             $cap = (@($claudeLines) | ForEach-Object { "$_" }) -join "`n"
             . (Join-Path $scriptRootReviewer "record_token_usage.ps1")
+            $pbCr = 0
+            try {
+                $pbCr = [System.Text.Encoding]::UTF8.GetByteCount($promptText)
+            }
+            catch {
+                $pbCr = 0
+            }
             Write-CliCaptureTokenUsageIfParsed `
                 -CapturedText $cap `
                 -ScriptName "run_claude_reviewer.ps1" `
                 -Provider "anthropic" `
                 -Model $model `
                 -Iteration 0 `
-                -ProjectRootHint $projHintReviewer
+                -ProjectRootHint $projHintReviewer `
+                -Phase $(if ($null -ne $env:AI_LOOP_TOKEN_PHASE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_PHASE)) { [string]$env:AI_LOOP_TOKEN_PHASE } else { "" }) `
+                -Role $(if ($null -ne $env:AI_LOOP_TOKEN_ROLE -and -not [string]::IsNullOrWhiteSpace([string]$env:AI_LOOP_TOKEN_ROLE)) { [string]$env:AI_LOOP_TOKEN_ROLE } else { "" }) `
+                -FixIterationIndex -1 `
+                -PromptBytes $pbCr
         }
     }
     catch {

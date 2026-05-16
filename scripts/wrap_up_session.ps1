@@ -76,6 +76,56 @@ $failuresTxt
 ## Notes
 (fill in manually before promoting)
 "@ | Set-Content -LiteralPath $draftPath -Encoding UTF8
+
+    # Non-blocking token ledger row (phase/role wrap_up; no fix_iteration_index; prompt_bytes omitted when 0).
+    try {
+        $ledgerTask = ""
+        $ledgerChain = ""
+        $chainPathLedger = [System.IO.Path]::Combine($aiLoop, "chain.json")
+        if (Test-Path -LiteralPath $chainPathLedger) {
+            try {
+                $cj = Get-Content -LiteralPath $chainPathLedger -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($null -ne $cj.planner_chain_id) {
+                    $ledgerChain = [string]$cj.planner_chain_id
+                }
+                if ($null -ne $cj.task_name) {
+                    $ledgerTask = [string]$cj.task_name
+                }
+            }
+            catch {
+            }
+        }
+        $jsonlPath = [System.IO.Path]::Combine($projectRoot, ".ai-loop", "token_usage.jsonl")
+        $loopDirTok = [System.IO.Path]::GetDirectoryName($jsonlPath)
+        if (-not (Test-Path -LiteralPath $loopDirTok)) {
+            New-Item -ItemType Directory -Force -Path $loopDirTok | Out-Null
+        }
+        $recRow = [ordered]@{
+            task_name          = $ledgerTask
+            script_name        = "wrap_up_session.ps1"
+            iteration          = 0
+            provider           = "unknown"
+            model              = ""
+            input_tokens       = $null
+            output_tokens      = $null
+            total_tokens       = $null
+            estimated_cost_usd = $null
+            confidence         = "unknown"
+            source             = "unknown"
+            quality            = "unknown"
+            timestamp          = [datetime]::UtcNow.ToString("o")
+            phase              = "wrap_up"
+            role               = "wrap_up"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ledgerChain)) {
+            $recRow.planner_chain_id = $ledgerChain
+        }
+        $lineTok = ($recRow | ConvertTo-Json -Compress -Depth 6)
+        [System.IO.File]::AppendAllText($jsonlPath, $lineTok + [Environment]::NewLine)
+    }
+    catch {
+        Write-Warning "wrap_up_session token ledger: $_"
+    }
 }
 catch {
     Write-Warning "wrap_up_session: $_"
