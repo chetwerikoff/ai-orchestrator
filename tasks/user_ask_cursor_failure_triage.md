@@ -2,15 +2,14 @@
 
 ## Goal
 
-Add a Cursor-powered failure triage workflow that runs before asking Claude for help when a task execution fails. The workflow should gather recent orchestrator artifacts automatically, accept an optional user-provided problem description file, and produce a concise diagnostic brief for Claude.
+Add a manual failure-to-task workflow: I provide a problem description either as a file with logs or as inline text, and a new script immediately creates a repair task through the existing planner flow using Cursor as the planner, Claude as the first task reviewer, and Codex as the final task reviewer.
 
-The goal is to reduce Claude token spend on log/file discovery while preserving Claude as the final decision-maker for root cause, fix strategy, or replanning.
+The workflow should eliminate the intermediate "generate a triage brief, then paste it to Claude" step. Cursor may gather and summarize bounded failure context internally, but the durable output should be a `.ai-loop/task.md` repair task that has been reviewed first by Claude and then by Codex before human review and normal `ai_loop_task_first.ps1` execution. Codex should still review the eventual implementation at the end as usual.
 
 ## Affected files (your best guess - planner will verify)
 
-- `scripts/triage_failure.ps1` (new)
-- `templates/failure_triage_prompt.md` (new)
-- `scripts/run_cursor_agent.ps1`
+- `scripts/plan_failure_fix.ps1` (new)
+- `templates/failure_fix_planner_prompt.md` (new, optional if reusing existing planner prompt is enough)
 - `.gitignore`
 - `scripts/install_into_project.ps1`
 - `tests/test_orchestrator_validation.py`
@@ -23,92 +22,75 @@ The goal is to reduce Claude token spend on log/file discovery while preserving 
 - `docs/archive/**`
 - `.ai-loop/_debug/**` by default, unless explicitly requested by a flag
 - `ai_loop.py`
-- Changing implementation/review loop behavior
-- Auto-fixing code
-- Running full test suites
-- Committing or pushing
+- Auto-fixing code or running the implementer from the new script
+- Auto-running `ai_loop_task_first.ps1`, `ai_loop_auto.ps1`, tests, Codex implementation review, or git commit/push from the new script
+- Creating a standalone Claude diagnostic brief that the user must paste manually
+- Changing the core implementation/review loop behavior unless the planner finds a small wrapper integration is strictly necessary
 
 ## Proposed approach (optional)
 
-Add a new read-only script:
+Add a new script for failed-run replanning, for example:
 
 ```powershell
-.\scripts\triage_failure.ps1 -ProblemFile path\to\problem.md
+.\scripts\plan_failure_fix.ps1 -ProblemFile path\to\failure_log.md
 ```
 
 Also support:
 
 ```powershell
-.\scripts\triage_failure.ps1 -Message "I ran X and got Y"
-.\scripts\triage_failure.ps1 -ProblemFile path\to\problem.md -IncludeDebug
+.\scripts\plan_failure_fix.ps1 -Message "I ran X and got Y"
+.\scripts\plan_failure_fix.ps1 -ProblemFile path\to\failure_log.md -IncludeDebug
 ```
 
 The script should:
 
-1. Read an optional problem description from `-ProblemFile`.
-2. Read an optional inline description from `-Message`.
-3. Auto-gather recent failure context:
-   - recent `.ai-loop/*.txt`;
-   - recent `.ai-loop/*.md`;
+1. Read an optional problem/log file from `-ProblemFile`.
+2. Read optional inline problem text from `-Message`.
+3. Auto-gather bounded recent orchestrator context:
+   - recent root-level `.ai-loop/*.txt`;
+   - recent root-level `.ai-loop/*.md`;
    - `git status --short`;
-   - diff stat / short diff summary;
+   - compact diff summary such as `git diff --stat` or equivalent;
    - `.ai-loop/task.md`;
    - `.ai-loop/implementer_summary.md`;
    - `.ai-loop/project_summary.md`;
    - `.ai-loop/repo_map.md`;
-   - terminal log if the user provided one as `-ProblemFile`.
-4. Avoid `.ai-loop/_debug/**` by default. Add `-IncludeDebug` only for cases where raw agent output is explicitly needed.
-5. Build a bounded prompt from `templates/failure_triage_prompt.md`.
-6. Run Cursor via `scripts/run_cursor_agent.ps1` in read-only diagnostic mode.
-7. Write the result to:
+   - the provided terminal log or problem file.
+4. Avoid `.ai-loop/_debug/**` by default. Add `-IncludeDebug` only for cases where raw agent output is explicitly needed, and keep it aggressively bounded.
+5. Compose a clear USER ASK for the existing planner: "create a task to fix this failure", with the gathered context included as evidence.
+6. Invoke `scripts/ai_loop_plan.ps1` rather than duplicating planner/reviewer logic, using Cursor as planner and Claude as the first task reviewer, equivalent to:
 
-   ```text
-   .ai-loop/failure_triage.md
+   ```powershell
+   .\scripts\ai_loop_plan.ps1 `
+     -Ask "<composed failure-fix ask>" `
+     -PlannerCommand .\scripts\run_cursor_agent.ps1 `
+     -WithReview `
+     -MaxReviewIterations 2 `
+     -ReviewerCommand .\scripts\run_claude_reviewer.ps1 `
+     -NoRevision `
+     -Force
    ```
 
-The Cursor output should be concise and stable:
+7. After Cursor planner and Claude reviewer finish successfully, run the existing Codex task reviewer on the generated task before considering the task ready. Prefer reusing existing planner-review prompt/wrapper behavior where practical; if `ai_loop_plan.ps1` cannot chain two reviewers directly, the new wrapper may run a second bounded review pass with `scripts/run_codex_reviewer.ps1` against the generated `.ai-loop/task.md` and the composed failure-fix ask. Codex output must be persisted in a clear review trace artifact and blocking issues must prevent silently presenting the task as ready.
+8. Write the normal planner outputs:
+   - `.ai-loop/task.md`;
+   - `.ai-loop/planner_review_trace.md`;
+   - Codex final task-review trace/output;
+   - queued `tasks/NNN_*.md` copy when the generated task contains `## Order`.
 
-```md
-# Failure Triage Brief
-
-## Symptom
-...
-
-## Command that failed
-...
-
-## Most likely cause
-...
-
-## Evidence
-- `path`: fact
-
-## Relevant files
-- `path`: why relevant
-
-## What was checked
-- ...
-
-## What was not checked
-- ...
-
-## Suggested next action
-- ...
-
-## Confidence
-Low | Medium | High
-```
-
-The triage pass must be advisory only. Claude receives this brief plus the user's raw problem description and decides the actual fix/replan.
+The new script should be a convenience wrapper around the existing planner architecture, not a second planner subsystem. It should not produce `.ai-loop/failure_triage.md` as the primary workflow output, because I do not want to manually pass an intermediate brief to Claude.
 
 ## Constraints / context the planner may not know
 
-- The script must not edit project files other than writing `.ai-loop/failure_triage.md` and bounded temporary prompt/output artifacts if needed.
-- The script must not run full pytest. It may read existing test outputs.
-- The script must not run implementer/reviewer/planner agents except Cursor for the diagnostic pass.
-- The prompt must explicitly tell Cursor: read-only, no edits, no fixes, no broad refactors, concise diagnostic brief only.
-- Keep context bounded. Do not blindly paste huge logs; prefer latest files and tail/head limits.
-- Add `.ai-loop/failure_triage.md` and any temporary triage artifacts to `.gitignore`.
-- If adding installer support, copy the new script/template to target projects.
-- Update `AGENTS.md` or `docs/workflow.md` so future agents know to use failure triage before asking Claude to diagnose a failed run.
-- The planner should choose the simplest implementation. If a single script plus one template is enough, do not introduce a larger subsystem.
+- The generated repair task must follow the normal `templates/task.md` / planner output contract so `ai_loop_task_first.ps1` can consume it.
+- The new script must not edit project files other than normal planner outputs and bounded temporary artifacts, if needed.
+- The new script must not run full pytest. It may read existing test outputs.
+- The new script must not run the implementer, OpenCode, tests, git commit, or git push.
+- Cursor is the planner in this workflow. Claude is the first task reviewer for blocking architectural/scope/safety issues.
+- Codex must run after Cursor and Claude as the final reviewer of the generated repair task, before the user runs implementation.
+- Codex should also remain part of the normal final implementation review path after the generated task is run; this script should not replace that later implementation review.
+- Keep context bounded. Do not blindly paste huge logs; prefer recent files, byte caps, and explicit truncation banners.
+- If the script creates deterministic temporary prompt/output artifacts under `.ai-loop/`, add them to `.gitignore`. Prefer `$env:TEMP` for transient prompt staging when practical.
+- If adding installer support, copy the new script and any new template to target projects.
+- Update `AGENTS.md` or `docs/workflow.md` so future agents know to use this failure-to-task wrapper after a failed run when the user wants a new repair task.
+- The planner should choose the simplest implementation. Prefer one wrapper script around `ai_loop_plan.ps1` over a new orchestration subsystem.

@@ -1,12 +1,22 @@
 # No param block: keeps $input available for the pipeline.
 # $input = piped prompt lines; $args = forwarded flags.
 
+$workspace = $null
 $model = "claude-haiku-4-5-20251001"
 
 $i = 0
 while ($i -lt $args.Count) {
     switch ($args[$i]) {
-        "--model" { $model = $args[$i + 1]; $i += 2; break }
+        "--workspace" {
+            $workspace = $args[$i + 1]
+            $i += 2
+            break
+        }
+        "--model" {
+            $model = $args[$i + 1]
+            $i += 2
+            break
+        }
         default { $i++ }
     }
 }
@@ -21,15 +31,54 @@ if ([string]::IsNullOrWhiteSpace($model)) {
     $model = "claude-haiku-4-5-20251001"
 }
 
+$scriptRootReviewer = $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($scriptRootReviewer)) {
+    $scriptRootReviewer = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
+}
+
+$projHintReviewer = ""
+if ($workspace -and (Test-Path -LiteralPath $workspace)) {
+    $projHintReviewer = [System.IO.Path]::GetFullPath($workspace.Trim())
+}
+else {
+    try { $projHintReviewer = (Get-Location).Path } catch { $projHintReviewer = "" }
+}
+
+$pushed = $false
 $exitCode = 1
 try {
+    if ($workspace -and (Test-Path $workspace)) {
+        Push-Location $workspace
+        $pushed = $true
+    }
     $prevEA = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    $promptText | claude --print --model $model
+    $claudeLines = @($promptText | claude --print --model $model 2>&1)
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = $prevEA
+    foreach ($ln in @($claudeLines)) {
+        Write-Output $ln
+    }
+
+    try {
+        if ($exitCode -eq 0) {
+            $cap = (@($claudeLines) | ForEach-Object { "$_" }) -join "`n"
+            . (Join-Path $scriptRootReviewer "record_token_usage.ps1")
+            Write-CliCaptureTokenUsageIfParsed `
+                -CapturedText $cap `
+                -ScriptName "run_claude_reviewer.ps1" `
+                -Provider "anthropic" `
+                -Model $model `
+                -Iteration 0 `
+                -ProjectRootHint $projHintReviewer
+        }
+    }
+    catch {
+        Write-Warning "Anthropic reviewer token recording skipped (non-blocking): $($_.Exception.Message)"
+    }
 }
 finally {
+    if ($pushed) { Pop-Location }
 }
 
 exit $exitCode

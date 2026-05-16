@@ -38,6 +38,10 @@ Before running task-first work, `scripts/ai_loop_plan.ps1` can regenerate `.ai-l
 
 **Variant A (Cursor planner + Claude architecture reviewer, single pass):** pass `-PlannerCommand` to your Cursor (or other) planner wrapper, `-ReviewerCommand` to `scripts/run_claude_reviewer.ps1`, plus `-WithReview -NoRevision`. The planner draft is reviewed once with a lighter prompt (no `repo_map.md` in the reviewer bundle). If the reviewer reports well-formed `ISSUES:`, the script writes `.ai-loop/planner_review_trace.md`, prints the issues in red, does **not** write `.ai-loop/task.md`, and exits `2` so you can revise the ask or planner setup manually. `NO_BLOCKING_ISSUES` writes `task.md` as usual. Malformed reviewer output still degrades like the Codex path (warning, `task.md` written).
 
+### Token usage journal (`token_usage.jsonl`)
+
+After successful planner and reviewer CLI exits, wrappers may append one JSONL row per invocation when **`ConvertFrom-CliTokenUsage`** can parse provider usage lines or JSON embedded in merged stdout/stderr. The rolling report (`scripts/show_token_report.ps1`) therefore reflects **parseable telemetry from configured CLIs**, not whether the orchestration loop counted as healthy. A line such as **No token usage records found.** is legitimate when nobody emitted a recognized usage block—for example Cursor outputs may omit any format the recorder understands, while Claude reviewer passes can now journal when Claude prints the usual API or CLI token summary.
+
 ## Start a new task
 
 Use this when `.ai-loop/task.md` contains a new implementation task:

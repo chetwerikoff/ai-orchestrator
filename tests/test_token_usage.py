@@ -667,6 +667,32 @@ def test_export_report_creates_timestamped_file() -> None:
                 pass
 
 
+def test_claude_reviewer_cli_capture_writes_jsonl() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    snippet = "Input tokens: 9\r\nOutput tokens: 11\r\nNO_BLOCKING_ISSUES"
+    b64 = base64.b64encode(snippet.encode("utf-16le")).decode("ascii")
+    _TOKEN_JSONL.unlink(missing_ok=True)
+    try:
+        cmd = (
+            ". .\\scripts\\record_token_usage.ps1; "
+            f"$t=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{b64}')); "
+            "Write-CliCaptureTokenUsageIfParsed -CapturedText $t "
+            "-ScriptName run_claude_reviewer.ps1 -Provider anthropic -Model "
+            "claude-haiku-4-5-20251001 -Iteration 0"
+        )
+        code, _, stderr = _run_ps_capture(cmd)
+        assert code == 0, stderr
+        data = json.loads(_TOKEN_JSONL.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert data["script_name"] == "run_claude_reviewer.ps1"
+        assert data["total_tokens"] == 20
+        assert data["model"] == "claude-haiku-4-5-20251001"
+        assert data["provider"] == "anthropic"
+    finally:
+        _TOKEN_JSONL.unlink(missing_ok=True)
+
+
 def test_wrapper_cli_capture_writes_jsonl() -> None:
     ps = _powershell_exe()
     if not ps:
@@ -742,6 +768,13 @@ def test_run_claude_planner_ps1_parse_clean() -> None:
     if not ps:
         pytest.skip("No pwsh or powershell on PATH")
     _parse_file_via_ast(_SCRIPTS / "run_claude_planner.ps1", ps=ps)
+
+
+def test_run_claude_reviewer_ps1_parse_clean() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    _parse_file_via_ast(_SCRIPTS / "run_claude_reviewer.ps1", ps=ps)
 
 
 def test_run_codex_reviewer_ps1_parse_clean() -> None:
