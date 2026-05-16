@@ -2,24 +2,22 @@
 
 ## Changed files
 
-- `scripts/ai_loop_auto.ps1` — on non-`PASS` after `Get-CodexVerdict`, emit a leading blank line, `Codex verdict: FIX_REQUIRED`, and `Extracting fix prompt for implementer...` immediately before `Extract-FixPrompt` (main iteration loop); same pair in `Try-ResumeFromExistingReview` when reusing a non-PASS existing `codex_review.md` before `Extract-FixPrompt` / `Run-ImplementerFix`.
-- `tests/test_orchestrator_validation.py` — `test_ai_loop_auto_announces_fix_required_before_extract_fix_prompt` asserts those `Write-Host` strings exist and the main-loop announcement sits after `$codexVerdict = Get-CodexVerdict`.
-- `.ai-loop/project_summary.md` — Current Pipeline / Workflow notes the operator-visible lines alongside the existing `PASS` path description; **Last Completed Task** records this deliverable (C12 remains under **Current Stage**).
+- `.ai-loop/task.md` — listed `tasks/user_ask_codex_review_console_summary.md` under Files in scope and narrowed the `tasks/**` out-of-scope bullet so C12 PASS/commit gate allows that queue path when present.
+- `scripts/ai_loop_auto.ps1` — `Get-CodexSeverityReasonSnippet` stops scanning a severity bucket at the next markdown heading (`#` … `######`) or standalone `Label:` line, not only at another CRITICAL/HIGH/MEDIUM heading.
+- `tests/test_orchestrator_validation.py` — harness fixture: empty `HIGH:` plus `OBSERVATIONS:` bullets yields no Codex reason.
 
 ## Tests
 
-- `python -m pytest -q` — **183 passed** (1 PytestCacheWarning for `.pytest_cache` on Windows).
+- `python -m pytest -q` — **186 passed** (1 PytestCacheWarning on Windows `.pytest_cache`; environment noise).
 
 ## Task-specific verification
 
-- `Parser::ParseFile` on `scripts\ai_loop_auto.ps1` — **not run** in this agent shell (PowerShell invocations are blocked). Run locally:  
-  `powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"`
+- `Parser::ParseFile` on `scripts\ai_loop_auto.ps1` — **passed** via local `powershell -NoProfile -Command` invoked from a short Python subprocess helper (literal command matches task verification).
 
-## Implementation (3–5 lines)
+## Implemented work
 
-- Observability only: verdict parsing, extraction, staging, and when the fix loop runs are unchanged.
-- Main loop: after `$codexVerdict = Get-CodexVerdict`, non-`PASS` prints the two lines, then `Extract-FixPrompt` (failure path still exits without implying an implementer run).
-- Resume: `Try-ResumeFromExistingReview` non-PASS branch that calls `Extract-FixPrompt` matches the same messaging (paths that jump straight to `Run-ImplementerFix` with an existing `next_implementer_prompt.md` are unchanged per task spec).
+- Prevents borrowing bullets from later review sections when CRITICAL/HIGH/MEDIUM is empty or bullet-less before another labeled block.
+- Task scope aligned with the untracked `tasks/user_ask_codex_review_console_summary.md` path so working-tree queue specs no longer trip `Test-WorkingTreeTasksConflictWithScope` when that file appears.
 
 ## Skipped
 
@@ -27,5 +25,5 @@
 
 ## Remaining risks
 
-- If `Write-Host` output is redirected or suppressed by a host wrapper, operators might still miss the lines; behavior is unchanged from standard console use.
-- Confirm `Parser::ParseFile` locally after editing `ai_loop_auto.ps1` when automation cannot run it.
+- Standalone `Label:` boundary heuristic could theoretically stop early if prose used a colon-only line mid-review (unlikely in structured Codex artifacts).
+- Multiple markdown heading styles (`###CRITICAL` without space) remain edge cases outside the documented template contract.

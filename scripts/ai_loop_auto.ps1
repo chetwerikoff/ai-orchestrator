@@ -562,6 +562,139 @@ function Get-CodexVerdict {
     return Get-ReviewVerdict -ReviewFile (Join-Path $AiLoop "codex_review.md")
 }
 
+function Format-LocaleNeutralThousands {
+    param([long]$Value)
+    $neg = $false
+    if ($Value -lt 0L) {
+        $neg = $true
+        $valueAbs = (-$Value -as [long])
+        # long.MinValue — fall back without grouping
+        if ($valueAbs -lt 0L) {
+            return "$Value"
+        }
+        $Value = $valueAbs
+    }
+    $s = "$Value"
+    $out = ''
+    $i = $s.Length
+    while ($i -gt 0) {
+        $take = [Math]::Min(3, $i)
+        $segment = $s.Substring($i - $take, $take)
+        $out = if ($out.Length -gt 0) { $segment + ' ' + $out } else { $segment }
+        $i -= $take
+    }
+    if ($neg) {
+        return '-' + $out
+    }
+    return $out
+}
+
+function Get-CodexSeverityReasonSnippet {
+    param([AllowEmptyString()][string]$Markdown)
+
+    if ([string]::IsNullOrWhiteSpace($Markdown)) {
+        return ""
+    }
+    $lines = @([regex]::Split($Markdown, "`r?`n"))
+    $headRx = [regex]::new('^\s*(?:[#]{1,6}\s*)?(?<sev>CRITICAL|HIGH|MEDIUM)\s*:\s*$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $priorities = @("CRITICAL", "HIGH", "MEDIUM")
+
+    foreach ($want in $priorities) {
+        for ($idx = 0; $idx -lt $lines.Count; $idx++) {
+            $hm = $headRx.Match([string]$lines[$idx])
+            if (-not $hm.Success -or ($hm.Groups['sev'].Value.ToUpperInvariant() -ne $want)) {
+                continue
+            }
+            for ($j = $idx + 1; $j -lt $lines.Count; $j++) {
+                $lnRaw = [string]$lines[$j]
+                $lnTrimmed = $lnRaw.TrimEnd()
+                # Stop at next severity bucket, markdown heading, or any standalone Label: line so empty
+                # CRITICAL/HIGH/MEDIUM sections cannot absorb bullets from later review sections.
+                if ($headRx.IsMatch($lnTrimmed)) {
+                    break
+                }
+                if ([regex]::IsMatch($lnTrimmed, '^\s*#{1,6}\s+\S')) {
+                    break
+                }
+                if ([regex]::IsMatch($lnTrimmed, '^\s*(?!-+|\*+)\s*\S(?:.*\S)?:\s*$')) {
+                    break
+                }
+                $bulletM = [regex]::Match($lnTrimmed, '^\s*[-*]\s+(?<body>.+)$')
+                if (-not $bulletM.Success) {
+                    continue
+                }
+                $body = $bulletM.Groups['body'].Value.Trim()
+                if ([string]::IsNullOrWhiteSpace($body)) {
+                    continue
+                }
+                if ($body.Trim().ToLowerInvariant() -eq 'none') {
+                    continue
+                }
+                $flat = (($body -replace '[\t\r\f\v]+', ' ') -replace '\s+', ' ').Trim()
+                $maxLen = 240
+                if ($flat.Length -le $maxLen) {
+                    return $flat
+                }
+                return $flat.Substring(0, ($maxLen - 3)).TrimEnd() + '...'
+            }
+            break
+        }
+    }
+    return ""
+}
+
+function Format-CodexTokenSummaryLines {
+    param([AllowEmptyString()][string]$Markdown)
+
+    if ($null -eq (Get-Command -Name ConvertFrom-CliTokenUsage -ErrorAction SilentlyContinue)) {
+        return @()
+    }
+    $parsed = ConvertFrom-CliTokenUsage -Text $Markdown
+    if (-not $parsed -or $null -eq $parsed.TotalTokens) {
+        return @()
+    }
+    $total = [long]$parsed.TotalTokens
+    $inTok = $parsed.InputTokens
+    $outTok = $parsed.OutputTokens
+    $base = ('Codex tokens: ' + (Format-LocaleNeutralThousands -Value $total))
+
+    $hasSplit = (($null -ne $inTok) -and ($null -ne $outTok))
+    if (-not $hasSplit) {
+        return @($base)
+    }
+    $inL = Format-LocaleNeutralThousands -Value ([long]$inTok)
+    $outL = Format-LocaleNeutralThousands -Value ([long]$outTok)
+    $splitTxt = "(in $inL / out $outL)"
+    if (($base.Length + 1 + $splitTxt.Length) -le 120) {
+        return @("$base $splitTxt")
+    }
+    return @($base, ('  ' + $splitTxt))
+}
+
+function Show-CodexReviewConsoleSummary {
+    param(
+        [ValidateSet('PASS', 'FIX_REQUIRED')]
+        [string]$Verdict,
+        [AllowEmptyString()][string]$ReviewMarkdownRaw
+    )
+
+    Write-Host ""
+    Write-Host "Codex verdict: $Verdict"
+
+    if ($Verdict -eq 'FIX_REQUIRED') {
+        $snip = Get-CodexSeverityReasonSnippet -Markdown $ReviewMarkdownRaw
+        if (-not [string]::IsNullOrWhiteSpace($snip)) {
+            Write-Host "Codex reason: $snip"
+        }
+    }
+
+    foreach ($tl in @(Format-CodexTokenSummaryLines -Markdown $ReviewMarkdownRaw)) {
+        Write-Host $tl
+    }
+
+    Write-Host 'See: .ai-loop\codex_review.md'
+}
+
 function Format-FixPromptFromObject {
     param($FixObject)
 
@@ -1192,6 +1325,14 @@ function Try-ResumeFromExistingReview {
         $codexVerdict = Get-CodexVerdict
 
         if ($codexVerdict -eq "PASS") {
+            $resumeReviewRaw = ""
+            if (Test-Path -LiteralPath $codexReview) {
+                $resumeReviewRaw = Get-Content -LiteralPath $codexReview -Raw -ErrorAction SilentlyContinue
+            }
+            if ($null -eq $resumeReviewRaw) {
+                $resumeReviewRaw = ""
+            }
+            Show-CodexReviewConsoleSummary -Verdict "PASS" -ReviewMarkdownRaw $resumeReviewRaw
             Write-Host "Existing Codex verdict is PASS. Running final test gate, commit, and push."
             $didCommit = Commit-And-Push
             if ($didCommit) {
@@ -1208,8 +1349,14 @@ function Try-ResumeFromExistingReview {
             exit 0
         }
 
-        Write-Host ""
-        Write-Host "Codex verdict: FIX_REQUIRED"
+        $resumeFixRaw = ""
+        if (Test-Path -LiteralPath $codexReview) {
+            $resumeFixRaw = Get-Content -LiteralPath $codexReview -Raw -ErrorAction SilentlyContinue
+        }
+        if ($null -eq $resumeFixRaw) {
+            $resumeFixRaw = ""
+        }
+        Show-CodexReviewConsoleSummary -Verdict "FIX_REQUIRED" -ReviewMarkdownRaw $resumeFixRaw
         Write-Host "Extracting fix prompt for implementer..."
 
         if (Extract-FixPrompt) {
@@ -1276,9 +1423,9 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
 
     Run-CodexReview | Out-Null
 
+    $combinedCodexCapture = ""
     try {
         $codexMd = Join-Path $AiLoop "codex_review.md"
-        $combinedCodexCapture = ""
         if (Test-Path -LiteralPath $codexMd) {
             $combinedCodexCapture = Get-Content -LiteralPath $codexMd -Raw -ErrorAction SilentlyContinue
         }
@@ -1289,11 +1436,12 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
     }
 
     $codexVerdict = Get-CodexVerdict
+    if ($null -eq $combinedCodexCapture) {
+        $combinedCodexCapture = ""
+    }
+    Show-CodexReviewConsoleSummary -Verdict $codexVerdict -ReviewMarkdownRaw $combinedCodexCapture
 
     if ($codexVerdict -eq "PASS") {
-        Write-Host ""
-        Write-Host "Codex verdict: PASS"
-
         $didCommit = Commit-And-Push
 
         if ($didCommit) {
@@ -1318,8 +1466,6 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         exit 0
     }
 
-    Write-Host ""
-    Write-Host "Codex verdict: FIX_REQUIRED"
     Write-Host "Extracting fix prompt for implementer..."
 
     $hasPrompt = Extract-FixPrompt

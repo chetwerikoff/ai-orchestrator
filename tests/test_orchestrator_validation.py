@@ -106,6 +106,13 @@ def _extract_get_review_verdict_from_auto(ps1_text: str) -> str:
     return ps1_text[start:end]
 
 
+def _extract_codex_review_console_summarizers_from_auto(ps1_text: str) -> str:
+    """Console summary helpers (`Format-LocaleNeutralThousands` through `Show-CodexReviewConsoleSummary`)."""
+    start = ps1_text.index("function Format-LocaleNeutralThousands")
+    end = ps1_text.index("function Format-FixPromptFromObject", start)
+    return ps1_text[start:end]
+
+
 def extract_fix_prompt_from_review_text(review: str) -> str | None:
     """Same contract as PowerShell `Extract-FixPromptFromFile` (primary match then tail fallback)."""
     m = _FIX_PROMPT_LABEL_RE.search(review)
@@ -663,16 +670,192 @@ def test_ai_loop_auto_resume_explicit_cursor_command_skips_persisted_implementer
 
 
 def test_ai_loop_auto_announces_fix_required_before_extract_fix_prompt() -> None:
-    """Non-PASS path mirrors PASS visibility: FIX_REQUIRED + extracting line before Extract-FixPrompt."""
+    """Non-PASS path mirrors PASS visibility: summary (verdict) before Extract-FixPrompt."""
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    fix_ann = 'Write-Host "Codex verdict: FIX_REQUIRED"'
     extract_ann = 'Write-Host "Extracting fix prompt for implementer..."'
-    assert fix_ann in text
     assert extract_ann in text
     _, _, main_iteration = text.partition("for ($i = 1; $i -le $MaxIterations; $i++)")
     verdict_in_main = main_iteration.index("$codexVerdict = Get-CodexVerdict")
-    fix_in_main = main_iteration.index(fix_ann, verdict_in_main)
-    assert fix_in_main > verdict_in_main
+    summary_in_main = main_iteration.index("Show-CodexReviewConsoleSummary", verdict_in_main)
+    extract_in_main = main_iteration.index(extract_ann, summary_in_main)
+    assert summary_in_main < extract_in_main
+
+
+def test_codex_review_console_summary_reason_priority_and_tokens_harness() -> None:
+    """Reason line from CRITICAL/HIGH/MEDIUM bullets; token line via shared ConvertFrom-CliTokenUsage."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("codex_console_summary")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        funcs = _extract_codex_review_console_summarizers_from_auto(auto_text)
+        harness_path = scratch / "_orch_codex_console_summary.ps1"
+        harness_path.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$FixturePath,
+    [Parameter(Mandatory)][string]$RepoRoot
+)
+
+$md = Get-Content -LiteralPath $FixturePath -Raw -ErrorAction Stop
+if ($null -eq $md) {
+    $md = ""
+}
+
+$rtu = Join-Path (Join-Path $RepoRoot 'scripts') 'record_token_usage.ps1'
+. $rtu
+
+"""
+            + funcs
+            + """
+$reason = Get-CodexSeverityReasonSnippet -Markdown $md
+$tok = @(Format-CodexTokenSummaryLines -Markdown $md)
+$tokEnc = [string]::Join("`t", $tok)
+Write-Output ("REASON`t" + $reason)
+Write-Output ("TOKENS`t" + $tokEnc)
+""",
+            encoding="utf-8",
+        )
+
+        def _run(fixture: str) -> tuple[str, list[str]]:
+            p = scratch / "fixture.md"
+            p.write_text(textwrap.dedent(fixture).strip() + "\n", encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    ps,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(harness_path),
+                    str(p),
+                    str(_ROOT),
+                ],
+                cwd=str(_ROOT),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+                check=False,
+            )
+            detail = (proc.stdout or "") + (proc.stderr or "")
+            assert proc.returncode == 0, detail
+            lines = [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+            reason = ""
+            toks: list[str] = []
+            for ln in lines:
+                if ln.startswith("REASON\t"):
+                    reason = ln.split("\t", 1)[1]
+                elif ln.startswith("TOKENS\t"):
+                    tail = ln.split("\t", 1)[1]
+                    toks = [x for x in tail.split("\t") if x]
+            return reason, toks
+
+        r1, _t1 = _run(
+            """
+            VERDICT: FIX_REQUIRED
+
+            CRITICAL:
+            - Alpha from critical
+
+            HIGH:
+            - Beta high only
+            """
+        )
+        assert "Alpha from critical" in r1
+        assert "Beta" not in r1
+
+        r2, _t2 = _run(
+            """
+            VERDICT: FIX_REQUIRED
+
+            CRITICAL:
+            - none
+
+            HIGH:
+            - take this high bullet
+            """
+        )
+        assert "take this high" in r2
+
+        r3, _t3 = _run(
+            """
+            VERDICT: FIX_REQUIRED
+
+            MEDIUM:
+            - none
+
+            FIX_PROMPT_FOR_IMPLEMENTER:
+            Free text with no severity bullets.
+            """
+        )
+        assert r3 == ""
+
+        r3b, _t3b = _run(
+            """
+            VERDICT: FIX_REQUIRED
+
+            HIGH:
+
+            OBSERVATIONS:
+            - This bullet must not become the Codex reason (empty HIGH above).
+            """
+        )
+        assert r3b == ""
+
+        _r4, t4 = _run(
+            """
+            VERDICT: PASS
+
+            Some narrative.
+
+            tokens used
+            12,345
+            """
+        )
+        assert t4 and t4[0] == "Codex tokens: 12 345"
+
+        _r5, t5 = _run(
+            """
+            VERDICT: PASS
+
+            No token usage block in this artifact.
+            """
+        )
+        assert t5 == []
+
+        long_body = "x" * 280
+        r6, _t6 = _run(
+            f"""
+            VERDICT: FIX_REQUIRED
+
+            HIGH:
+            - {long_body}
+            """
+        )
+        assert r6.endswith("...")
+        assert len(r6) <= 240
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_ai_loop_auto_resume_shows_console_summary_before_existing_pass_message() -> None:
+    t = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    resume_block = t[t.index("function Try-ResumeFromExistingReview") :]
+    a = resume_block.index('if ($codexVerdict -eq "PASS") {')
+    sub = resume_block[a:]
+    b = sub.index('Write-Host "Existing Codex verdict is PASS.')
+    sidx = sub.index("Show-CodexReviewConsoleSummary")
+    assert sidx < b
+
+
+def test_ai_loop_auto_resume_fix_branch_uses_console_summary() -> None:
+    t = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    needle = 'Show-CodexReviewConsoleSummary -Verdict "FIX_REQUIRED"'
+    assert needle in t
 
 
 def test_safety_doc_documents_implementer_json_runtime_policy() -> None:

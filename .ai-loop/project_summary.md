@@ -27,7 +27,7 @@
 
 For a new task, run `ai_loop_task_first.ps1`. Optionally draft or refine `.ai-loop/task.md` first with `scripts/ai_loop_plan.ps1` (manual; requires a configured planner CLI). It runs the implementer first, then hands off to `ai_loop_auto.ps1` only after meaningful implementation side effects or an accepted no-code marker in `.ai-loop/implementer_result.md`. For existing changes, run `ai_loop_auto.ps1` directly. Codex reviews after tests/diff capture; `PASS` triggers final tests and safe commit/push unless `-NoPush`; `FIX_REQUIRED` writes `.ai-loop/next_implementer_prompt.md` and reruns the selected implementer.
 
-The auto loop prints `Codex verdict: PASS` on the success path and, on any non-PASS verdict treated as fix work, emits `Codex verdict: FIX_REQUIRED` plus `Extracting fix prompt for implementer...` immediately before extracting the fix prompt (main iteration and resume-from-existing-review paths that call `Extract-FixPrompt`), so the operator sees the verdict before `Run-ImplementerFix`'s banner.
+After each Codex review, `scripts/ai_loop_auto.ps1` prints one compact summary block (`Codex verdict:` line, optional `Codex reason:` on `FIX_REQUIRED` from severity bullets only within each CRITICAL/HIGH/MEDIUM section until the next severity heading, markdown heading, or standalone `Label:` line, optional spaced `Codex tokens:` via `ConvertFrom-CliTokenUsage`, and `See: .ai-loop\codex_review.md`) before follow-on actions such as fix-prompt extraction or the PASS commit gate; full detail stays in `.ai-loop/codex_review.md`.
 
 Resume uses `.ai-loop/implementer.json` (runtime, gitignored) to reload the last effective wrapper/model when `-CursorCommand` is omitted. Explicit `-CursorCommand` / `-CursorModel` on `continue_ai_loop.ps1` or `ai_loop_auto.ps1 -Resume` override persisted state.
 
@@ -61,7 +61,7 @@ Stable with **C13** landed: Codex review prompts prefer bounded `.ai-loop/review
 
 ## Last Completed Task
 
-**Codex FIX_REQUIRED terminal visibility:** `scripts/ai_loop_auto.ps1` prints a blank line, `Codex verdict: FIX_REQUIRED`, and `Extracting fix prompt for implementer...` immediately before `Extract-FixPrompt` on the non-`PASS` path in the main review loop (after `Get-CodexVerdict`) and in `Try-ResumeFromExistingReview` when reusing a non-PASS existing review—matching the clarity of the `Codex verdict: PASS` line. `tests/test_orchestrator_validation.py` includes a static source assertion. (C12 queue-protection behavior in `ai_loop_auto.ps1` remains as documented under **Current Stage**.)
+**Codex review console summary:** `scripts/ai_loop_auto.ps1` centralizes post-review host output in `Show-CodexReviewConsoleSummary` (canonical `Codex verdict:` line, optional single-line `Codex reason:` from `CRITICAL`/`HIGH`/`MEDIUM` bullets on `FIX_REQUIRED`, optional `Codex tokens:` via shared `ConvertFrom-CliTokenUsage`), printed before fix-prompt extraction or the PASS path; resume-from-existing-review uses the same helper. Reason scanning stops at the next markdown heading or standalone section label line so empty severity sections cannot absorb later bullets. `tests/test_orchestrator_validation.py` subprocess fixtures cover reason precedence, omitted reasons, labeled-section boundaries, and token/no-token cases.
 
 ## Next Likely Steps
 
