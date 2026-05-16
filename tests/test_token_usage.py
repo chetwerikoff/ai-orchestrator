@@ -132,6 +132,15 @@ def test_ai_loop_auto_ps1_parse_clean() -> None:
     _parse_file_via_ast(script, ps=ps)
 
 
+def test_ai_loop_task_first_ps1_parse_clean() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    script = _SCRIPTS / "ai_loop_task_first.ps1"
+    assert script.is_file(), f"missing {script}"
+    _parse_file_via_ast(script, ps=ps)
+
+
 def test_write_token_usage_record_integration() -> None:
     ps = _powershell_exe()
     if not ps:
@@ -462,6 +471,60 @@ def test_show_report_writes_summary_md() -> None:
         _TOKEN_SUMMARY_MD.unlink(missing_ok=True)
 
 
+def test_cli_capture_dedupe_skips_second_identical_capture() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    snippet = "VERDICT: PASS\r\ntokens used 55\r\n"
+    b64 = base64.b64encode(snippet.encode("utf-16le")).decode("ascii")
+    _TOKEN_JSONL.unlink(missing_ok=True)
+    try:
+        cmd = (
+            ". .\\scripts\\record_token_usage.ps1; "
+            f"$t=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{b64}')); "
+            "Write-CliCaptureTokenUsageIfParsed -CapturedText $t -ScriptName ai_loop_auto.codex_review "
+            "-Provider codex -Model codex -Iteration 1 -DedupeId 'pytest:dedupe_a'; "
+            "Write-CliCaptureTokenUsageIfParsed -CapturedText $t -ScriptName ai_loop_auto.codex_review "
+            "-Provider codex -Model codex -Iteration 1 -DedupeId 'pytest:dedupe_a'"
+        )
+        code, _, stderr = _run_ps_capture(cmd)
+        assert code == 0, stderr
+        lines = [ln for ln in _TOKEN_JSONL.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        assert len(lines) == 1
+        data = json.loads(lines[0])
+        assert data["script_name"] == "ai_loop_auto.codex_review"
+        assert data["total_tokens"] == 55
+    finally:
+        _TOKEN_JSONL.unlink(missing_ok=True)
+
+
+def test_cli_capture_codex_auto_review_script_name() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    snippet = '{"prompt_tokens":10,"completion_tokens":5}\r\nVERDICT: PASS\r\n'
+    b64 = base64.b64encode(snippet.encode("utf-16le")).decode("ascii")
+    _TOKEN_JSONL.unlink(missing_ok=True)
+    try:
+        root_esc = str(_ROOT.resolve()).replace("'", "''")
+        cmd = (
+            ". .\\scripts\\record_token_usage.ps1; "
+            f"$t=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{b64}')); "
+            "Write-CliCaptureTokenUsageIfParsed -CapturedText $t -ScriptName ai_loop_auto.codex_review "
+            "-Provider codex -Model codex -Iteration 2 -DedupeId 'pytest:codex_cap' "
+            f"-ProjectRootHint '{root_esc}'"
+        )
+        code, _, stderr = _run_ps_capture(cmd)
+        assert code == 0, stderr
+        data = json.loads(_TOKEN_JSONL.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert data["script_name"] == "ai_loop_auto.codex_review"
+        assert data["provider"] == "codex"
+        assert data["iteration"] == 2
+        assert data["total_tokens"] == 15
+    finally:
+        _TOKEN_JSONL.unlink(missing_ok=True)
+
+
 def test_codex_auto_record_chain() -> None:
     ps = _powershell_exe()
     if not ps:
@@ -472,7 +535,7 @@ def test_codex_auto_record_chain() -> None:
         cmd = (
             ". .\\scripts\\record_token_usage.ps1; "
             f"$parsed = ConvertFrom-CliTokenUsage -Text '{snippet}'; "
-            "Write-TokenUsageRecord -TaskName pytest_chain -ScriptName ai_loop_auto.ps1 -Iteration 2 "
+            "Write-TokenUsageRecord -TaskName pytest_chain -ScriptName ai_loop_auto.codex_review -Iteration 2 "
             "-Provider codex -Model codex -InputTokens $parsed.InputTokens "
             "-OutputTokens $parsed.OutputTokens -TotalTokens $parsed.TotalTokens "
             "-Confidence unknown -Source $parsed.Source -Quality $parsed.Quality"
@@ -484,6 +547,7 @@ def test_codex_auto_record_chain() -> None:
         assert data["source"] == "api_response"
         assert data["iteration"] == 2
         assert data["model"] == "codex"
+        assert data["script_name"] == "ai_loop_auto.codex_review"
     finally:
         _TOKEN_JSONL.unlink(missing_ok=True)
 

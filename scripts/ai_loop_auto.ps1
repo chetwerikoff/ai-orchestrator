@@ -26,6 +26,7 @@ catch {
 
 New-Item -ItemType Directory -Force -Path $AiLoop | Out-Null
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+Remove-Item -LiteralPath (Join-Path $ProjectRoot ".tmp\pass_token_report_shown.flag") -Force -ErrorAction SilentlyContinue
 
 $script:DurableAlwaysCommitPaths = @(
     '.ai-loop/task.md',
@@ -216,6 +217,20 @@ function ConvertTo-CrtSafeArg {
 function Write-FinalStatus {
     param([string]$Text)
     $Text | Set-Content (Join-Path $AiLoop "final_status.md") -Encoding UTF8
+}
+
+function Set-PassTokenReportEmittedFlag {
+    <#
+    .SYNOPSIS
+        Marker for ai_loop_task_first.ps1: auto-loop already ran show_token_report.ps1 on Codex PASS (avoid duplicate console report).
+    #>
+    try {
+        $f = Join-Path $ProjectRoot ".tmp\pass_token_report_shown.flag"
+        New-Item -ItemType Directory -Force -Path (Split-Path $f -Parent) | Out-Null
+        Set-Content -LiteralPath $f -Value "1" -Encoding utf8
+    }
+    catch {
+    }
 }
 
 function Ensure-AiLoopFiles {
@@ -542,64 +557,6 @@ function Run-PostFixCommand {
     Write-Host "Running post-fix command..."
     Invoke-CommandToFile $PostFixCommand (Join-Path $AiLoop "post_fix_output.txt") | Out-Null
     return $LASTEXITCODE
-}
-
-function Get-TaskHeadingForTokenUsage {
-    param([string]$TaskFilePath)
-
-    try {
-        if (-not (Test-Path -LiteralPath $TaskFilePath)) {
-            return ""
-        }
-        foreach ($line in Get-Content -LiteralPath $TaskFilePath -ErrorAction SilentlyContinue) {
-            $t = [string]$line
-            $m = [regex]::Match($t, '^\s*#\s*(.+)$')
-            if ($m.Success) {
-                return $m.Groups[1].Value.Trim()
-            }
-        }
-        return ""
-    }
-    catch {
-        return ""
-    }
-}
-
-function Register-CodexTokenUsageAttempt {
-    param(
-        [string]$CodexText,
-        [int]$Iteration,
-        [string]$TaskMdPath
-    )
-
-    try {
-        if ($null -eq (Get-Command -Name ConvertFrom-CliTokenUsage -ErrorAction SilentlyContinue)) {
-            return
-        }
-        $parsed = ConvertFrom-CliTokenUsage -Text $CodexText
-        if (-not $parsed) {
-            return
-        }
-        if ($null -eq (Get-Command -Name Write-TokenUsageRecord -ErrorAction SilentlyContinue)) {
-            return
-        }
-        $heading = Get-TaskHeadingForTokenUsage -TaskFilePath $TaskMdPath
-        Write-TokenUsageRecord `
-            -TaskName $heading `
-            -ScriptName "ai_loop_auto.ps1" `
-            -Iteration $Iteration `
-            -Provider "codex" `
-            -Model "codex" `
-            -InputTokens $parsed.InputTokens `
-            -OutputTokens $parsed.OutputTokens `
-            -TotalTokens $parsed.TotalTokens `
-            -Confidence "unknown" `
-            -Source $parsed.Source `
-            -Quality $parsed.Quality
-    }
-    catch {
-        Write-Warning "Codex token usage recording failed (non-blocking): $($_.Exception.Message)"
-    }
 }
 
 function Run-CodexReview {
@@ -1641,7 +1598,11 @@ function Try-ResumeFromExistingReview {
             if ($WithWrapUp) {
                 & "$PSScriptRoot\wrap_up_session.ps1"
             }
-            try { & "$PSScriptRoot\show_token_report.ps1" } catch { Write-Warning "Token report failed: $_" }
+            try {
+                & "$PSScriptRoot\show_token_report.ps1"
+                Set-PassTokenReportEmittedFlag
+            }
+            catch { Write-Warning "Token report failed: $_" }
             exit 0
         }
 
@@ -1725,7 +1686,16 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         if (Test-Path -LiteralPath $codexMd) {
             $combinedCodexCapture = Get-Content -LiteralPath $codexMd -Raw -Encoding utf8 -ErrorAction SilentlyContinue
         }
-        Register-CodexTokenUsageAttempt -CodexText $combinedCodexCapture -Iteration $i -TaskMdPath (Join-Path $AiLoop "task.md")
+        if ($null -ne (Get-Command -Name Write-CliCaptureTokenUsageIfParsed -ErrorAction SilentlyContinue)) {
+            Write-CliCaptureTokenUsageIfParsed `
+                -CapturedText $combinedCodexCapture `
+                -ScriptName "ai_loop_auto.codex_review" `
+                -Provider "codex" `
+                -Model "codex" `
+                -Iteration $i `
+                -ProjectRootHint $ProjectRoot `
+                -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $i)
+        }
     }
     catch {
         Write-Warning "Codex token usage hook skipped: $($_.Exception.Message)"
@@ -1758,7 +1728,11 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         if ($WithWrapUp) {
             & "$PSScriptRoot\wrap_up_session.ps1"
         }
-        try { & "$PSScriptRoot\show_token_report.ps1" } catch { Write-Warning "Token report failed: $_" }
+        try {
+            & "$PSScriptRoot\show_token_report.ps1"
+            Set-PassTokenReportEmittedFlag
+        }
+        catch { Write-Warning "Token report failed: $_" }
         exit 0
     }
 

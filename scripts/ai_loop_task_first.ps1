@@ -293,6 +293,8 @@ function Invoke-AutoReviewLoop {
     )
     Assert-FileExists -Path $ScriptPath -Message "Auto loop script was not found."
     Write-Host "Running existing Codex review/fix loop..."
+    $passTokFlag = Join-Path $ProjectRoot ".tmp\pass_token_report_shown.flag"
+    Remove-Item -LiteralPath $passTokFlag -Force -ErrorAction SilentlyContinue
     $psArgs = @("-ExecutionPolicy", "Bypass", "-File", $ScriptPath, "-MaxIterations", "$Iterations", "-CommitMessage", $Message, "-TestCommand", $TestCommand, "-SafeAddPaths", $SafeAddPaths)
     if (-not [string]::IsNullOrWhiteSpace($PostFixCommand)) { $psArgs += @("-PostFixCommand", $PostFixCommand) }
     if (-not [string]::IsNullOrWhiteSpace($FixerCommand)) { $psArgs += @("-CursorCommand", $FixerCommand) }
@@ -494,7 +496,13 @@ else {
 
 Write-Section "STEP 2: CODEX REVIEW / FIX LOOP"
 Invoke-AutoReviewLoop -ScriptPath $AutoLoopScript -Iterations $MaxIterations -Message $CommitMessage -NoPush:$NoPush -TestCommand $TestCommand -PostFixCommand $PostFixCommand -SafeAddPaths $SafeAddPaths -ChainHandoffFromImplementer:$(-not $SkipInitialCursor) -WithWrapUp:$WithWrapUp -FixerCommand $CursorCommand -FixerModel $CursorModel
-try { & (Join-Path $PSScriptRoot "show_token_report.ps1") } catch { Write-Warning "Token report failed: $($_.Exception.Message)" }
+$passTokFlag = Join-Path $ProjectRoot ".tmp\pass_token_report_shown.flag"
+if (Test-Path -LiteralPath $passTokFlag) {
+    Remove-Item -LiteralPath $passTokFlag -Force -ErrorAction SilentlyContinue
+}
+else {
+    try { & (Join-Path $PSScriptRoot "show_token_report.ps1") } catch { Write-Warning "Token report failed: $($_.Exception.Message)" }
+}
 if ($taskName) {
     Write-Section "AI LOOP TASK: `"$taskName`" DONE"
 } else {

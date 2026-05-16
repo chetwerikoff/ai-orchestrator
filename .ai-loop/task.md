@@ -1,105 +1,101 @@
-﻿# Task: Normalize Codex reviewer transcript before strict validation
+﻿# Task: Token usage reliability (Codex path + report dedupe + Cursor parser)
 
 ## Project context
 
 Required reading for the implementer:
 
 - `AGENTS.md`
-- `.ai-loop/task.md` (this file)
+- `.ai-loop/task.md` (this file, once published)
 - `.ai-loop/project_summary.md`
 - `.ai-loop/repo_map.md`
 
 ## Goal
 
-The optional `-WithReview` path in `scripts/ai_loop_plan.ps1` passes raw `codex exec` transcript text into `Test-ReviewerOutputStrict`. That transcript can include role labels (for example a leading `codex` line), a `tokens used` footer, and duplicated echoed content, which makes strict validation fail with `MALFORMED` even when the reviewer body is valid. Normalize reviewer stdout to strip that envelope immediately before the existing strict check so correct `NO_BLOCKING_ISSUES` and `ISSUES:` responses pass without relaxing `Test-ReviewerOutputStrict`.
+Improve reliability of appended token-usage rows and console reporting on the normal task-first and auto-loop path: when Codex and Cursor CLIs emit parseable usage, successful passes should persist those rows non-fatally; eliminate back-to-back duplicate token reports (including repeated `No token usage records found.` lines) when `ai_loop_task_first.ps1` chains into `ai_loop_auto.ps1` and the auto-loop already printed the report on PASS.
 
 ## Scope
 
 **Allowed:**
 
-- Add a small `Normalize-ReviewerOutput` helper in `scripts/ai_loop_plan.ps1`, patterned after `Normalize-PlannerOutput` (same file), and invoke it at the single reviewer path that feeds `Test-ReviewerOutputStrict`.
-- Add or extend tests in `tests/test_orchestrator_validation.py` so normalization and downstream strict acceptance are covered without changing strict validation rules.
+- Add or extend non-fatal token capture immediately after Codex review CLI output is captured in the auto-loop (the path that uses `Run-CodexReview` / `codex exec` directly, not only the `run_codex_reviewer.ps1` wrapper used elsewhere).
+- Extend `ConvertFrom-CliTokenUsage` only for additional **stable, explicit** Cursor CLI usage patterns already observed in real output (no guessing, no text-length estimation).
+- Remove or gate redundant `show_token_report.ps1` invocations so a normal successful task-first PASS does not print the same report twice.
+- Add or extend unit tests with subprocess/harness patterns already used in this repo (no live Cursor/Codex CLIs, no git commit/push).
+- Brief, accurate documentation of Cursor limitations if the CLI still does not emit a supported format in common modes.
 
 **Not allowed:**
 
-- Changing `Test-ReviewerOutputStrict` validation rules or accepted issue tags (normalization only).
-- Editing `templates/reviewer_prompt.md`, `scripts/ai_loop_auto.ps1`, or `scripts/run_codex_reviewer.ps1`.
-- Committing, pushing, or writing under `docs/archive/**` or `.ai-loop/_debug/**`.
-- Editing `ai_loop.py`.
+- Changing Codex verdict / review semantics.
+- Making token recording fatal to the loop.
+- Fabricating token counts or recording secrets / account identifiers.
+- Editing `docs/archive/**`, `.ai-loop/_debug/**`, or `ai_loop.py`.
+- Broad refactors of orchestration beyond the hooks and call-site coordination described here.
 
 ## Files in scope
 
-- `scripts/ai_loop_plan.ps1`
-- `tests/test_orchestrator_validation.py`
+- `scripts/ai_loop_auto.ps1`
+- `scripts/ai_loop_task_first.ps1`
+- `scripts/record_token_usage.ps1`
+- `scripts/run_cursor_agent.ps1` only if aCursor-specific normalization must occur at capture time before parsing (prefer parser-only changes)
+- `tests/test_token_usage.py`
+- `tests/test_orchestrator_validation.py` only if an existing harness proves the cleanest place for task-first / auto chaining assertions
+- `docs/workflow.md`
+- `.ai-loop/project_summary.md`
 
 ## Files out of scope
 
 - `docs/archive/**`
 - `.ai-loop/_debug/**`
 - `ai_loop.py`
-- `templates/reviewer_prompt.md`
-- `scripts/ai_loop_auto.ps1`
-- `scripts/run_codex_reviewer.ps1`
-- Any file not listed under **Files in scope**
+- `tasks/context_audit/**` (default)
+- Wholesale changes to `scripts/run_codex_reviewer.ps1` unless strictly necessary for shared helpers (the main review loop records from `Run-CodexReview`; avoid parallel recording paths that double-append for the same invocation)
 
 ## Required behavior
 
-1. Implement `Normalize-ReviewerOutput` in `scripts/ai_loop_plan.ps1` following the same general style as `Normalize-PlannerOutput` (trimmed lines, simple string operations, no new dependencies).
-2. Normalization semantics (after full-text processing matching these rules):
-   - If the input contains a standalone trimmed line exactly `NO_BLOCKING_ISSUES`, return the string `NO_BLOCKING_ISSUES` (planner/reviewer contract: single canonical token for the clean pass case).
-   - Else locate the **last** line that matches `^\s*ISSUES:\s*$`; if none, return the stripped transcript after other cleanup steps that still apply, or empty string when appropriate so strict validation fails closed as today.
-   - From that `ISSUES:` line onward, remove a trailing footer: a whole line matching `tokens used` case-insensitively and everything after it on following lines.
-   - Trim trailing whitespace from the result; duplicate echoed blocks are handled by taking the **last** `ISSUES:` anchor as specified.
-3. At the **only** call site where reviewer stdout is validated with `Test-ReviewerOutputStrict`, pass `Normalize-ReviewerOutput`ÔÇÖs output into `Test-ReviewerOutputStrict` (do not alter `Test-ReviewerOutputStrict` itself).
-4. Preserve behavior for empty or whitespace-only input: strict validation should still yield `{ Ok = $false }` as today (normalization may yield empty; strict check unchanged).
-5. Do not apply this normalization to planner Claude output or other non-Codex-review pathsÔÇöonly the reviewer transcript path that currently triggers false `MALFORMED`.
+1. **Codex auto-loop capture:** After `Run-CodexReview` (or the single choke point that already joins Codex stdout/stderr for the review) completes successfully enough to return captured text to the rest of the script, invoke the existing non-blocking helper (`Write-CliCaptureTokenUsageIfParsed` or equivalent in `record_token_usage.ps1`) with a clear `script_name`/provider discriminator (for example `codex` / `ai_loop_auto`) and meaningful metadata when available (model if known, iteration label if cheaply available, repo root hint consistent with other recorders). Recording must not change exit codes or review outcomes.
+2. **No double-append for one Codex call:** Ensure the new Codex hook does not write duplicate rows for identical usage parsed from the same review invocation (choose the smallest reliable guard: e.g., single call site, or skip when the parsed fingerprint matches an append in the same run scope).
+3. **Cursor parsing:** Extend `ConvertFrom-CliTokenUsage` only when you can point to a concrete, stable pattern (document the exemplar string shape in the implementation comment or test fixture). If unsupported, do not invent parsers; rely on documentation updates.
+4. **Report de-duplication:** On the normal task-first path where `ai_loop_task_first.ps1` invokes `ai_loop_auto.ps1` and auto exits zero, do not immediately run `show_token_report.ps1` again if auto already printed the report for that PASS. Preserve a sensible report on paths where auto did not run or did not print (for example non-zero auto exit), without surprising silenceÔÇöprefer the smallest conditional around the task-first tail `show_token_report.ps1` call.
+5. **Compatibility:** Existing `.ai-loop/token_usage.jsonl` rows and `show_token_report.ps1` sections remain backward compatible; additions are additive fields or new `script_name` values, not breaking renames.
+6. **Docs/summary:** Update `docs/workflow.md` only to reflect user-visible behavior (where reports appear; Cursor limitation if applicable). Update `.ai-loop/project_summary.md` only if durable architecture text about token reporting changes.
 
 ## Tests
 
-- Extend `tests/test_orchestrator_validation.py` with focused cases that invoke the same PowerShell harness pattern already used for planner/task-first helpers (dot-source or subprocess as appropriate for this repo), covering at minimum:
-  - Transcript with a leading `codex` (or similar role-label) line before a valid `ISSUES:` block ÔåÆ strict acceptance unchanged from a clean file with only that block.
-  - Footer `tokens used` plus numeric line removed; body still validates.
-  - Two `ISSUES:` sections (echo duplicate) ÔåÆ **last** block is what strict validation sees and passes when that block is valid.
-  - Clean `NO_BLOCKING_ISSUES` only ÔåÆ still valid.
-  - Clean `ISSUES:` block with no wrapper ÔåÆ still valid.
-  - Empty / whitespace-only ÔåÆ `{ Ok = $false }` unchanged.
-- Run `python -m pytest -q`.
+- Extend `tests/test_token_usage.py` to cover: Codex-like merged output parsing path for the new recorder inputs; any new Cursor pattern with afixture string; dedupe guard behavior if implementable without live CLI.
+- Run `python -m pytest -q`; if PowerShell is touched, keep existing parse-check posture for edited scripts (see `AGENTS.md`).
 
 ## Verification
 
-```powershell
-python -m pytest -q
-```
-
-```powershell
-powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan.ps1', [ref]$null, [ref]$null)"
-```
-
-Optional: `pyright` if any Python typing is touched (unlikely).
+- `python -m pytest -q`
+- PowerShell parse check on each edited `.ps1` under `scripts/` (copy the one-line `Parser::ParseFile` pattern from `AGENTS.md` for those files).
 
 ## Implementer summary requirements
 
 - List changed files briefly.
-- State pytest result as count summary (not full log).
-- Summarize implemented work in 3ÔÇô5 lines.
-- Note any skipped items with reason.
-- List 1ÔÇô3 remaining risks.
+- State pytest result as a count summary, not a full log.
+- Summarize implemented behavior in 3ÔÇô5 lines (Codex hook, dedupe, Cursor parser or doc-only, report tail behavior).
+- Note anything skipped with reason.
+- List 1ÔÇô3 remaining risks (for example reliance on CLI output stability).
 
 ## Project summary update
 
-Add one short bullet under an appropriate heading (for example **Last Completed Task** or **Current Stage** notes) stating that `-WithReview` now normalizes Codex reviewer transcripts before `Test-ReviewerOutputStrict`, eliminating false `MALFORMED` warnings from CLI envelope noiseÔÇöafter this task ships.
+Update the token-usage / reporting bullets in **Current Architecture** or **Current Stage** if behavior changes (Codex rows from auto-loop; single report per successful task-first PASS). If only tests/helpers change, write **no update needed**.
 
 ## Output hygiene
 
-- Do not duplicate this task body into `.ai-loop/project_summary.md`; only the durable one-line note above.
-- Do not write debug transcripts under `.ai-loop/_debug/` unless debugging locally outside commit scope.
-- Do not create a git commit unless the human explicitly asks.
+- Do not duplicate the full task narrative into `.ai-loop/implementer_summary.md`.
+- Do not write new files under `.ai-loop/_debug/`.
+- Do not create a git commit unless a separately scoped task authorizes it.
 - Do not edit `docs/archive/**`.
 
 ## Important
 
-- Reuse `Normalize-PlannerOutput` in the same file as the structural pattern only; reviewer normalization rules differ (last `ISSUES:` anchor, `tokens used` footer).
-- **Architect note:** none on core approachÔÇöthe USER ASK matches repo conventions (minimal PowerShell helper, strict validator untouched, tests beside existing orchestrator validation). If implementation discovers a second call site to `Test-ReviewerOutputStrict`, normalize at both or consolidate so **all** Codex reviewer transcripts hit normalization onceÔÇöstill without editing `Test-ReviewerOutputStrict`.
-- Keep the PowerShell delta small (on the order of one function plus one call-site change; total change budget ~80 lines including tests).
+- Assume **`Run-CodexReview` is the authoritative capture site** for normal Codex review output in `ai_loop_auto.ps1`; hook there rather than expecting `run_codex_reviewer.ps1` to run in that path.
+- Keep the change set near the **~80 changed lines** policy; if the combined diff wants to grow, land **Codex recording + dedupe + report gating** first in one iteration, then Cursor parser extensions in a follow-up iteration (still within this taskÔÇÖs files) before expanding scope.
+- **Architect note:** User listed `scripts/show_token_report.ps1`; prefer fixing duplicate messages by **coordinating callers** (`ai_loop_auto.ps1` vs `ai_loop_task_first.ps1`) rather than adding stateful de-duplication inside the report script, unless call-site gating is insufficient.
+- **Architect note:** User proposed extending Cursor handling in `run_cursor_agent.ps1`; prefer **`ConvertFrom-CliTokenUsage` in `record_token_usage.ps1`** so all CLI wrappers benefit uniformly; touch `run_cursor_agent.ps1` only if capture-time normalization is unavoidable.
+- **Architect note:** Dedupe for Codex should mean **one logical write per review invocation**, not weakening parsers or suppressing legitimate later reviews across iterations.
 
 ## Order
+
+1

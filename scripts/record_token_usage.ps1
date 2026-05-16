@@ -4,6 +4,9 @@ if ([string]::IsNullOrWhiteSpace($script:_RecordTokenUsageScriptDir)) {
     $script:_RecordTokenUsageScriptDir = Split-Path -LiteralPath $MyInvocation.MyCommand.Path -Parent
 }
 
+# Per-process dedupe for Write-CliCaptureTokenUsageIfParsed -DedupeId (same capture text twice for one logical call).
+$script:_CliCaptureDedupeLastFpById = @{}
+
 function ConvertFrom-CliTokenUsage {
     param(
         [Parameter(Mandatory = $true)]
@@ -139,7 +142,8 @@ function Write-CliCaptureTokenUsageIfParsed {
         [Parameter(Mandatory = $true)][string]$Provider,
         [string]$Model = "",
         [int]$Iteration = 0,
-        [string]$ProjectRootHint = ""
+        [string]$ProjectRootHint = "",
+        [string]$DedupeId = ""
     )
 
     try {
@@ -152,6 +156,24 @@ function Write-CliCaptureTokenUsageIfParsed {
         $parsed = ConvertFrom-CliTokenUsage -Text $CapturedText
         if (-not $parsed) {
             return
+        }
+        $dedupeKeyTrimmed = ""
+        $dedupeFp = ""
+        if (-not [string]::IsNullOrWhiteSpace($DedupeId)) {
+            $enc = New-Object System.Text.UTF8Encoding $false
+            $bytes = $enc.GetBytes([string]$CapturedText)
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                $hash = $sha.ComputeHash($bytes)
+            }
+            finally {
+                $sha.Dispose()
+            }
+            $dedupeFp = [BitConverter]::ToString($hash) -replace '-', ''
+            $dedupeKeyTrimmed = $DedupeId.Trim()
+            if ($script:_CliCaptureDedupeLastFpById.ContainsKey($dedupeKeyTrimmed) -and $script:_CliCaptureDedupeLastFpById[$dedupeKeyTrimmed] -eq $dedupeFp) {
+                return
+            }
         }
         if ($null -eq (Get-Command -Name Write-TokenUsageRecord -ErrorAction SilentlyContinue)) {
             return
@@ -177,6 +199,9 @@ function Write-CliCaptureTokenUsageIfParsed {
             -Confidence "unknown" `
             -Source $parsed.Source `
             -Quality $parsed.Quality
+        if ($dedupeKeyTrimmed -ne "" -and $dedupeFp -ne "") {
+            $script:_CliCaptureDedupeLastFpById[$dedupeKeyTrimmed] = $dedupeFp
+        }
     }
     catch {
         Write-Warning "Token usage wrapper capture skipped (non-blocking): $($_.Exception.Message)"
