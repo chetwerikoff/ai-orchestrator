@@ -1812,7 +1812,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
 
     if ($iterTestExit -ne 0) {
         Write-Host ""
-        Write-Host "Tests failed — skipping Codex review and sending directly to implementer fix." -ForegroundColor Yellow
+        Write-Host "Tests failed - skipping Codex review and sending directly to implementer fix." -ForegroundColor Yellow
         $failSummary = Join-Path $AiLoop "test_failures_summary.md"
         $failText = if (Test-Path $failSummary) { Get-Content $failSummary -Raw } else { Get-Content (Join-Path $AiLoop "test_output.txt") -Raw -ErrorAction SilentlyContinue }
         $fixPrompt = "Tests are failing. Fix them before any other changes.`n`n$failText"
