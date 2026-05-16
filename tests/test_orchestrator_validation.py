@@ -1836,6 +1836,34 @@ def test_run_codex_review_prompt_preserves_literal_json_fence() -> None:
     assert "\n```\n\nRules:" in literal
 
 
+def test_run_codex_review_joined_capture_invokes_token_hook() -> None:
+    """Run-CodexReview must record usage from the in-process joined capture with dedupe id."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    anchor = text.index("function Run-CodexReview")
+    end = text.index("function Get-ReviewVerdictLineScanResult", anchor)
+    body = text[anchor:end]
+    assert "param([int]$Iteration = 1)" in body
+    assert "Write-CliCaptureTokenUsageIfParsed" in body
+    assert "ai_loop_auto.codex_review" in body
+    assert '-DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration)' in body
+
+
+def test_review_loop_calls_run_codex_review_with_iteration_only() -> None:
+    """Iteration token hook lives inside Run-CodexReview — not duplicated in the outer loop body."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    loop_anchor = text.index("for ($i = 1; $i -le $MaxIterations; $i++)")
+    fix_anchor = text.index('Write-Host "Extracting fix prompt for implementer..."', loop_anchor)
+    loop_seg = text[loop_anchor:fix_anchor]
+    assert "Run-CodexReview -Iteration $i" in loop_seg
+    assert "Write-CliCaptureTokenUsageIfParsed" not in loop_seg
+
+
+def test_pass_skips_show_token_report_when_chained_from_task_first() -> None:
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert '$env:AI_LOOP_CHAIN_FROM_TASK_FIRST -ne "1"' in text
+    assert text.count('$env:AI_LOOP_CHAIN_FROM_TASK_FIRST -ne "1"') >= 2
+
+
 def test_get_review_verdict_exact_line_matching_and_last_exact_wins() -> None:
     """Get-ReviewVerdict: full-line anchored VERDICT only; stray instruction text cannot imply PASS; last exact line wins."""
     ps = _powershell_exe()
