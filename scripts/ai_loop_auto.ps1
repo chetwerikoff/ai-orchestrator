@@ -515,16 +515,10 @@ Brief summary.
     }
 }
 
-function Get-ReviewVerdict {
-    param(
-        [string]$ReviewFile
-    )
+function Get-ReviewVerdictLineScanResult {
+    param([AllowEmptyString()][string]$ReviewText)
 
-    if (!(Test-Path $ReviewFile)) {
-        return "FIX_REQUIRED"
-    }
-
-    $review = Get-Content $ReviewFile -Raw
+    $review = $ReviewText
     if ($null -eq $review) {
         $review = ""
     }
@@ -538,22 +532,51 @@ function Get-ReviewVerdict {
         ([System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
             [System.Text.RegularExpressions.RegexOptions]::Compiled)
     )
+
+    $lines = @([regex]::Split($review, "`r?`n"))
     $lastVerdict = $null
-    foreach ($line in ($review -split '\r?\n')) {
-        $t = $line.Trim()
+    $lastIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $t = ([string]$lines[$i]).Trim()
         $m = $verdictRe.Match($t)
-        if ($m.Success) {
-            $g = $m.Groups[1].Value.ToUpperInvariant()
-            if ($g -eq 'PASS') {
-                $lastVerdict = 'PASS'
-            }
-            elseif ($g -eq 'FIX_REQUIRED') {
-                $lastVerdict = 'FIX_REQUIRED'
-            }
+        if (-not $m.Success) {
+            continue
+        }
+        $g = $m.Groups[1].Value.ToUpperInvariant()
+        if ($g -eq 'PASS') {
+            $lastVerdict = 'PASS'
+            $lastIdx = $i
+        }
+        elseif ($g -eq 'FIX_REQUIRED') {
+            $lastVerdict = 'FIX_REQUIRED'
+            $lastIdx = $i
         }
     }
-    if ($null -ne $lastVerdict) {
-        return $lastVerdict
+
+    return [pscustomobject]@{
+        LastVerdict            = $lastVerdict
+        LastVerdictLineIndex   = $lastIdx
+        Lines                  = $lines
+    }
+}
+
+function Get-ReviewVerdict {
+    param(
+        [string]$ReviewFile
+    )
+
+    if (!(Test-Path $ReviewFile)) {
+        return "FIX_REQUIRED"
+    }
+
+    $review = Get-Content -LiteralPath $ReviewFile -Raw -Encoding utf8
+    if ($null -eq $review) {
+        $review = ""
+    }
+
+    $scan = Get-ReviewVerdictLineScanResult -ReviewText $review
+    if ($null -ne $scan.LastVerdict) {
+        return $scan.LastVerdict
     }
     return "FIX_REQUIRED"
 }
@@ -595,8 +618,25 @@ function Get-CodexSeverityReasonSnippet {
     if ([string]::IsNullOrWhiteSpace($Markdown)) {
         return ""
     }
-    $lines = @([regex]::Split($Markdown, "`r?`n"))
+
+    # Reasons come only from the assistant tail after the same last anchored VERDICT line used for gating.
+    $scan = Get-ReviewVerdictLineScanResult -ReviewText $Markdown
+    if ($scan.LastVerdictLineIndex -lt 0) {
+        return ""
+    }
+
+    $lines = @()
+    $start = $scan.LastVerdictLineIndex + 1
+    if ($start -lt $scan.Lines.Count) {
+        $lines = @($scan.Lines[$start..($scan.Lines.Count - 1)])
+    }
+
+    if ($lines.Count -eq 0) {
+        return ""
+    }
+
     $headRx = [regex]::new('^\s*(?:[#]{1,6}\s*)?(?<sev>CRITICAL|HIGH|MEDIUM)\s*:\s*$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $dotEllipsisOnlyRx = [regex]::new(('^[\s.' + [char]0x2026 + ']+$'), [System.Text.RegularExpressions.RegexOptions]::Compiled)
     $priorities = @("CRITICAL", "HIGH", "MEDIUM")
 
     foreach ($want in $priorities) {
@@ -627,7 +667,16 @@ function Get-CodexSeverityReasonSnippet {
                 if ([string]::IsNullOrWhiteSpace($body)) {
                     continue
                 }
-                if ($body.Trim().ToLowerInvariant() -eq 'none') {
+                if ($body.ToLowerInvariant() -eq 'none') {
+                    continue
+                }
+                if ($body -eq '...') {
+                    continue
+                }
+                if (($body.Length -eq 1) -and ([int][char]$body[0] -eq 0x2026)) {
+                    continue
+                }
+                if ($dotEllipsisOnlyRx.IsMatch($body)) {
                     continue
                 }
                 $flat = (($body -replace '[\t\r\f\v]+', ' ') -replace '\s+', ' ').Trim()
@@ -1327,7 +1376,7 @@ function Try-ResumeFromExistingReview {
         if ($codexVerdict -eq "PASS") {
             $resumeReviewRaw = ""
             if (Test-Path -LiteralPath $codexReview) {
-                $resumeReviewRaw = Get-Content -LiteralPath $codexReview -Raw -ErrorAction SilentlyContinue
+                $resumeReviewRaw = Get-Content -LiteralPath $codexReview -Raw -Encoding utf8 -ErrorAction SilentlyContinue
             }
             if ($null -eq $resumeReviewRaw) {
                 $resumeReviewRaw = ""
@@ -1351,7 +1400,7 @@ function Try-ResumeFromExistingReview {
 
         $resumeFixRaw = ""
         if (Test-Path -LiteralPath $codexReview) {
-            $resumeFixRaw = Get-Content -LiteralPath $codexReview -Raw -ErrorAction SilentlyContinue
+            $resumeFixRaw = Get-Content -LiteralPath $codexReview -Raw -Encoding utf8 -ErrorAction SilentlyContinue
         }
         if ($null -eq $resumeFixRaw) {
             $resumeFixRaw = ""
@@ -1427,7 +1476,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
     try {
         $codexMd = Join-Path $AiLoop "codex_review.md"
         if (Test-Path -LiteralPath $codexMd) {
-            $combinedCodexCapture = Get-Content -LiteralPath $codexMd -Raw -ErrorAction SilentlyContinue
+            $combinedCodexCapture = Get-Content -LiteralPath $codexMd -Raw -Encoding utf8 -ErrorAction SilentlyContinue
         }
         Register-CodexTokenUsageAttempt -CodexText $combinedCodexCapture -Iteration $i -TaskMdPath (Join-Path $AiLoop "task.md")
     }

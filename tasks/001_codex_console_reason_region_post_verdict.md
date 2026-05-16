@@ -30,7 +30,6 @@ Codex writes a full transcript to `.ai-loop/codex_review.md`, which includes the
 - `scripts/ai_loop_auto.ps1`
 - `tests/test_orchestrator_validation.py`
 - `.ai-loop/project_summary.md`
-- `tasks/` (planner queue copies and related specs for this workstream)
 
 ## Files out of scope
 
