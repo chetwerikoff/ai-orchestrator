@@ -24,6 +24,17 @@ catch {
     Write-Warning "record_token_usage.ps1 load failed (token recording disabled): $($_.Exception.Message)"
 }
 
+function Invoke-ArchiveAiLoopChainBestEffort {
+    try {
+        if (Get-Command -Name Archive-AiLoopChainIfPresent -ErrorAction SilentlyContinue) {
+            Archive-AiLoopChainIfPresent -ProjectRoot $ProjectRoot
+        }
+    }
+    catch {
+        Write-Warning "[chain] archive skipped (non-blocking): $($_.Exception.Message)"
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $AiLoop | Out-Null
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 Remove-Item -LiteralPath (Join-Path $ProjectRoot ".tmp\pass_token_report_shown.flag") -Force -ErrorAction SilentlyContinue
@@ -674,6 +685,14 @@ FINAL_NOTE:
 Brief summary.
 '@
 
+    $codexPromptBytes = 0
+    try {
+        $codexPromptBytes = [System.Text.Encoding]::UTF8.GetByteCount($prompt)
+    }
+    catch {
+        $codexPromptBytes = 0
+    }
+
     Write-Host ""
     Write-Host "Running Codex review..."
 
@@ -704,7 +723,11 @@ Brief summary.
                     -Model "codex" `
                     -Iteration $Iteration `
                     -ProjectRootHint $ProjectRoot `
-                    -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration)
+                    -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration) `
+                    -Phase "implementation" `
+                    -Role "codex_review" `
+                    -FixIterationIndex (($Iteration - 1) + [int]$script:AiaResumePreloopFixIterations) `
+                    -PromptBytes $codexPromptBytes
             }
         }
         catch {
@@ -742,7 +765,11 @@ Brief summary.
                     -Model "codex" `
                     -Iteration $Iteration `
                     -ProjectRootHint $ProjectRoot `
-                    -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration)
+                    -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration) `
+                    -Phase "implementation" `
+                    -Role "codex_review" `
+                    -FixIterationIndex (($Iteration - 1) + [int]$script:AiaResumePreloopFixIterations) `
+                    -PromptBytes $codexPromptBytes
             }
         }
         catch {
@@ -1346,6 +1373,7 @@ DETAIL: See .ai-loop/implementer_result.md
     Write-FinalStatus $unsafeFinal
     Write-Host ""
     Write-Host "UNSAFE_QUEUE_CLEANUP: $ConsoleLine" -ForegroundColor Yellow
+    Invoke-ArchiveAiLoopChainBestEffort
     exit 1
 }
 
@@ -1371,6 +1399,8 @@ function Extract-FixPrompt {
 }
 
 function Run-ImplementerFix {
+    param([int]$FixIterationIndex = -1)
+
     Ensure-AiLoopFiles
 
     $implementerPrompt = @"
@@ -1419,8 +1449,21 @@ After changes:
     if (-not [string]::IsNullOrWhiteSpace($CursorModel)) {
         $implementerArgs += @("--model", $CursorModel)
     }
-    $implementerPrompt | & $runWrapper @implementerArgs *> (Join-Path $debugDir "implementer_fix_output.txt")
-    return $LASTEXITCODE
+    $env:AI_LOOP_TOKEN_PHASE = "implementation"
+    $env:AI_LOOP_TOKEN_ROLE = "implementer"
+    Remove-Item Env:\AI_LOOP_TOKEN_FIX_ITER -ErrorAction SilentlyContinue
+    if ($FixIterationIndex -ge 0) {
+        $env:AI_LOOP_TOKEN_FIX_ITER = "$FixIterationIndex"
+    }
+    try {
+        $implementerPrompt | & $runWrapper @implementerArgs *> (Join-Path $debugDir "implementer_fix_output.txt")
+        return $LASTEXITCODE
+    }
+    finally {
+        Remove-Item Env:\AI_LOOP_TOKEN_PHASE -ErrorAction SilentlyContinue
+        Remove-Item Env:\AI_LOOP_TOKEN_ROLE -ErrorAction SilentlyContinue
+        Remove-Item Env:\AI_LOOP_TOKEN_FIX_ITER -ErrorAction SilentlyContinue
+    }
 }
 
 function Stage-SafeProjectFiles {
@@ -1577,6 +1620,7 @@ function Commit-And-Push {
     if ($LASTEXITCODE -ne 0) {
         Write-FinalStatus "ABORTED: tests failed before commit. Push skipped."
         Write-Host "ABORTED: tests failed before commit. Push skipped."
+        Invoke-ArchiveAiLoopChainBestEffort
         exit 5
     }
 
@@ -1600,6 +1644,7 @@ function Commit-And-Push {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "Git commit failed. Push skipped."
         Write-FinalStatus "PASS, but git commit failed. Manual check required."
+        Invoke-ArchiveAiLoopChainBestEffort
         exit 3
     }
 
@@ -1610,6 +1655,7 @@ function Commit-And-Push {
         if ($LASTEXITCODE -ne 0) {
             Write-Host "Git push failed."
             Write-FinalStatus "PASS and committed, but git push failed. Manual push required."
+            Invoke-ArchiveAiLoopChainBestEffort
             exit 4
         }
 
@@ -1647,7 +1693,8 @@ function Try-ResumeFromExistingReview {
                 -ConsoleLine "resume halted (protected tasks/ paths in existing fix prompt)" `
                 -FinalReasonLine "Fix prompt targeted protected tasks/ queue paths outside the active task scope."
         }
-        Run-ImplementerFix | Out-Null
+        Run-ImplementerFix -FixIterationIndex 1 | Out-Null
+        $script:AiaResumePreloopFixIterations = 1
         return $true
     }
 
@@ -1682,6 +1729,7 @@ function Try-ResumeFromExistingReview {
                 }
                 catch { Write-Warning "Token report failed: $_" }
             }
+            Invoke-ArchiveAiLoopChainBestEffort
             exit 0
         }
 
@@ -1697,7 +1745,8 @@ function Try-ResumeFromExistingReview {
 
         if (Extract-FixPrompt) {
             Write-Host "Extracted fix prompt from existing Codex review."
-            Run-ImplementerFix | Out-Null
+            Run-ImplementerFix -FixIterationIndex 1 | Out-Null
+            $script:AiaResumePreloopFixIterations = 1
             return $true
         }
     }
@@ -1712,6 +1761,8 @@ if (-not $Resume) {
     Clear-AiLoopRuntimeState
 }
 
+$script:AiaResumePreloopFixIterations = 0
+
 $resumed = Try-ResumeFromExistingReview
 
 if ($resumed) {
@@ -1725,7 +1776,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
     Write-Host "AI LOOP ITERATION $i / $MaxIterations"
     Write-Host "=============================="
 
-    Save-TestAndDiff | Out-Null
+    $iterTestExit = Save-TestAndDiff
     Run-PostFixCommand | Out-Null
 
     $porcelainLines = @(git status --porcelain --untracked-files=all 2>$null)
@@ -1745,6 +1796,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
             )
             Write-Host ""
             Write-Host "Clean tree on iteration 1: skipping Codex. Prefer task-first (ai_loop_task_first.ps1) when the working tree has no changes yet." -ForegroundColor Yellow
+            Invoke-ArchiveAiLoopChainBestEffort
             exit 6
         }
         Write-FinalStatus (
@@ -1754,6 +1806,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         )
         Write-Host ""
         Write-Host ('Iteration ' + $i + ': working tree clean before Codex (implementer fix produced no git-visible changes). See .ai-loop\final_status.md') -ForegroundColor Yellow
+        Invoke-ArchiveAiLoopChainBestEffort
         exit 7
     }
 
@@ -1775,6 +1828,12 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         $combinedCodexCapture = ""
     }
     Show-CodexReviewConsoleSummary -Verdict $codexVerdict -ReviewMarkdownRaw $combinedCodexCapture
+
+    if ($codexVerdict -eq "PASS" -and $iterTestExit -ne 0) {
+        Write-Host ""
+        Write-Host "Codex returned PASS but tests failed (exit $iterTestExit) — overriding to FIX_REQUIRED to prevent committing broken state." -ForegroundColor Yellow
+        $codexVerdict = "FIX_REQUIRED"
+    }
 
     if ($codexVerdict -eq "PASS") {
         $didCommit = Commit-And-Push
@@ -1804,6 +1863,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
             }
             catch { Write-Warning "Token report failed: $_" }
         }
+        Invoke-ArchiveAiLoopChainBestEffort
         exit 0
     }
 
@@ -1817,10 +1877,11 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         Write-Host "Stopped: Codex requested fixes, but no fix prompt was extracted."
         Write-Host "See:"
         Write-Host ".ai-loop\codex_review.md"
+        Invoke-ArchiveAiLoopChainBestEffort
         exit 1
     }
 
-    Run-ImplementerFix | Out-Null
+    Run-ImplementerFix -FixIterationIndex ([int]$script:AiaResumePreloopFixIterations + $i) | Out-Null
 }
 
 Write-FinalStatus "STOPPED: max iterations reached. Manual review required."
@@ -1833,4 +1894,5 @@ Write-Host ".ai-loop\codex_review.md"
 Write-Host ".ai-loop\implementer_summary.md"
 Write-Host ".ai-loop\project_summary.md"
 
+Invoke-ArchiveAiLoopChainBestEffort
 exit 2
