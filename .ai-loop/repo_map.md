@@ -20,7 +20,7 @@
 
 ## scripts/
 
-- `scripts/ai_loop_auto.ps1` — Marker for ai_loop_task_first.ps1: auto-loop already ran show_token_report.ps1 on Codex PASS (avoid duplicate console report).
+- `scripts/ai_loop_auto.ps1` — Marker for ai_loop_task_first.ps1: auto-loop already ran show_token_report.ps1 on Codex PASS (suppress duplicate tail).
 - `scripts/ai_loop_plan.ps1` — Draft wrapper failures can leave a stale LASTEXITCODE; do not let that falsify the planner check.
 - `scripts/ai_loop_task_first.ps1` — Workaround for a Windows PowerShell 5.1 native-command quoting bug: when a splatted argv
 - `scripts/build_repo_map.ps1` — Generate a deterministic `.ai-loop/repo_map.md` index for the repository tree.

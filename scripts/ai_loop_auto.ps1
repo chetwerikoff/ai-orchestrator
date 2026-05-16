@@ -222,7 +222,8 @@ function Write-FinalStatus {
 function Set-PassTokenReportEmittedFlag {
     <#
     .SYNOPSIS
-        Marker for ai_loop_task_first.ps1: auto-loop already ran show_token_report.ps1 on Codex PASS (avoid duplicate console report).
+        Marker for ai_loop_task_first.ps1: auto-loop already ran show_token_report.ps1 on Codex PASS (suppress duplicate tail).
+        Task-first skips the PASS report inside the chained child (`AI_LOOP_CHAIN_FROM_TASK_FIRST`); use this flag when the child emitted the report (e.g. `-SkipInitialCursor`).
     #>
     try {
         $f = Join-Path $ProjectRoot ".tmp\pass_token_report_shown.flag"
@@ -591,6 +592,8 @@ function Run-PostFixCommand {
 }
 
 function Run-CodexReview {
+    param([int]$Iteration = 1)
+
     Ensure-AiLoopFiles
 
     $prompt = @'
@@ -692,6 +695,22 @@ Brief summary.
         $joinedOut = ($textLines -join [Environment]::NewLine).TrimEnd()
         $joinedOut | Set-Content -LiteralPath $codexOutPath -Encoding UTF8 -ErrorAction SilentlyContinue
 
+        try {
+            if ($null -ne (Get-Command -Name Write-CliCaptureTokenUsageIfParsed -ErrorAction SilentlyContinue)) {
+                Write-CliCaptureTokenUsageIfParsed `
+                    -CapturedText $joinedOut `
+                    -ScriptName "ai_loop_auto.codex_review" `
+                    -Provider "codex" `
+                    -Model "codex" `
+                    -Iteration $Iteration `
+                    -ProjectRootHint $ProjectRoot `
+                    -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration)
+            }
+        }
+        catch {
+            Write-Warning "Codex token usage hook skipped: $($_.Exception.Message)"
+        }
+
         return $codexExit
     }
     catch {
@@ -701,6 +720,33 @@ Brief summary.
         }
         catch {
             Write-Warning "Codex fallback redirect failed: $($_.Exception.Message)"
+        }
+        $joinedOutFb = ""
+        try {
+            if (Test-Path -LiteralPath $codexOutPath) {
+                $rawFb = Get-Content -LiteralPath $codexOutPath -Raw -Encoding utf8 -ErrorAction SilentlyContinue
+                if ($null -ne $rawFb) {
+                    $joinedOutFb = $rawFb.TrimEnd()
+                }
+            }
+        }
+        catch {
+        }
+        try {
+            if ((-not [string]::IsNullOrWhiteSpace($joinedOutFb)) -and
+                    ($null -ne (Get-Command -Name Write-CliCaptureTokenUsageIfParsed -ErrorAction SilentlyContinue))) {
+                Write-CliCaptureTokenUsageIfParsed `
+                    -CapturedText $joinedOutFb `
+                    -ScriptName "ai_loop_auto.codex_review" `
+                    -Provider "codex" `
+                    -Model "codex" `
+                    -Iteration $Iteration `
+                    -ProjectRootHint $ProjectRoot `
+                    -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $Iteration)
+            }
+        }
+        catch {
+            Write-Warning "Codex token usage hook skipped (fallback path): $($_.Exception.Message)"
         }
         return $LASTEXITCODE
     }
@@ -1629,11 +1675,13 @@ function Try-ResumeFromExistingReview {
             if ($WithWrapUp) {
                 & "$PSScriptRoot\wrap_up_session.ps1"
             }
-            try {
-                & "$PSScriptRoot\show_token_report.ps1"
-                Set-PassTokenReportEmittedFlag
+            if ($env:AI_LOOP_CHAIN_FROM_TASK_FIRST -ne "1") {
+                try {
+                    & "$PSScriptRoot\show_token_report.ps1"
+                    Set-PassTokenReportEmittedFlag
+                }
+                catch { Write-Warning "Token report failed: $_" }
             }
-            catch { Write-Warning "Token report failed: $_" }
             exit 0
         }
 
@@ -1709,7 +1757,7 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         exit 7
     }
 
-    Run-CodexReview | Out-Null
+    Run-CodexReview -Iteration $i | Out-Null
 
     $combinedCodexCapture = ""
     try {
@@ -1717,19 +1765,9 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         if (Test-Path -LiteralPath $codexMd) {
             $combinedCodexCapture = Get-Content -LiteralPath $codexMd -Raw -Encoding utf8 -ErrorAction SilentlyContinue
         }
-        if ($null -ne (Get-Command -Name Write-CliCaptureTokenUsageIfParsed -ErrorAction SilentlyContinue)) {
-            Write-CliCaptureTokenUsageIfParsed `
-                -CapturedText $combinedCodexCapture `
-                -ScriptName "ai_loop_auto.codex_review" `
-                -Provider "codex" `
-                -Model "codex" `
-                -Iteration $i `
-                -ProjectRootHint $ProjectRoot `
-                -DedupeId ("ai_loop_auto:codex_review:iter{0}" -f $i)
-        }
     }
     catch {
-        Write-Warning "Codex token usage hook skipped: $($_.Exception.Message)"
+        $combinedCodexCapture = ""
     }
 
     $codexVerdict = Get-CodexVerdict
@@ -1759,11 +1797,13 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         if ($WithWrapUp) {
             & "$PSScriptRoot\wrap_up_session.ps1"
         }
-        try {
-            & "$PSScriptRoot\show_token_report.ps1"
-            Set-PassTokenReportEmittedFlag
+        if ($env:AI_LOOP_CHAIN_FROM_TASK_FIRST -ne "1") {
+            try {
+                & "$PSScriptRoot\show_token_report.ps1"
+                Set-PassTokenReportEmittedFlag
+            }
+            catch { Write-Warning "Token report failed: $_" }
         }
-        catch { Write-Warning "Token report failed: $_" }
         exit 0
     }
 

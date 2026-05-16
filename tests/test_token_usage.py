@@ -552,6 +552,33 @@ def test_codex_auto_record_chain() -> None:
         _TOKEN_JSONL.unlink(missing_ok=True)
 
 
+def test_joined_codex_review_capture_writes_jsonl_iteration_3() -> None:
+    """Fixture matches Run-CodexReview merged transcript (assistant body + CLI footer tokens used)."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    snippet = "VERDICT: PASS\n\ntokens used 777\n"
+    b64 = base64.b64encode(snippet.encode("utf-16le")).decode("ascii")
+    root_esc = str(_ROOT.resolve()).replace("'", "''")
+    _TOKEN_JSONL.unlink(missing_ok=True)
+    try:
+        cmd = (
+            ". .\\scripts\\record_token_usage.ps1; "
+            f"$t=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('{b64}')); "
+            "Write-CliCaptureTokenUsageIfParsed -CapturedText $t -ScriptName ai_loop_auto.codex_review "
+            "-Provider codex -Model codex -Iteration 3 -DedupeId 'pytest:joined_cap' "
+            f"-ProjectRootHint '{root_esc}'"
+        )
+        code, _, stderr = _run_ps_capture(cmd)
+        assert code == 0, stderr
+        data = json.loads(_TOKEN_JSONL.read_text(encoding="utf-8").strip().splitlines()[-1])
+        assert data["script_name"] == "ai_loop_auto.codex_review"
+        assert data["iteration"] == 3
+        assert data["total_tokens"] == 777
+    finally:
+        _TOKEN_JSONL.unlink(missing_ok=True)
+
+
 def test_parse_limits_yaml_known_unknown_na() -> None:
     blob = """
 providers:
