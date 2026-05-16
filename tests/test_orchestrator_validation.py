@@ -83,6 +83,22 @@ def _extract_fix_prompt_ps_functions_from_auto(ps1_text: str) -> str:
     return ps1_text[start:end]
 
 
+def _extract_test_fix_prompt_tasks_conflict_from_auto(ps1_text: str) -> str:
+    """C12 helper stack up to `Stop-UnsafeQueueCleanup` (excludes exit helper and `Extract-FixPrompt`)."""
+    start = ps1_text.index("function Test-IsUnderTasksQueuePath")
+    end = ps1_text.index("function Stop-UnsafeQueueCleanup", start)
+    return ps1_text[start:end]
+
+
+def _extract_working_tree_tasks_gate_helpers(ps1_text: str) -> str:
+    """Minimal slices for `Test-WorkingTreeTasksConflictWithScope` harness (no git repo setup here)."""
+    a = ps1_text.index("function Test-IsUnderTasksQueuePath")
+    b = ps1_text.index("function Get-FixObjectTasksPathHits", a)
+    c = ps1_text.index("function Get-WorkingTreeTasksPathsRelative")
+    d = ps1_text.index("function Commit-And-Push", c)
+    return ps1_text[a:b] + ps1_text[c:d]
+
+
 def _extract_get_review_verdict_from_auto(ps1_text: str) -> str:
     """`Get-ReviewVerdict` from ai_loop_auto.ps1 (Codex verdict gate harness)."""
     start = ps1_text.index("function Get-ReviewVerdict")
@@ -428,6 +444,30 @@ def test_ai_loop_auto_writes_diff_summary() -> None:
     script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert "diff_summary.txt" in script
     assert "git diff --stat" in script
+
+
+def test_ai_loop_auto_git_review_snapshots_use_repo_wide_diff() -> None:
+    """Codex pre-review artifacts come from full-tree `git diff`/`status` (not task-scope-filtered)."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    start = text.index("function Save-GitReviewArtifactsForCodex")
+    end = text.index("function Save-TestAndDiff", start)
+    block = text[start:end]
+    assert "git diff HEAD" in block
+    assert "git status" in block
+    for banned in ("Get-FilesInScope", "Test-RelEligible", "ActiveScope"):
+        assert banned not in block
+
+
+def test_ai_loop_auto_stage_safe_project_files_is_allowlist_only() -> None:
+    """Final commit staging iterates `SafeAddPaths` only (no task-scope intersect helper)."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    start = text.index("function Stage-SafeProjectFiles")
+    end = text.index("function Commit-And-Push", start)
+    block = text[start:end]
+    assert "Get-SafeAddPathList" in block
+    assert "git add" in block
+    for banned in ("Get-FilesInScope", "Test-RelEligible", "ActiveScope"):
+        assert banned not in block
 
 
 def test_ai_loop_auto_invokes_pytest_failure_filter() -> None:
@@ -972,6 +1012,551 @@ exit ($(if ($r) { 0 } else { 1 }))
         body = out_path.read_text(encoding="utf-8").strip()
         assert body
         assert "Legacy fallback body line one." in body
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_fix_prompt_tasks_conflict_detected() -> None:
+    """C12: Test-FixPromptTasksConflict is true when fix JSON lists tasks/ paths and task.md scope omits tasks."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("fix_prompt_tasks_conflict_yes")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        func = _extract_test_fix_prompt_tasks_conflict_from_auto(
+            (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        )
+        harness = scratch / "_orch_tasks_conflict.ps1"
+        harness.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$TaskFile
+)
+
+"""
+            + func
+            + """
+$FixData = [pscustomobject]@{
+    files = @('tasks/some_task.md')
+    changes = @(
+        [pscustomobject]@{ path = 'src/ok.py'; kind = 'edit'; what = 'noop' }
+    )
+}
+$c = Test-FixPromptTasksConflict -FixData $FixData -TaskMdPath $TaskFile
+exit ($(if ($c -eq $true) { 0 } else { 1 }))
+""",
+            encoding="utf-8",
+        )
+
+        task_path = scratch / "task.md"
+        task_path.write_text(
+            "## Files in scope\n\n- `scripts/example.ps1`\n\n## Goal\n\nx\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(task_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_fix_prompt_tasks_conflict_clear_when_in_scope() -> None:
+    """C12: tasks/ in ## Files in scope clears the conflict for matching fix prompts."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("fix_prompt_tasks_conflict_no")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        func = _extract_test_fix_prompt_tasks_conflict_from_auto(
+            (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        )
+        harness = scratch / "_orch_tasks_conflict_clear.ps1"
+        harness.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$TaskFile
+)
+
+"""
+            + func
+            + """
+$FixData = [pscustomobject]@{
+    files = @('tasks/some_task.md')
+    changes = @()
+}
+$c = Test-FixPromptTasksConflict -FixData $FixData -TaskMdPath $TaskFile
+exit ($(if ($c -eq $false) { 0 } else { 1 }))
+""",
+            encoding="utf-8",
+        )
+
+        task_path = scratch / "task.md"
+        task_path.write_text(
+            "## Files in scope\n\n- `tasks/related.md`\n\n## Goal\n\nx\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(task_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_fix_prompt_tasks_conflict_detected_tasks_backslash_path() -> None:
+    """C12: Windows-style tasks\\ paths are treated as under tasks/ for conflict detection."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("fix_prompt_tasks_conflict_bs")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        func = _extract_test_fix_prompt_tasks_conflict_from_auto(
+            (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        )
+        harness = scratch / "_orch_tasks_conflict_bs.ps1"
+        harness.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$TaskFile
+)
+
+"""
+            + func
+            + """
+$FixData = [pscustomobject]@{
+    files = @()
+    changes = @(
+        [pscustomobject]@{ path = 'tasks\\some_task.md'; kind = 'delete'; what = 'cleanup' }
+    )
+}
+$c = Test-FixPromptTasksConflict -FixData $FixData -TaskMdPath $TaskFile
+exit ($(if ($c -eq $true) { 0 } else { 1 }))
+""",
+            encoding="utf-8",
+        )
+
+        task_path = scratch / "task.md"
+        task_path.write_text(
+            "## Files in scope\n\n- `README.md`\n\n## Goal\n\nx\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(task_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_fix_prompt_artifacts_tasks_conflict_from_markdown_only() -> None:
+    """C12: Markdown-only fix prompt still triggers conflict when JSON object is absent."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("fix_prompt_artifacts_md_only")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        func = _extract_test_fix_prompt_tasks_conflict_from_auto(
+            (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        )
+        harness = scratch / "_orch_artifacts_md.ps1"
+        harness.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$PromptFile,
+    [Parameter(Mandatory)][string]$TaskFile
+)
+
+"""
+            + func
+            + """
+$c = Test-FixPromptArtifactsTasksConflict -FixData $null -PromptMarkdownPath $PromptFile -TaskMdPath $TaskFile
+exit ($(if ($c -eq $true) { 0 } else { 1 }))
+""",
+            encoding="utf-8",
+        )
+
+        prompt_path = scratch / "next_implementer_prompt.md"
+        prompt_path.write_text(
+            textwrap.dedent(
+                """\
+                # Fix prompt
+
+                ## Files to change
+
+                - tasks/from_markdown_only.md
+
+                ## Changes
+
+                ## Acceptance
+
+                cleanup queue
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        task_path = scratch / "task.md"
+        task_path.write_text(
+            "## Files in scope\n\n- `scripts/example.ps1`\n\n## Goal\n\nx\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(prompt_path),
+                str(task_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_fix_prompt_artifacts_tasks_conflict_clear_markdown_when_scope_lists_tasks() -> None:
+    """C12: Markdown tasks paths are allowed when task.md scope mentions tasks."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("fix_prompt_artifacts_md_clear")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        func = _extract_test_fix_prompt_tasks_conflict_from_auto(
+            (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        )
+        harness = scratch / "_orch_artifacts_md_clear.ps1"
+        harness.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$PromptFile,
+    [Parameter(Mandatory)][string]$TaskFile
+)
+
+"""
+            + func
+            + """
+$c = Test-FixPromptArtifactsTasksConflict -FixData $null -PromptMarkdownPath $PromptFile -TaskMdPath $TaskFile
+exit ($(if ($c -eq $false) { 0 } else { 1 }))
+""",
+            encoding="utf-8",
+        )
+
+        prompt_path = scratch / "next_implementer_prompt.md"
+        prompt_path.write_text(
+            textwrap.dedent(
+                """\
+                # Fix prompt
+
+                ## Files to change
+
+                - tasks/from_markdown_only.md
+
+                ## Changes
+
+                ## Acceptance
+
+                ok
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        task_path = scratch / "task.md"
+        task_path.write_text(
+            "## Files in scope\n\n- `tasks/related.md`\n\n## Goal\n\nx\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(prompt_path),
+                str(task_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_working_tree_tasks_conflict_when_untracked_tasks_without_scope() -> None:
+    """C12: tasks/* on disk without tasks scoping in task.md reports conflict."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("wt_tasks_conflict")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ["git", "init"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "orch@test.local"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "orch tester"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        (scratch / "README.md").write_text("init\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "README.md"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+
+        tasks_dir = scratch / "tasks"
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+        (tasks_dir / "orphan.md").write_text("queue\n", encoding="utf-8")
+
+        func = _extract_working_tree_tasks_gate_helpers(
+            (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        )
+        harness = scratch / "_orch_wt_gate.ps1"
+        harness.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$RepoRoot,
+    [Parameter(Mandatory)][string]$TaskFile
+)
+
+"""
+            + func
+            + """
+$c = Test-WorkingTreeTasksConflictWithScope -ProjectRoot $RepoRoot -TaskMdPath $TaskFile
+exit ($(if ($c -eq $true) { 0 } else { 1 }))
+""",
+            encoding="utf-8",
+        )
+
+        task_path = scratch / "task.md"
+        task_path.write_text(
+            "## Files in scope\n\n- `README.md`\n\n## Goal\n\nx\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(scratch),
+                str(task_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_working_tree_tasks_clear_when_scope_lists_tasks() -> None:
+    """C12: Untracked tasks/* files do not conflict when scope mentions tasks."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    scratch = _orch_scratch("wt_tasks_clear")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        subprocess.run(
+            ["git", "init"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+        subprocess.run(
+            ["git", "config", "user.email", "orch@test.local"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "orch tester"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        (scratch / "README.md").write_text("init\n", encoding="utf-8")
+        subprocess.run(
+            ["git", "add", "README.md"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "init"],
+            cwd=str(scratch),
+            capture_output=True,
+            check=True,
+            timeout=60,
+        )
+
+        tasks_dir = scratch / "tasks"
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+        (tasks_dir / "orphan.md").write_text("queue\n", encoding="utf-8")
+
+        func = _extract_working_tree_tasks_gate_helpers(
+            (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        )
+        harness = scratch / "_orch_wt_clear.ps1"
+        harness.write_text(
+            """param(
+    [Parameter(Mandatory)][string]$RepoRoot,
+    [Parameter(Mandatory)][string]$TaskFile
+)
+
+"""
+            + func
+            + """
+$c = Test-WorkingTreeTasksConflictWithScope -ProjectRoot $RepoRoot -TaskMdPath $TaskFile
+exit ($(if ($c -eq $false) { 0 } else { 1 }))
+""",
+            encoding="utf-8",
+        )
+
+        task_path = scratch / "task.md"
+        task_path.write_text(
+            "## Files in scope\n\n- `tasks/` stuff\n\n## Goal\n\nx\n",
+            encoding="utf-8",
+        )
+
+        proc = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness),
+                str(scratch),
+                str(task_path),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, f"harness failed ({proc.returncode}):\n{detail}"
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

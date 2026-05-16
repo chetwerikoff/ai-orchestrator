@@ -215,7 +215,7 @@ function Ensure-AiLoopFiles {
     $summaryStub = "# Implementer summary`n`nNo task has been completed yet."
 
     if (!(Test-Path $projectSummary)) {
-        @"
+        $projectSummaryStub = @"
 # Project Summary
 
 ## Project purpose
@@ -253,7 +253,8 @@ TODO
 ## Notes for future AI sessions
 
 - Keep durable project-level context here.
-"@ | Set-Content $projectSummary -Encoding UTF8
+"@
+        $projectSummaryStub | Set-Content $projectSummary -Encoding UTF8
     }
 
     if (-not (Test-Path $implementerSummary)) {
@@ -281,11 +282,22 @@ function Get-SafeAddPathList {
     return $SafeAddPaths.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
 }
 
-function Add-IntentToAddForReview {
-    foreach ($path in Get-SafeAddPathList) {
-        if (Test-Path $path) {
-            git add -N $path 2>$null
-        }
+function Save-GitReviewArtifactsForCodex {
+    param(
+        [string]$GitStatusOut,
+        [string]$DiffPatchOut,
+        [string]$DiffStatOut
+    )
+
+    Push-Location $ProjectRoot
+    try {
+        @(git status --short --porcelain --untracked-files=all 2>$null) |
+            Set-Content -LiteralPath $GitStatusOut -Encoding UTF8
+        @(git diff HEAD 2>$null) | Set-Content -LiteralPath $DiffPatchOut -Encoding UTF8
+        @(git diff --stat HEAD 2>$null) | Set-Content -LiteralPath $DiffStatOut -Encoding UTF8
+    }
+    finally {
+        Pop-Location
     }
 }
 
@@ -297,12 +309,11 @@ function Save-TestAndDiff {
     Invoke-CommandToFile $TestCommand (Join-Path $AiLoop "test_output.txt") | Out-Null
     $testExit = $LASTEXITCODE
 
-    Write-Host "Saving git status and diff..."
-    git status --short > (Join-Path $AiLoop "git_status.txt")
-
-    Add-IntentToAddForReview
-    git diff > (Join-Path $AiLoop "last_diff.patch")
-    git diff --stat > (Join-Path $AiLoop "diff_summary.txt")
+    Write-Host "Saving git status and diff for Codex review..."
+    Save-GitReviewArtifactsForCodex `
+        -GitStatusOut (Join-Path $AiLoop "git_status.txt") `
+        -DiffPatchOut (Join-Path $AiLoop "last_diff.patch") `
+        -DiffStatOut (Join-Path $AiLoop "diff_summary.txt")
 
     if ($testExit -ne 0) {
         Write-Host "Tests failed; generating filtered failures summary..."
@@ -312,7 +323,7 @@ function Save-TestAndDiff {
                 --input  (Join-Path $AiLoop "test_output.txt") `
                 --output (Join-Path $AiLoop "test_failures_summary.md")
         }
-        # If filter script is missing, skip silently — test_output.txt remains
+        # If filter script is missing, skip silently - test_output.txt remains
         # available for the reviewer as fallback.
     }
 
@@ -396,15 +407,15 @@ You are the reviewer in an authenticated development loop.
 
 Read in this priority order (stop reading once verdict is clear):
 
-1. `.ai-loop/task.md` — current task contract
-2. `.ai-loop/reviewer_context.md` — bounded working-rules summary (preferred over AGENTS.md)
-3. `.ai-loop/implementer_summary.md` — implementer's report on the latest iteration
-4. `.ai-loop/diff_summary.txt` — short git diff --stat
-5. `.ai-loop/test_failures_summary.md` — filtered failures (read when present; do not read test_output.txt unless this summary is absent or insufficient)
-6. `.ai-loop/last_diff.patch` — full diff only when exact patch context is required for a specific finding; prefer reading only the changed files relevant to that finding
-7. `.ai-loop/test_output.txt` — raw pytest output (read only when test_failures_summary.md is absent or insufficient)
-8. `.ai-loop/git_status.txt` — short porcelain status
-9. `AGENTS.md` — full working rules (read only when reviewer_context.md is insufficient)
+1. `.ai-loop/task.md` - current task contract
+2. `.ai-loop/reviewer_context.md` - bounded working-rules summary (preferred over AGENTS.md)
+3. `.ai-loop/implementer_summary.md` - implementer's report on the latest iteration
+4. `.ai-loop/diff_summary.txt` - short git diff --stat
+5. `.ai-loop/test_failures_summary.md` - filtered failures (read when present; do not read test_output.txt unless this summary is absent or insufficient)
+6. `.ai-loop/last_diff.patch` - full diff only when exact patch context is required for a specific finding; prefer reading only the changed files relevant to that finding
+7. `.ai-loop/test_output.txt` - raw pytest output (read only when test_failures_summary.md is absent or insufficient)
+8. `.ai-loop/git_status.txt` - short porcelain status
+9. `AGENTS.md` - full working rules (read only when reviewer_context.md is insufficient)
 
 Review the latest changes.
 
@@ -658,11 +669,282 @@ function Write-NextImplementerPrompt {
     $PromptText | Set-Content $neutral -Encoding UTF8
 }
 
+function Get-FixPromptJsonObjectFromReview {
+    param([string]$ReviewFile)
+    if (!(Test-Path -LiteralPath $ReviewFile)) {
+        return $null
+    }
+    $review = Get-Content -LiteralPath $ReviewFile -Raw -ErrorAction SilentlyContinue
+    if (!$review) {
+        return $null
+    }
+    $jsonMatch = [regex]::Match(
+        $review,
+        '(?ms)FIX_PROMPT_FOR_IMPLEMENTER:\s*```json\s*(?<json>[\s\S]*?)\s*```',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if (-not $jsonMatch.Success) {
+        return $null
+    }
+    $jsonText = $jsonMatch.Groups['json'].Value.Trim()
+    try {
+        return $jsonText | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-IsUnderTasksQueuePath {
+    param([string]$CandidatePath)
+    if ([string]::IsNullOrWhiteSpace([string]$CandidatePath)) {
+        return $false
+    }
+    $norm = ([string]$CandidatePath).Trim() -replace '\\', '/'
+    if ($norm.StartsWith('./')) {
+        $norm = $norm.Substring(2)
+    }
+    return $norm.StartsWith('tasks/', [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Test-TaskMdScopeAllowsTasksQueue {
+    param([string]$TaskMdPath)
+    if (-not (Test-Path -LiteralPath $TaskMdPath)) {
+        return $false
+    }
+
+    $lines = @(Get-Content -LiteralPath $TaskMdPath -ErrorAction SilentlyContinue)
+    $inScope = $false
+    foreach ($line in $lines) {
+        if ($line -match '^\s*##\s') {
+            if ($inScope) {
+                break
+            }
+            if ($line -match '^\s*##\s+Files\s+in\s+scope\s*$') {
+                $inScope = $true
+            }
+            continue
+        }
+        if ($inScope) {
+            $trim = $line.Trim()
+            if ($trim -match '^(?:[-*]|\d+\.)\s' -and $trim -match '(?i)tasks') {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
+function Get-FixObjectTasksPathHits {
+    param([object]$FixData)
+
+    $hits = [System.Collections.Generic.List[string]]::new()
+    if ($null -eq $FixData) {
+        return @()
+    }
+
+    foreach ($f in @($FixData.files)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$f)) {
+            $sf = ([string]$f).Trim()
+            if (Test-IsUnderTasksQueuePath -CandidatePath $sf) {
+                [void]$hits.Add($sf)
+            }
+        }
+    }
+
+    foreach ($c in @($FixData.changes)) {
+        if (-not $c) {
+            continue
+        }
+        foreach ($prop in 'path', 'file') {
+            $v = $c.$prop
+            if ($null -eq $v) {
+                continue
+            }
+            $sv = ([string]$v).Trim()
+            if ([string]::IsNullOrWhiteSpace($sv)) {
+                continue
+            }
+            if (Test-IsUnderTasksQueuePath -CandidatePath $sv) {
+                [void]$hits.Add($sv)
+            }
+        }
+    }
+
+    return @($hits | Select-Object -Unique)
+}
+
+function Get-FixMarkdownTasksPathHits {
+    param([string]$PromptMarkdownPath)
+
+    $hits = [System.Collections.Generic.List[string]]::new()
+    if (-not (Test-Path -LiteralPath $PromptMarkdownPath)) {
+        return @()
+    }
+
+    $lines = @(Get-Content -LiteralPath $PromptMarkdownPath -ErrorAction SilentlyContinue)
+    $mode = 'none'
+    foreach ($line in $lines) {
+        if ($line -match '(?i)^\s*##\s') {
+            if ($mode -eq 'files') {
+                $mode = 'past_files'
+            }
+            elseif ($mode -eq 'changes') {
+                $mode = 'past_changes'
+            }
+
+            if ($line -match '(?i)^\s*##\s+files\s+to\s+change\s*$') {
+                $mode = 'files'
+                continue
+            }
+            if ($line -match '(?i)^\s*##\s+changes\s*$') {
+                $mode = 'changes'
+                continue
+            }
+            continue
+        }
+
+        if ($mode -eq 'files') {
+            if ($line -match '^\s*-\s+(.+)$') {
+                $item = $Matches[1].Trim().Trim([char]0x0060).Trim()
+                if (Test-IsUnderTasksQueuePath -CandidatePath $item) {
+                    [void]$hits.Add($item)
+                }
+            }
+            continue
+        }
+
+        if ($mode -eq 'changes') {
+            if ($line -match '-\s*\([^)]*\)\s*`([^`]+)`') {
+                $item = $Matches[1].Trim()
+                if (Test-IsUnderTasksQueuePath -CandidatePath $item) {
+                    [void]$hits.Add($item)
+                }
+            }
+            continue
+        }
+    }
+
+    return @($hits | Select-Object -Unique)
+}
+
+function Test-FixPromptTasksConflict {
+    param(
+        [object]$FixData,
+        [string]$TaskMdPath
+    )
+
+    $hits = @(Get-FixObjectTasksPathHits -FixData $FixData)
+    if ($hits.Count -eq 0) {
+        return $false
+    }
+
+    if (Test-TaskMdScopeAllowsTasksQueue -TaskMdPath $TaskMdPath) {
+        return $false
+    }
+
+    return $true
+}
+
+function Test-FixPromptArtifactsTasksConflict {
+    param(
+        [object]$FixData,
+        [string]$PromptMarkdownPath,
+        [string]$TaskMdPath
+    )
+
+    $set = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($p in @(Get-FixObjectTasksPathHits -FixData $FixData)) {
+        [void]$set.Add($p)
+    }
+    foreach ($p in @(Get-FixMarkdownTasksPathHits -PromptMarkdownPath $PromptMarkdownPath)) {
+        [void]$set.Add($p)
+    }
+
+    $hits = @($set)
+    if ($hits.Count -eq 0) {
+        return $false
+    }
+
+    if (Test-TaskMdScopeAllowsTasksQueue -TaskMdPath $TaskMdPath) {
+        return $false
+    }
+
+    return $true
+}
+
+function Get-FixPromptArtifactTasksOffenders {
+    param(
+        [object]$FixData,
+        [string]$PromptMarkdownPath
+    )
+
+    $set = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($p in @(Get-FixObjectTasksPathHits -FixData $FixData)) {
+        [void]$set.Add($p)
+    }
+    foreach ($p in @(Get-FixMarkdownTasksPathHits -PromptMarkdownPath $PromptMarkdownPath)) {
+        [void]$set.Add($p)
+    }
+
+    return @($set | Sort-Object)
+}
+
+function Stop-UnsafeQueueCleanup {
+    param(
+        [Parameter(Mandatory)][string[]]$OffendingPaths,
+        [Parameter(Mandatory)][string]$HumanSummary,
+        [Parameter(Mandatory)][string]$ConsoleLine,
+        [Parameter(Mandatory)][string]$FinalReasonLine
+    )
+
+    $uniq = @(
+        $OffendingPaths |
+            Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } |
+            Select-Object -Unique
+    )
+
+    Write-Warning "UNSAFE_QUEUE_CLEANUP: protected tasks/ queue conflict ($ConsoleLine). Paths: $($uniq -join ', ')"
+
+    $resultPath = Join-Path $AiLoop "implementer_result.md"
+    $detail = ($uniq | ForEach-Object { "- $_" }) -join "`n"
+    $unsafeBody = @"
+UNSAFE_QUEUE_CLEANUP
+
+$HumanSummary
+
+Offending paths:
+$detail
+"@
+    $unsafeBody | Set-Content -Path $resultPath -Encoding UTF8
+
+    $unsafeFinal = @"
+STATUS: UNSAFE_QUEUE_CLEANUP
+REASON: $FinalReasonLine
+DETAIL: See .ai-loop/implementer_result.md
+"@
+    Write-FinalStatus $unsafeFinal
+    Write-Host ""
+    Write-Host "UNSAFE_QUEUE_CLEANUP: $ConsoleLine" -ForegroundColor Yellow
+    exit 1
+}
+
 function Extract-FixPrompt {
     $codexReview = Join-Path $AiLoop "codex_review.md"
     $tmp = Join-Path $AiLoop "next_implementer_prompt.md"
+    $taskMd = Join-Path $AiLoop "task.md"
     $ok = Extract-FixPromptFromFile -ReviewFile $codexReview -OutputPromptFile $tmp
     if ($ok) {
+        $fixObj = Get-FixPromptJsonObjectFromReview -ReviewFile $codexReview
+        if (Test-FixPromptArtifactsTasksConflict -FixData $fixObj -PromptMarkdownPath $tmp -TaskMdPath $taskMd) {
+            $uniq = @(Get-FixPromptArtifactTasksOffenders -FixData $fixObj -PromptMarkdownPath $tmp)
+            Stop-UnsafeQueueCleanup `
+                -OffendingPaths $uniq `
+                -HumanSummary "The Codex fix prompt references tasks/ paths that are not covered by the active task.md ## Files in scope section. The orchestrator halted before invoking the implementer." `
+                -ConsoleLine "fix iteration halted (protected tasks/ paths in Codex fix prompt)" `
+                -FinalReasonLine "Fix prompt targeted protected tasks/ queue paths outside the active task scope."
+        }
         $body = Get-Content $tmp -Raw
         Write-NextImplementerPrompt -PromptText $body.TrimEnd()
     }
@@ -705,7 +987,6 @@ After changes:
    - current stage
    - next likely steps
 "@
-
     Write-Host ""
     $runWrapper = if (-not [string]::IsNullOrWhiteSpace($CursorCommand)) { $CursorCommand } else { Join-Path $PSScriptRoot "run_cursor_agent.ps1" }
     Write-Host "Running implementer (non-interactive) via: $runWrapper"
@@ -724,12 +1005,19 @@ After changes:
 }
 
 function Stage-SafeProjectFiles {
-    Write-Host "Staging safe project files..."
+    Write-Host 'Staging safe project paths...'
 
-    foreach ($path in Get-SafeAddPathList) {
-        if (Test-Path $path) {
-            git add $path
+    Push-Location $ProjectRoot
+    try {
+        foreach ($rel in @(Get-SafeAddPathList)) {
+            if ([string]::IsNullOrWhiteSpace($rel)) {
+                continue
+            }
+            git add -- $rel.Trim() 2>$null
         }
+    }
+    finally {
+        Pop-Location
     }
 
     # Intentionally do NOT stage runtime artifacts:
@@ -744,8 +1032,78 @@ function Stage-SafeProjectFiles {
     # output/
 }
 
+function Get-WorkingTreeTasksPathsRelative {
+    param([string]$ProjectRoot)
+
+    $hits = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    Push-Location $ProjectRoot
+    try {
+        $gitDir = git rev-parse --git-dir 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace([string]$gitDir)) {
+            return @()
+        }
+
+        foreach ($raw in @(git diff HEAD --name-only 2>$null)) {
+            $line = ([string]$raw).Trim()
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+            }
+            $norm = $line -replace '\\', '/'
+            if ($norm.StartsWith('./')) {
+                $norm = $norm.Substring(2)
+            }
+            if (Test-IsUnderTasksQueuePath -CandidatePath $norm) {
+                [void]$hits.Add($norm)
+            }
+        }
+
+        foreach ($raw in @(git ls-files --others --exclude-standard 2>$null)) {
+            $line = ([string]$raw).Trim()
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+            }
+            $norm = $line -replace '\\', '/'
+            if ($norm.StartsWith('./')) {
+                $norm = $norm.Substring(2)
+            }
+            if (Test-IsUnderTasksQueuePath -CandidatePath $norm) {
+                [void]$hits.Add($norm)
+            }
+        }
+    }
+    finally {
+        Pop-Location
+    }
+
+    return @($hits | Sort-Object)
+}
+
+function Test-WorkingTreeTasksConflictWithScope {
+    param(
+        [string]$ProjectRoot,
+        [string]$TaskMdPath
+    )
+
+    if (Test-TaskMdScopeAllowsTasksQueue -TaskMdPath $TaskMdPath) {
+        return $false
+    }
+
+    $paths = @(Get-WorkingTreeTasksPathsRelative -ProjectRoot $ProjectRoot)
+    return ($paths.Count -gt 0)
+}
+
 function Commit-And-Push {
     Ensure-AiLoopFiles
+
+    $taskMdGate = Join-Path $AiLoop "task.md"
+    if (Test-WorkingTreeTasksConflictWithScope -ProjectRoot $ProjectRoot -TaskMdPath $taskMdGate) {
+        $wtOff = @(Get-WorkingTreeTasksPathsRelative -ProjectRoot $ProjectRoot)
+        Stop-UnsafeQueueCleanup `
+            -OffendingPaths $wtOff `
+            -HumanSummary "The git working tree still contains tasks/ paths while the active task.md ## Files in scope section does not cover tasks/. Resolve by reverting or staging those paths outside this loop, adding tasks/ (or the specific files) to scope, or committing manually before relying on Codex PASS." `
+            -ConsoleLine "final gate blocked (tasks/ working-tree changes outside active scope)" `
+            -FinalReasonLine "Working tree has tasks/ changes while active task scope omits tasks/."
+    }
 
     Write-Host ""
     Write-Host "Preparing Git commit..."
@@ -759,24 +1117,18 @@ function Commit-And-Push {
         exit 5
     }
 
-    Add-IntentToAddForReview
-    git diff > (Join-Path $AiLoop "last_diff.patch")
-    git status --short > (Join-Path $AiLoop "git_status.txt")
-
-    $status = git status --porcelain
-
-    if (!$status) {
-        Write-Host "No changes to commit."
-        return
-    }
+    Save-GitReviewArtifactsForCodex `
+        -GitStatusOut (Join-Path $AiLoop "git_status.txt") `
+        -DiffPatchOut (Join-Path $AiLoop "last_diff.patch") `
+        -DiffStatOut (Join-Path $AiLoop "diff_summary.txt")
 
     Stage-SafeProjectFiles
 
-    $staged = git diff --cached --name-only
+    $staged = @(git diff --cached --name-only 2>$null)
 
-    if (!$staged) {
-        Write-Host "No safe staged changes to commit."
-        return
+    if (@($staged).Count -eq 0) {
+        Write-Host "Nothing staged for commit under SafeAddPaths (no matching changes or nothing to stage)."
+        return $false
     }
 
     Write-Host "Creating commit..."
@@ -803,6 +1155,8 @@ function Commit-And-Push {
     else {
         Write-Host "NoPush enabled. Commit created locally only."
     }
+
+    return $true
 }
 
 function Try-ResumeFromExistingReview {
@@ -816,21 +1170,36 @@ function Try-ResumeFromExistingReview {
     Write-Host "Resume mode enabled."
 
     $nextNeutral = Join-Path $AiLoop "next_implementer_prompt.md"
+    $codexReview = Join-Path $AiLoop "codex_review.md"
 
     if (Test-Path $nextNeutral) {
         Write-Host "Resuming from existing next_implementer_prompt.md..."
+        $taskMd = Join-Path $AiLoop "task.md"
+        $fixObjResume = Get-FixPromptJsonObjectFromReview -ReviewFile $codexReview
+        if (Test-FixPromptArtifactsTasksConflict -FixData $fixObjResume -PromptMarkdownPath $nextNeutral -TaskMdPath $taskMd) {
+            $uniqResume = @(Get-FixPromptArtifactTasksOffenders -FixData $fixObjResume -PromptMarkdownPath $nextNeutral)
+            Stop-UnsafeQueueCleanup `
+                -OffendingPaths $uniqResume `
+                -HumanSummary "The Codex fix prompt references tasks/ paths that are not covered by the active task.md ## Files in scope section. The orchestrator halted before invoking the implementer." `
+                -ConsoleLine "resume halted (protected tasks/ paths in existing fix prompt)" `
+                -FinalReasonLine "Fix prompt targeted protected tasks/ queue paths outside the active task scope."
+        }
         Run-ImplementerFix | Out-Null
         return $true
     }
 
-    $codexReview = Join-Path $AiLoop "codex_review.md"
     if (Test-Path $codexReview) {
         $codexVerdict = Get-CodexVerdict
 
         if ($codexVerdict -eq "PASS") {
             Write-Host "Existing Codex verdict is PASS. Running final test gate, commit, and push."
-            Commit-And-Push
-            Write-FinalStatus "PASS from resume mode. Changes committed and pushed if NoPush was not enabled."
+            $didCommit = Commit-And-Push
+            if ($didCommit) {
+                Write-FinalStatus "PASS from resume mode. Changes committed and pushed if NoPush was not enabled."
+            }
+            else {
+                Write-FinalStatus "PASS from resume mode. Commit skipped - nothing staged under SafeAddPaths."
+            }
             Write-Host "Final status: PASS"
             if ($WithWrapUp) {
                 & "$PSScriptRoot\wrap_up_session.ps1"
@@ -882,22 +1251,22 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
     }
     if (-not $hasWork) {
         if ($i -eq 1) {
-            Write-FinalStatus @"
-STATUS: FAILED
-REASON: REVIEW_STARTED_ON_CLEAN_TREE
-DETAIL: Working tree is clean before Codex review. Use scripts/ai_loop_task_first.ps1 when starting from scratch with an implementer pass, or make changes before calling REVIEW-only mode.
-"@
+            Write-FinalStatus (
+                "STATUS: FAILED`n" +
+                "REASON: REVIEW_STARTED_ON_CLEAN_TREE`n" +
+                "DETAIL: Working tree is clean before Codex review. Use scripts/ai_loop_task_first.ps1 when starting from scratch with an implementer pass, or make changes before calling REVIEW-only mode."
+            )
             Write-Host ""
             Write-Host "Clean tree on iteration 1: skipping Codex. Prefer task-first (ai_loop_task_first.ps1) when the working tree has no changes yet." -ForegroundColor Yellow
             exit 6
         }
-        Write-FinalStatus @"
-STATUS: FAILED
-REASON: NO_CHANGES_AFTER_IMPLEMENTER_FIX
-DETAIL: No working-tree changes before Codex review on iteration $i after the implementer fix pass.
-"@
+        Write-FinalStatus (
+            "STATUS: FAILED`n" +
+            "REASON: NO_CHANGES_AFTER_IMPLEMENTER_FIX`n" +
+            "DETAIL: No working-tree changes before Codex review on iteration $i after the implementer fix pass."
+        )
         Write-Host ""
-        Write-Host "Iteration $i`: working tree clean before Codex (implementer fix produced no git-visible changes). See .ai-loop\final_status.md" -ForegroundColor Yellow
+        Write-Host ('Iteration ' + $i + ': working tree clean before Codex (implementer fix produced no git-visible changes). See .ai-loop\final_status.md') -ForegroundColor Yellow
         exit 7
     }
 
@@ -921,9 +1290,14 @@ DETAIL: No working-tree changes before Codex review on iteration $i after the im
         Write-Host ""
         Write-Host "Codex verdict: PASS"
 
-        Commit-And-Push
+        $didCommit = Commit-And-Push
 
-        Write-FinalStatus "PASS after iteration $i. Codex=PASS. Changes committed and pushed if NoPush was not enabled."
+        if ($didCommit) {
+            Write-FinalStatus "PASS after iteration $i. Codex=PASS. Changes committed and pushed if NoPush was not enabled."
+        }
+        else {
+            Write-FinalStatus "PASS after iteration $i. Codex=PASS. Commit skipped - nothing staged under SafeAddPaths."
+        }
 
         Write-Host ""
         Write-Host "Final status: PASS"

@@ -14,6 +14,13 @@ Read in this priority order (stop reading once verdict is clear):
 8. `.ai-loop/git_status.txt` — short porcelain status
 9. `AGENTS.md` — full working rules (read only when reviewer_context.md is insufficient)
 
+---
+
+> **PROTECTED: `tasks/` queue specs**  
+> Files under `tasks/` are **protected concurrent-work queue entries** maintained by the planner (not disposable scratch output). **Do not** recommend deleting, reverting, or “cleaning up” any `tasks/*.md` unless the active `.ai-loop/task.md` `## Files in scope` section explicitly lists that path, a `tasks/` directory entry, or another unambiguous `tasks/` glob—and the task itself requests queue changes when that applies. **Violations of this rule make the review invalid** (treat as you would a malformed verdict).
+
+---
+
 Review the latest changes.
 
 Check:
