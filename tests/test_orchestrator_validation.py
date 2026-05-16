@@ -171,9 +171,11 @@ def _require_git_exe() -> str:
 def _extract_scope_staging_harness(ps1_text: str) -> str:
     a = ps1_text.index("function Get-SafeAddPathList")
     b = ps1_text.index("function Test-PorcelainPathInReviewFilter")
+    t0 = ps1_text.index("function Test-TaskMdScopeAllowsTasksQueue")
+    t1 = ps1_text.index("function Get-FixObjectTasksPathHits", t0)
     c = ps1_text.index("function Stage-SafeProjectFiles")
     d = ps1_text.index("function Get-WorkingTreeTasksPathsRelative")
-    return ps1_text[a:b] + ps1_text[c:d]
+    return ps1_text[a:b] + ps1_text[t0:t1] + ps1_text[c:d]
 
 
 def _extract_save_git_review_harness(ps1_text: str) -> str:
@@ -517,6 +519,7 @@ def test_ai_loop_auto_stage_safe_project_files_uses_active_scope_and_durable() -
     assert "DurableAlwaysCommitPaths" in block
     assert "Get-ActiveScope" in block
     assert "Test-PathUnderSafeAddEntry" in block
+    assert "Test-TaskMdScopeAllowsTasksQueue" in block
     assert "git add" in block
     assert "foreach ($rel in @(Get-SafeAddPathList))" not in block
 
@@ -568,12 +571,15 @@ def test_scope_filter_excludes_tasks_user_ask() -> None:
         tdir = root / "tasks"
         tdir.mkdir()
         (tdir / "user_ask_foo.md").write_text("draft\n", encoding="utf-8")
-        subprocess.run(
+        proc = subprocess.run(
             [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
             check=True,
             capture_output=True,
             text=True,
         )
+        out = (proc.stdout or "") + (proc.stderr or "")
+        assert "Skipped staging SafeAddPaths entry" in out
+        assert "tasks/" in out
         st = subprocess.run(
             [git_exe, "diff", "--cached", "--name-only"],
             cwd=root,
@@ -627,11 +633,14 @@ def test_scope_filter_includes_explicit_tasks_file() -> None:
         tdir = root / "tasks"
         tdir.mkdir()
         (tdir / "016_feature.md").write_text("spec\n", encoding="utf-8")
-        subprocess.run(
+        proc = subprocess.run(
             [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
             check=True,
             capture_output=True,
+            text=True,
         )
+        out = (proc.stdout or "") + (proc.stderr or "")
+        assert "Skipped staging SafeAddPaths entry" not in out
         st = subprocess.run(
             [git_exe, "diff", "--cached", "--name-only"],
             cwd=root,
@@ -2389,6 +2398,16 @@ exit ($(if ($c -eq $false) { 0 } else { 1 }))
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def test_commit_and_push_omits_working_tree_tasks_unsafe_gate() -> None:
+    """PASS commit path must not block on untracked tasks/ queue files (C12 fix-prompt guard remains separate)."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    i = text.index("function Commit-And-Push {")
+    j = text.index("\nfunction Try-ResumeFromExistingReview {", i)
+    body = text[i:j]
+    assert "Test-WorkingTreeTasksConflictWithScope" not in body
+    assert "Stop-UnsafeQueueCleanup" not in body
+
+
 def test_codex_template_reads_test_failures_before_raw_pytest_output() -> None:
     """Filtered failures are denser signal; template must list them before test_output.txt."""
     t = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
@@ -2781,6 +2800,7 @@ def test_ai_loop_plan_review_invariants() -> None:
     assert "Normalize-PlannerOutput -Output $output" in text
     assert "Normalize-PlannerOutput -Output $revised" in text
     assert "function Test-ReviewerOutputStrict" in text
+    assert '$revFmt = Test-ReviewerOutputStrict -Output $issues' in text
     assert "$reviewLoopExitKind" in text
     assert 'if ($reviewLoopExitKind -eq "max_iterations")' in text
     assert "-gt 3)" in text

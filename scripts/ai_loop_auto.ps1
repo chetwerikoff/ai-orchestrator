@@ -1406,6 +1406,21 @@ function Stage-SafeProjectFiles {
         }
 
         $taskMdPath = Join-Path $ProjectRoot ".ai-loop/task.md"
+        foreach ($safeEntryRaw in @(Get-SafeAddPathList)) {
+            if ([string]::IsNullOrWhiteSpace($safeEntryRaw)) {
+                continue
+            }
+            $safeTrim = $safeEntryRaw.Trim()
+            $safeNorm = Normalize-RepoRelativePath -Path $safeTrim
+            $isTasksSafeEntry = $safeNorm.Equals('tasks', [System.StringComparison]::OrdinalIgnoreCase) -or
+                $safeNorm.StartsWith('tasks/', [System.StringComparison]::OrdinalIgnoreCase)
+            if ($isTasksSafeEntry -and -not (Test-TaskMdScopeAllowsTasksQueue -TaskMdPath $taskMdPath)) {
+                Write-Host "[scope-filter] Skipped staging SafeAddPaths entry '$safeTrim' (tasks/ queue not in task.md scope)."
+                continue
+            }
+            # tasks/* SafeAddPaths entries never bulk-`git add` here (DD-024): explicit scope paths are staged below.
+        }
+
         $activeScope = @(Get-ActiveScope -TaskMdPath $taskMdPath)
         $safeList = @(Get-SafeAddPathList)
 
@@ -1518,16 +1533,6 @@ function Test-WorkingTreeTasksConflictWithScope {
 
 function Commit-And-Push {
     Ensure-AiLoopFiles
-
-    $taskMdGate = Join-Path $AiLoop "task.md"
-    if (Test-WorkingTreeTasksConflictWithScope -ProjectRoot $ProjectRoot -TaskMdPath $taskMdGate) {
-        $wtOff = @(Get-WorkingTreeTasksPathsRelative -ProjectRoot $ProjectRoot)
-        Stop-UnsafeQueueCleanup `
-            -OffendingPaths $wtOff `
-            -HumanSummary "The git working tree still contains tasks/ paths while the active task.md ## Files in scope section does not cover tasks/. Resolve by reverting or staging those paths outside this loop, adding tasks/ (or the specific files) to scope, or committing manually before relying on Codex PASS." `
-            -ConsoleLine "final gate blocked (tasks/ working-tree changes outside active scope)" `
-            -FinalReasonLine "Working tree has tasks/ changes while active task scope omits tasks/."
-    }
 
     Write-Host ""
     Write-Host "Preparing Git commit..."
