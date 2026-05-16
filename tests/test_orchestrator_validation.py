@@ -83,6 +83,13 @@ def _extract_fix_prompt_ps_functions_from_auto(ps1_text: str) -> str:
     return ps1_text[start:end]
 
 
+def _extract_get_review_verdict_from_auto(ps1_text: str) -> str:
+    """`Get-ReviewVerdict` from ai_loop_auto.ps1 (Codex verdict gate harness)."""
+    start = ps1_text.index("function Get-ReviewVerdict")
+    end = ps1_text.index("function Get-CodexVerdict", start)
+    return ps1_text[start:end]
+
+
 def extract_fix_prompt_from_review_text(review: str) -> str | None:
     """Same contract as PowerShell `Extract-FixPromptFromFile` (primary match then tail fallback)."""
     m = _FIX_PROMPT_LABEL_RE.search(review)
@@ -686,6 +693,119 @@ def test_run_codex_review_prompt_preserves_literal_json_fence() -> None:
     literal = _extract_run_codex_review_prompt_literal(text)
     assert "```json\n" in literal
     assert "\n```\n\nRules:" in literal
+
+
+def test_get_review_verdict_exact_line_matching_and_last_exact_wins() -> None:
+    """Get-ReviewVerdict: full-line anchored VERDICT only; stray instruction text cannot imply PASS; last exact line wins."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    transcript_fix_last = (
+        "VERDICT: PASS or FIX_REQUIRED\n"
+        "\n"
+        "Some preamble.\n"
+        "VERDICT: FIX_REQUIRED\n"
+    )
+    transcript_pass_last = (
+        "VERDICT: PASS or FIX_REQUIRED\n"
+        "\n"
+        "VERDICT: PASS\n"
+    )
+    scratch = _orch_scratch("review_verdict")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        func_src = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+        funcs = _extract_get_review_verdict_from_auto(func_src)
+        harness_path = scratch / "_orch_get_review_verdict.ps1"
+        harness_path.write_text(
+            """param([Parameter(Mandatory)][string]$ReviewPath)
+
+"""
+            + funcs
+            + """
+$r = Get-ReviewVerdict -ReviewFile $ReviewPath
+Write-Output $r
+""",
+            encoding="utf-8",
+        )
+
+        missing_path = scratch / "__missing_codex_review__.md"
+
+        cases: list[tuple[str | None, bool, str]] = [
+            ("VERDICT: PASS\n", True, "PASS"),
+            ("VERDICT: FIX_REQUIRED\n", True, "FIX_REQUIRED"),
+            ("VERDICT: PASS or FIX_REQUIRED\n", True, "FIX_REQUIRED"),
+            ("Return exactly: VERDICT: PASS or FIX_REQUIRED\n", True, "FIX_REQUIRED"),
+            (transcript_fix_last, True, "FIX_REQUIRED"),
+            (transcript_pass_last, True, "PASS"),
+            ("", True, "FIX_REQUIRED"),
+            (None, False, "FIX_REQUIRED"),
+        ]
+
+        for idx, (body, create_file, expected) in enumerate(cases):
+            review_path = scratch / f"_review_case_{idx}.md"
+            if review_path.exists():
+                review_path.unlink()
+            if create_file:
+                assert body is not None
+                review_path.write_text(body, encoding="utf-8")
+                target_path = review_path
+            else:
+                if missing_path.exists():
+                    missing_path.unlink()
+                target_path = missing_path
+
+            proc = subprocess.run(
+                [
+                    ps,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(harness_path),
+                    str(target_path),
+                ],
+                cwd=str(scratch),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=120,
+                check=False,
+            )
+            detail = (proc.stdout or "") + (proc.stderr or "")
+            assert proc.returncode == 0, (
+                f"case {idx}: harness failed ({proc.returncode}):\n{detail}"
+            )
+            got = proc.stdout.strip() if proc.stdout else ""
+            assert got == expected, f"case {idx}: expected {expected!r}, got {got!r}"
+
+        bom_review = scratch / "_review_utf8_sig.md"
+        bom_review.write_text("VERDICT: PASS\n", encoding="utf-8-sig")
+        proc_b = subprocess.run(
+            [
+                ps,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(harness_path),
+                str(bom_review),
+            ],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        combined_b = (proc_b.stdout or "") + (proc_b.stderr or "")
+        assert proc_b.returncode == 0, combined_b
+        assert proc_b.stdout.strip() == "PASS"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
 
 def test_codex_review_template_shows_nested_json_fence() -> None:

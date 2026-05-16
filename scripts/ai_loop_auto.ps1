@@ -514,11 +514,36 @@ function Get-ReviewVerdict {
     }
 
     $review = Get-Content $ReviewFile -Raw
-
-    if ($review -match "VERDICT:\s*PASS") {
-        return "PASS"
+    if ($null -eq $review) {
+        $review = ""
+    }
+    if ($review.Length -gt 0 -and [int][char]$review[0] -eq 0xFEFF) {
+        $review = $review.Substring(1)
     }
 
+    # Line-anchored only: substring hits like `VERDICT: PASS or FIX_REQUIRED` must not imply PASS.
+    $verdictRe = [regex]::new(
+        '^\s*VERDICT:\s*(PASS|FIX_REQUIRED)\s*$',
+        ([System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+            [System.Text.RegularExpressions.RegexOptions]::Compiled)
+    )
+    $lastVerdict = $null
+    foreach ($line in ($review -split '\r?\n')) {
+        $t = $line.Trim()
+        $m = $verdictRe.Match($t)
+        if ($m.Success) {
+            $g = $m.Groups[1].Value.ToUpperInvariant()
+            if ($g -eq 'PASS') {
+                $lastVerdict = 'PASS'
+            }
+            elseif ($g -eq 'FIX_REQUIRED') {
+                $lastVerdict = 'FIX_REQUIRED'
+            }
+        }
+    }
+    if ($null -ne $lastVerdict) {
+        return $lastVerdict
+    }
     return "FIX_REQUIRED"
 }
 

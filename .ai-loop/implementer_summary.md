@@ -2,26 +2,35 @@
 
 ## Changed files
 
-- `scripts/run_claude_reviewer.ps1` — `--workspace` + `--model` parsing; merged `stdout`/`stderr` via `2>&1`; replay to pipeline; workspace `Push-Location`; non-fatal `Write-CliCaptureTokenUsageIfParsed` on exit `0`.
-- `docs/workflow.md` — Token journal subsection (`token_usage.jsonl` intent vs loop health; Cursor gaps).
-- `.ai-loop/project_summary.md` — `run_claude_reviewer.ps1` + token-report bullet clarified (reviewer journaling; Cursor only when CLI format matches).
-- `tests/test_token_usage.py` — AST parse test + `run_claude_reviewer` journaling harness.
+- `.ai-loop/implementer_summary.md` — replaced stale cleanup-only summary with accurate `Get-ReviewVerdict` documentation (old vs new behavior, verification, edge cases, risks).
+- `.ai-loop/project_summary.md` — removed unrelated durable notes about deleting five out-of-scope `tasks/user_ask_*.md` stubs; kept Last Completed Task and future-session verdict-parsing note.
 
-## Tests
+## Code / tests (verdict fix)
 
-`python -m pytest -q` — **172 passed** (warning: `.pytest_cache` WinError 183 unrelated to changes).
+- `scripts/ai_loop_auto.ps1` — `Get-ReviewVerdict`: line-anchored verdict matching, last exact line wins, BOM handling unchanged.
+- `tests/test_orchestrator_validation.py` — `test_get_review_verdict_exact_line_matching_and_last_exact_wins` (dot-sourced function harness + case matrix).
 
-Verification: reviewer PS1 validated by `tests/test_token_usage.py` `Parser::ParseFile` harness (`test_run_claude_reviewer_ps1_parse_clean`). Standalone nested `powershell -NoProfile ParseFile(...)` did not execute in this environment; CI/local can run as in AGENTS.md if needed.
+## Implementation summary
 
-## Implementation (3–5 lines)
+- **Previous behavior:** Review text was matched with patterns that could treat `PASS` (or `FIX_REQUIRED`) as found when it appeared **inside** a longer line — for example `VERDICT: PASS or FIX_REQUIRED` could satisfy a `PASS` branch and falsely gate the loop as clean.
+- **Current behavior:** Read raw file content, strip a leading UTF-8 BOM if present, split on `\r?\n`, `Trim()` each line, and apply a **full-line** compiled regex `^\s*VERDICT:\s*(PASS|FIX_REQUIRED)\s*$` (case-insensitive). Each successful match updates a running “last verdict”; the final value is returned; if none match, return `FIX_REQUIRED`. Missing file or null content still defaults to `FIX_REQUIRED`.
 
-Merged capture + replay matches other Claude wrappers. After success, dot-sources `record_token_usage.ps1` and records with `-Provider anthropic`, `-Iteration 0`, `ProjectRootHint`/`--workspace` resolution aligned with `run_claude_planner.ps1`.
+## Verification
 
-## Skipped
+- `python -m pytest -q`: **173 passed**, 1 `PytestCacheWarning` (WinError 183 on `.pytest_cache` — environmental, not a failure).
+- **PowerShell parse:** `ai_loop_auto.ps1` is covered by AST `ParseFile` checks in the suite (`test_powershell_orchestrator_scripts_parse_cleanly` includes `ai_loop_auto.ps1`; `test_ai_loop_auto_ps1_parse_clean` in `tests/test_token_usage.py` also) when `powershell`/`pwsh` is on PATH — same API as `AGENTS.md` one-liner.
 
-- **`record_token_usage.ps1` / `run_cursor_agent.ps1`**: No repeatable in-repo Cursor CLI sample justified a new `ConvertFrom-CliTokenUsage` branch beyond existing parsers.
+## Task-specific live CLI
+
+- Skipped: `task.md` disallows live Codex / Cursor / Claude / OpenCode for this contract.
+
+## Edge cases
+
+- CRLF vs LF handled by `-split '\r?\n'`.
+- UTF-8 BOM on first code unit `0xFEFF` stripped before splitting.
+- Instruction-only lines and transcripts: no exact verdict line → `FIX_REQUIRED`; multiple exact lines → **last** wins (prompt noise then final answer).
 
 ## Remaining risks
 
-- If Claude reviewer output mixes usage text in an unseen shape, journaling still no-ops silently (existing parser contract).
-- `2>&1` without `cmd /c` may differ from planner’s NativeCommand workaround in edge shells; aligns with task-specified merged capture approach.
+- If a reviewer emits a verdict with extra prose on the **same** line as the token (after `FIX_REQUIRED`), the line no longer matches and the safe default applies — acceptable versus false PASS.
+- Extremely unusual line layouts (e.g. multi-line verdicts) still resolve to `FIX_REQUIRED` unless a line is exactly the anchored form.

@@ -58,7 +58,7 @@ Stable with **C13** landed: Codex review prompts prefer bounded `.ai-loop/review
 
 ## Last Completed Task
 
-Reduce Codex review context with bounded reviewer artifacts (C13): `templates/reviewer_context.md`, reading-list updates in `ai_loop_auto.ps1` / `codex_review_prompt.md`, installer copy, tests.
+Fixed critical false-PASS verdict bug in `Get-ReviewVerdict` (`ai_loop_auto.ps1`): line-anchored regex now required; last exact verdict line wins; instruction text containing both verdict strings no longer triggers PASS.
 
 ## Next Likely Steps
 
@@ -71,6 +71,7 @@ Reduce Codex review context with bounded reviewer artifacts (C13): `templates/re
 
 ## Notes For Future AI Sessions
 
+- Verdict parsing in `Get-ReviewVerdict` uses line-split + `^VERDICT:\s*(PASS|FIX_REQUIRED)$` anchoring; last exact line wins. Do not weaken back to substring matching.
 - Tracked files under `tasks/` (for example `tasks/task.md`, `tasks/scout_bug_report.md`) are queue or reference specs. Unless the active `.ai-loop/task.md` explicitly lists them in scope, do not overwrite or delete them; restore from git if the tree must match the last commit.
 - Untracked root-level scratch `.md` files are picked up by `scripts/build_repo_map.ps1` into `.ai-loop/repo_map.md`; delete them or move them under ignored paths before regenerating the map so metadata stays clean.
 - Keep durable project-level context here; put per-iteration detail in `.ai-loop/implementer_summary.md`.
