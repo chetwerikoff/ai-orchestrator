@@ -647,6 +647,13 @@ Risk: extra latency when enabled; scout may return empty or invalid JSON (handle
 with warnings; run continues). Mitigation: non-fatal failures; scout artifacts
 stay under `_debug/` and are not staged.
 
+### DD-024 — Scope-filtered staging and review artifacts
+
+Decision: **Stage set** narrows to **DurableAlwaysCommit** (`.ai-loop/` subset of `SafeAddPaths`) **∪** (**ActiveScope** ∩ **SafeAddPaths**), where **ActiveScope** is parsed from `## Files in scope` in `.ai-loop/task.md`. Missing section or no bullets → empty ActiveScope (**fail-closed**): only durable paths stage, with a `[scope-filter]` warning. **`git_status.txt`** for Codex is filtered to the same path set; **`last_diff.patch`** / **`diff_summary.txt`** stay unfiltered `git diff HEAD` output.
+
+Status: active.
+Date: 2026-05-16.
+
 ## §13 Open Questions
 
 No open questions at this time.

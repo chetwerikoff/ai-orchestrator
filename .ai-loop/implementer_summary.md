@@ -1,32 +1,33 @@
 ﻿# Implementer summary
 
-## Changed files (this documentation pass)
+## Changed files
 
-- `.ai-loop/implementer_summary.md` — replaced stale C12/tasks-scope summary with an accurate report of the landed **post-verdict `Codex reason:`** work and verification.
+- `scripts/ai_loop_auto.ps1` — `Stage-SafeProjectFiles`: ActiveScope `git add` when path is missing from disk but still listed in the index (stages tracked deletions).
+- `tests/test_orchestrator_validation.py` — `test_scope_filter_stages_tracked_deletion_in_cached_name_status` regression for cached `D` in `git diff --cached --name-status`.
 
-## Changed files (summarized work under review)
+## Functions added or modified (`ai_loop_auto.ps1`)
 
-- `scripts/ai_loop_auto.ps1` — `Get-CodexSeverityReasonSnippet` reads severity bullets only **after** the last line-anchored `VERDICT: PASS|FIX_REQUIRED`; `Show-CodexReviewConsoleSummary` prints optional `Codex reason:` for `FIX_REQUIRED` from that tail only. Ignores placeholder bullets (`- none`, `- ...`, Unicode/dots-only filler). If no anchored verdict line is found, the snippet is empty so no `Codex reason:` line is emitted. Verdict resolution stays in `Get-ReviewVerdictLineScanResult` / `Get-ReviewVerdict` unchanged.
-- `tests/test_orchestrator_validation.py` — harness/substring fixtures: long preamble with example `CRITICAL`/`HIGH`/`MEDIUM` before the final `VERDICT: FIX_REQUIRED` vs real post-verdict `HIGH:` text; `- none` / `- ...` suppression; no real bullets after verdict ⇒ no `Codex reason:` in captured console output; non-anchored/malformed `VERDICT` lines.
-- `.ai-loop/project_summary.md` — **Current Pipeline / Workflow** and **Last Completed Task** note that console `Codex reason:` is post-final-`VERDICT` only.
+| Function | One-line role |
+|----------|---------------|
+| `Stage-SafeProjectFiles` | **Modified:** same as DD-024 durable + ActiveScope pass; ActiveScope entries use `git ls-files --cached` when the path is absent on disk so tracked deletions are staged. |
 
 ## Tests
 
-`python -m pytest -q` → **187 passed**, **1 warning** (pytest cache path on Windows).
+- Full suite: **193 passed** (`python -m pytest -q`).
 
-## Task-specific verification
+## Task-specific CLI / verification
 
-- **PowerShell parse check** on `scripts\ai_loop_auto.ps1`: **OK** — `System.Management.Automation.Language.Parser::ParseFile` (same check as AGENTS.md) executed via a short Python subprocess wrapper; exit code **0**.
+- **PowerShell parse:** Not executed from this agent environment (command runner rejected nested `powershell` invocations). Expected check per AGENTS.md:
 
-## Implementation (concise)
+  `powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_auto.ps1', [ref]$null, [ref]$null)"`
 
-Console one-liner reasons are bounded to the assistant tail after the authoritative last `VERDICT:` line so prompt/example severity blocks above it cannot surface as `Codex reason:`. CRITICAL → HIGH → MEDIUM priority within that suffix; meaningless placeholder bullets are skipped; empty snippet omits the reason line while other summary lines (tokens if present, `See: .ai-loop\codex_review.md`) remain.
+- **task.md targeted pytest:** Not re-run separately; full suite includes the new deletion-staging test.
+
+## Risks / notes
+
+- ActiveScope entries that never existed in the index and are absent on disk still skip `git add` (avoids `pathspec did not match` noise); only in-index-or-on-disk paths stage.
+- Durable path loop still requires `Test-Path` before `git add`; only ActiveScope deletion behavior was extended per fix prompt.
 
 ## Skipped
 
-- Live Codex/Cursor/Claude runs (out of scope per task).
-
-## Remaining risks
-
-- Unusual transcripts with multiple assistant answers or embedded severity labels after unrelated sections could still need human judgment; the extractor stops at headings and standalone `Label:` lines within a severity bucket to limit “vacuuming.”
-- If `.ai-loop/codex_review.md` lacks any proper anchored `VERDICT:` line, no `Codex reason:` is printed (by design).
+- None for this fix prompt.

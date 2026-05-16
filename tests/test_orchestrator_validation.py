@@ -150,6 +150,48 @@ def _default_safe_add_paths_literal(script: Path) -> str:
     return m.group(1).strip()
 
 
+_DURABLE_COMMIT_PATHS_PS = """$script:DurableAlwaysCommitPaths = @(
+    '.ai-loop/task.md',
+    '.ai-loop/implementer_summary.md',
+    '.ai-loop/project_summary.md',
+    '.ai-loop/repo_map.md',
+    '.ai-loop/failures.md',
+    '.ai-loop/archive/rolls/',
+    '.ai-loop/_debug/session_draft.md'
+)"""
+
+
+def _require_git_exe() -> str:
+    exe = shutil.which("git")
+    if not exe:
+        pytest.skip("git not on PATH")
+    return exe
+
+
+def _extract_scope_staging_harness(ps1_text: str) -> str:
+    a = ps1_text.index("function Get-SafeAddPathList")
+    b = ps1_text.index("function Test-PorcelainPathInReviewFilter")
+    c = ps1_text.index("function Stage-SafeProjectFiles")
+    d = ps1_text.index("function Get-WorkingTreeTasksPathsRelative")
+    return ps1_text[a:b] + ps1_text[c:d]
+
+
+def _extract_save_git_review_harness(ps1_text: str) -> str:
+    a = ps1_text.index("function Get-SafeAddPathList")
+    b = ps1_text.index("function Save-TestAndDiff")
+    return ps1_text[a:b]
+
+
+def _extract_get_active_scope_only(ps1_text: str) -> str:
+    start = ps1_text.index("function Get-ActiveScope")
+    end = ps1_text.index("function Test-PathUnderSafeAddEntry", start)
+    return ps1_text[start:end]
+
+
+def _ps_single_quoted_literal(s: str) -> str:
+    return s.replace("'", "''")
+
+
 def test_default_safe_add_paths_parity_includes_docs_and_templates() -> None:
     """Orchestrator entrypoints must agree on SafeAddPaths defaults; AGENTS.md and docs/safety.md must match."""
     names = ("ai_loop_auto.ps1", "ai_loop_task_first.ps1", "continue_ai_loop.ps1")
@@ -453,33 +495,417 @@ def test_ai_loop_auto_writes_diff_summary() -> None:
     assert "git diff --stat" in script
 
 
-def test_ai_loop_auto_git_review_snapshots_use_repo_wide_diff() -> None:
-    """Codex pre-review artifacts come from full-tree `git diff`/`status` (not task-scope-filtered)."""
+def test_ai_loop_auto_git_review_snapshots_diff_unfiltered_status_scope_filtered() -> None:
+    """Pre-review artifacts: git diff stays full-tree; git_status.txt is narrowed to DD-024 stage set."""
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     start = text.index("function Save-GitReviewArtifactsForCodex")
     end = text.index("function Save-TestAndDiff", start)
     block = text[start:end]
     assert "git diff HEAD" in block
-    assert "git status" in block
-    for banned in ("Get-FilesInScope", "Test-RelEligible", "ActiveScope"):
-        assert banned not in block
+    assert "git diff --stat" in block
+    assert "Get-ActiveScope" in block
+    assert "Test-GitStatusLinePassesScopeFilter" in block
+    assert "git status --short --porcelain --untracked-files=all" in block
 
 
-def test_ai_loop_auto_stage_safe_project_files_is_allowlist_only() -> None:
-    """Final commit staging iterates `SafeAddPaths` only (no task-scope intersect helper)."""
+def test_ai_loop_auto_stage_safe_project_files_uses_active_scope_and_durable() -> None:
+    """Commit staging no longer blinds `git add`s every SafeAddPaths directory blob (DD-024)."""
     text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     start = text.index("function Stage-SafeProjectFiles")
-    end = text.index("function Commit-And-Push", start)
+    end = text.index("function Get-WorkingTreeTasksPathsRelative", start)
     block = text[start:end]
-    assert "Get-SafeAddPathList" in block
+    assert "DurableAlwaysCommitPaths" in block
+    assert "Get-ActiveScope" in block
+    assert "Test-PathUnderSafeAddEntry" in block
     assert "git add" in block
-    for banned in ("Get-FilesInScope", "Test-RelEligible", "ActiveScope"):
-        assert banned not in block
+    assert "foreach ($rel in @(Get-SafeAddPathList))" not in block
 
 
 def test_ai_loop_auto_invokes_pytest_failure_filter() -> None:
     script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert "filter_pytest_failures.py" in script
+
+
+def test_scope_filter_excludes_tasks_user_ask() -> None:
+    """Stage-SafeProjectFiles must not git-add tasks/*.md absent from ## Files in scope."""
+    git_exe = _require_git_exe()
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("scope_filter_excl")
+    root.mkdir(parents=True, exist_ok=True)
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    try:
+        frag = root / "_stg.ps1"
+        frag.write_text(_extract_scope_staging_harness(auto_text), encoding="utf-8")
+        safe = _ps_single_quoted_literal(_default_safe_add_paths_from_agents_md())
+        runner = root / "_run_stg.ps1"
+        runner.write_text(
+            f"$ErrorActionPreference = 'Stop'\n"
+            f"$ProjectRoot = $args[0]\n"
+            f"Set-Location -LiteralPath $ProjectRoot\n"
+            f"$SafeAddPaths = '{safe}'\n"
+            f"{_DURABLE_COMMIT_PATHS_PS}\n"
+            f". '{_ps_single_quoted_literal(str(frag.resolve()))}'\n"
+            f"Stage-SafeProjectFiles\n",
+            encoding="utf-8",
+        )
+        subprocess.run([git_exe, "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run([git_exe, "config", "user.email", "t@e.t"], cwd=root, check=True)
+        subprocess.run([git_exe, "config", "user.name", "t"], cwd=root, check=True)
+        (root / "README.md").write_text("r\n", encoding="utf-8")
+        subprocess.run([git_exe, "add", "README.md"], cwd=root, check=True)
+        subprocess.run([git_exe, "commit", "-m", "i"], cwd=root, check=True)
+        loop = root / ".ai-loop"
+        loop.mkdir(parents=True)
+        (loop / "task.md").write_text(
+            "## Files in scope\n\n- scripts/scope_only.ps1\n\n",
+            encoding="utf-8",
+        )
+        sdir = root / "scripts"
+        sdir.mkdir(parents=True)
+        (sdir / "scope_only.ps1").write_text("# z\n", encoding="utf-8")
+        tdir = root / "tasks"
+        tdir.mkdir()
+        (tdir / "user_ask_foo.md").write_text("draft\n", encoding="utf-8")
+        subprocess.run(
+            [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        st = subprocess.run(
+            [git_exe, "diff", "--cached", "--name-only"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        staged = {ln.strip().replace("\\", "/") for ln in st.stdout.splitlines() if ln.strip()}
+        assert "tasks/user_ask_foo.md" not in staged
+        assert "scripts/scope_only.ps1" in staged
+        assert ".ai-loop/task.md" in staged
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_scope_filter_includes_explicit_tasks_file() -> None:
+    git_exe = _require_git_exe()
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("scope_filter_tasks")
+    root.mkdir(parents=True, exist_ok=True)
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    try:
+        frag = root / "_stg2.ps1"
+        frag.write_text(_extract_scope_staging_harness(auto_text), encoding="utf-8")
+        safe = _ps_single_quoted_literal(_default_safe_add_paths_from_agents_md())
+        runner = root / "_run_stg2.ps1"
+        runner.write_text(
+            f"$ErrorActionPreference = 'Stop'\n"
+            f"$ProjectRoot = $args[0]\n"
+            f"Set-Location -LiteralPath $ProjectRoot\n"
+            f"$SafeAddPaths = '{safe}'\n"
+            f"{_DURABLE_COMMIT_PATHS_PS}\n"
+            f". '{_ps_single_quoted_literal(str(frag.resolve()))}'\n"
+            f"Stage-SafeProjectFiles\n",
+            encoding="utf-8",
+        )
+        subprocess.run([git_exe, "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run([git_exe, "config", "user.email", "t@e.t"], cwd=root, check=True)
+        subprocess.run([git_exe, "config", "user.name", "t"], cwd=root, check=True)
+        (root / "README.md").write_text("r\n", encoding="utf-8")
+        subprocess.run([git_exe, "add", "README.md"], cwd=root, check=True)
+        subprocess.run([git_exe, "commit", "-m", "i"], cwd=root, check=True)
+        loop = root / ".ai-loop"
+        loop.mkdir(parents=True)
+        (loop / "task.md").write_text(
+            "## Files in scope\n\n- tasks/016_feature.md\n\n",
+            encoding="utf-8",
+        )
+        tdir = root / "tasks"
+        tdir.mkdir()
+        (tdir / "016_feature.md").write_text("spec\n", encoding="utf-8")
+        subprocess.run(
+            [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
+            check=True,
+            capture_output=True,
+        )
+        st = subprocess.run(
+            [git_exe, "diff", "--cached", "--name-only"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        staged = {ln.strip().replace("\\", "/") for ln in st.stdout.splitlines() if ln.strip()}
+        assert "tasks/016_feature.md" in staged
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_scope_filter_stages_tracked_deletion_in_cached_name_status() -> None:
+    """ActiveScope entry for a deleted tracked file: Stage-SafeProjectFiles must stage the deletion."""
+    git_exe = _require_git_exe()
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("scope_filter_del")
+    root.mkdir(parents=True, exist_ok=True)
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    try:
+        frag = root / "_stg_del.ps1"
+        frag.write_text(_extract_scope_staging_harness(auto_text), encoding="utf-8")
+        safe = _ps_single_quoted_literal(_default_safe_add_paths_from_agents_md())
+        runner = root / "_run_stg_del.ps1"
+        runner.write_text(
+            f"$ErrorActionPreference = 'Stop'\n"
+            f"$ProjectRoot = $args[0]\n"
+            f"Set-Location -LiteralPath $ProjectRoot\n"
+            f"$SafeAddPaths = '{safe}'\n"
+            f"{_DURABLE_COMMIT_PATHS_PS}\n"
+            f". '{_ps_single_quoted_literal(str(frag.resolve()))}'\n"
+            f"Stage-SafeProjectFiles\n",
+            encoding="utf-8",
+        )
+        subprocess.run([git_exe, "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run([git_exe, "config", "user.email", "t@e.t"], cwd=root, check=True)
+        subprocess.run([git_exe, "config", "user.name", "t"], cwd=root, check=True)
+        (root / "README.md").write_text("r\n", encoding="utf-8")
+        subprocess.run([git_exe, "add", "README.md"], cwd=root, check=True)
+        subprocess.run([git_exe, "commit", "-m", "i"], cwd=root, check=True)
+        loop = root / ".ai-loop"
+        loop.mkdir(parents=True)
+        rel = "tasks/tracked_for_deletion.md"
+        (loop / "task.md").write_text(
+            f"## Files in scope\n\n- {rel}\n\n",
+            encoding="utf-8",
+        )
+        tdir = root / "tasks"
+        tdir.mkdir()
+        (tdir / "tracked_for_deletion.md").write_text("body\n", encoding="utf-8")
+        subprocess.run([git_exe, "add", rel], cwd=root, check=True)
+        subprocess.run([git_exe, "commit", "-m", "add tracked task file"], cwd=root, check=True)
+        (tdir / "tracked_for_deletion.md").unlink()
+        subprocess.run(
+            [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
+            check=True,
+            capture_output=True,
+        )
+        st = subprocess.run(
+            [git_exe, "diff", "--cached", "--name-status"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        lines = [ln.strip() for ln in st.stdout.splitlines() if ln.strip()]
+        assert any(
+            (parts := ln.split()) and parts[0] == "D" and parts[-1].replace("\\", "/") == rel
+            for ln in lines
+        ), f"expected cached deletion for {rel}, got: {lines!r}"
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_durable_paths_always_staged() -> None:
+    """Empty ActiveScope still stages DurableAlwaysCommit paths that exist."""
+    git_exe = _require_git_exe()
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("durable_paths")
+    root.mkdir(parents=True, exist_ok=True)
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    try:
+        frag = root / "_stg3.ps1"
+        frag.write_text(_extract_scope_staging_harness(auto_text), encoding="utf-8")
+        safe = _ps_single_quoted_literal(_default_safe_add_paths_from_agents_md())
+        runner = root / "_run_stg3.ps1"
+        runner.write_text(
+            f"$ErrorActionPreference = 'Stop'\n"
+            f"$ProjectRoot = $args[0]\n"
+            f"Set-Location -LiteralPath $ProjectRoot\n"
+            f"$SafeAddPaths = '{safe}'\n"
+            f"{_DURABLE_COMMIT_PATHS_PS}\n"
+            f". '{_ps_single_quoted_literal(str(frag.resolve()))}'\n"
+            f"Stage-SafeProjectFiles\n",
+            encoding="utf-8",
+        )
+        subprocess.run([git_exe, "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run([git_exe, "config", "user.email", "t@e.t"], cwd=root, check=True)
+        subprocess.run([git_exe, "config", "user.name", "t"], cwd=root, check=True)
+        (root / "README.md").write_text("r\n", encoding="utf-8")
+        subprocess.run([git_exe, "add", "README.md"], cwd=root, check=True)
+        subprocess.run([git_exe, "commit", "-m", "i"], cwd=root, check=True)
+        loop = root / ".ai-loop"
+        loop.mkdir(parents=True)
+        (loop / "task.md").write_text(
+            "## Files in scope\n\n\n",
+            encoding="utf-8",
+        )
+        (loop / "project_summary.md").write_text("ps\n", encoding="utf-8")
+        subprocess.run(
+            [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
+            check=True,
+            capture_output=True,
+        )
+        st = subprocess.run(
+            [git_exe, "diff", "--cached", "--name-only"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        staged = {ln.strip().replace("\\", "/") for ln in st.stdout.splitlines() if ln.strip()}
+        assert ".ai-loop/task.md" in staged
+        assert ".ai-loop/project_summary.md" in staged
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_git_status_filtered() -> None:
+    git_exe = _require_git_exe()
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("git_status_filter")
+    root.mkdir(parents=True, exist_ok=True)
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    try:
+        frag = root / "_review.ps1"
+        frag.write_text(_extract_save_git_review_harness(auto_text), encoding="utf-8")
+        safe = _ps_single_quoted_literal(_default_safe_add_paths_from_agents_md())
+        frag_p = _ps_single_quoted_literal(str(frag.resolve()))
+        loop_p = "$AiLoop = Join-Path $ProjectRoot '.ai-loop'"
+        runner = root / "_run_review.ps1"
+        runner.write_text(
+            f"$ErrorActionPreference = 'Stop'\n"
+            f"$ProjectRoot = $args[0]\n"
+            f"Set-Location -LiteralPath $ProjectRoot\n"
+            f"$SafeAddPaths = '{safe}'\n"
+            f"{_DURABLE_COMMIT_PATHS_PS}\n"
+            f". '{frag_p}'\n"
+            f"{loop_p}\n"
+            f"Save-GitReviewArtifactsForCodex "
+            f"-GitStatusOut (Join-Path $AiLoop 'git_status.txt') "
+            f"-DiffPatchOut (Join-Path $AiLoop 'last_diff.patch') "
+            f"-DiffStatOut (Join-Path $AiLoop 'diff_summary.txt')\n",
+            encoding="utf-8",
+        )
+        subprocess.run([git_exe, "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run([git_exe, "config", "user.email", "t@e.t"], cwd=root, check=True)
+        subprocess.run([git_exe, "config", "user.name", "t"], cwd=root, check=True)
+        (root / "README.md").write_text("r\n", encoding="utf-8")
+        subprocess.run([git_exe, "add", "README.md"], cwd=root, check=True)
+        subprocess.run([git_exe, "commit", "-m", "i"], cwd=root, check=True)
+        loop = root / ".ai-loop"
+        loop.mkdir(parents=True)
+        (loop / "task.md").write_text(
+            "## Files in scope\n\n- scripts/in_status.ps1\n\n",
+            encoding="utf-8",
+        )
+        sdir = root / "scripts"
+        sdir.mkdir(parents=True)
+        (sdir / "in_status.ps1").write_text("# k\n", encoding="utf-8")
+        tdir = root / "tasks"
+        tdir.mkdir()
+        (tdir / "user_ask_foo.md").write_text("draft\n", encoding="utf-8")
+        subprocess.run(
+            [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        gst = (loop / "git_status.txt").read_text(encoding="utf-8")
+        assert "user_ask_foo.md" not in gst
+        assert "in_status.ps1" in gst
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_missing_scope_section_get_active_scope_empty_and_staging_narrow() -> None:
+    """No ## Files in scope → Get-ActiveScope is empty; staging omits non-durable paths."""
+    git_exe = _require_git_exe()
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("missing_scope_fail")
+    root.mkdir(parents=True, exist_ok=True)
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    warn_line = "[scope-filter] ActiveScope is empty; staging durable paths only."
+    assert warn_line in auto_text
+    try:
+        gas = root / "_gas.ps1"
+        gas.write_text(_extract_get_active_scope_only(auto_text), encoding="utf-8")
+        chk = root / "_check_scope.ps1"
+        chk.write_text(
+            f"$ErrorActionPreference = 'Stop'\n"
+            f"$ProjectRoot = $args[0]\n"
+            f". '{_ps_single_quoted_literal(str(gas.resolve()))}'\n"
+            f"$r = @(Get-ActiveScope -TaskMdPath (Join-Path $ProjectRoot '.ai-loop/task.md'))\n"
+            f"if ($r.Count -ne 0) {{ throw \"expected empty ActiveScope, got $($r.Count)\" }}\n",
+            encoding="utf-8",
+        )
+        loop = root / ".ai-loop"
+        loop.mkdir(parents=True)
+        (loop / "task.md").write_text(
+            "# Task\n\n## Not the scope header\n\n- scripts/x.ps1\n",
+            encoding="utf-8",
+        )
+        subprocess.run(
+            [ps, "-NoProfile", "-File", str(chk), str(root.resolve())],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        frag = root / "_stg_ns.ps1"
+        frag.write_text(_extract_scope_staging_harness(auto_text), encoding="utf-8")
+        safe = _ps_single_quoted_literal(_default_safe_add_paths_from_agents_md())
+        runner = root / "_run_ns.ps1"
+        runner.write_text(
+            f"$ErrorActionPreference = 'Stop'\n"
+            f"$WarningPreference = 'Continue'\n"
+            f"$ProjectRoot = $args[0]\n"
+            f"Set-Location -LiteralPath $ProjectRoot\n"
+            f"$SafeAddPaths = '{safe}'\n"
+            f"{_DURABLE_COMMIT_PATHS_PS}\n"
+            f". '{_ps_single_quoted_literal(str(frag.resolve()))}'\n"
+            f"Stage-SafeProjectFiles 3>&1 | Write-Output\n",
+            encoding="utf-8",
+        )
+        subprocess.run([git_exe, "init"], cwd=root, check=True, capture_output=True)
+        subprocess.run([git_exe, "config", "user.email", "t@e.t"], cwd=root, check=True)
+        subprocess.run([git_exe, "config", "user.name", "t"], cwd=root, check=True)
+        (root / "README.md").write_text("r\n", encoding="utf-8")
+        subprocess.run([git_exe, "add", "README.md"], cwd=root, check=True)
+        subprocess.run([git_exe, "commit", "-m", "i"], cwd=root, check=True)
+        sdir = root / "scripts"
+        sdir.mkdir(parents=True)
+        (sdir / "orphan.ps1").write_text("# o\n", encoding="utf-8")
+        (loop / "project_summary.md").write_text("ps\n", encoding="utf-8")
+        pr = subprocess.run(
+            [ps, "-NoProfile", "-File", str(runner), str(root.resolve())],
+            capture_output=True,
+            text=True,
+        )
+        assert pr.returncode == 0, pr.stderr
+        combined = (pr.stdout or "") + (pr.stderr or "")
+        assert warn_line in combined
+        st = subprocess.run(
+            [git_exe, "diff", "--cached", "--name-only"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        staged = {ln.strip().replace("\\", "/") for ln in st.stdout.splitlines() if ln.strip()}
+        assert "scripts/orphan.ps1" not in staged
+        assert ".ai-loop/project_summary.md" in staged
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 def test_default_safe_add_paths_includes_implementer_summary() -> None:

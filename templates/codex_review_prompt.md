@@ -11,7 +11,7 @@ Read in this priority order (stop reading once verdict is clear):
 5. `.ai-loop/test_failures_summary.md` — filtered failures (read when present; do not read test_output.txt unless this summary is absent or insufficient)
 6. `.ai-loop/last_diff.patch` — full diff only when exact patch context is required for a specific finding; prefer reading only the changed files relevant to that finding
 7. `.ai-loop/test_output.txt` — raw pytest output (read only when test_failures_summary.md is absent or insufficient)
-8. `.ai-loop/git_status.txt` — short porcelain status
+8. `.ai-loop/git_status.txt` — short porcelain status (paths pre-filtered to the active task `## Files in scope` plus durable `.ai-loop/` orchestrator state paths; concurrent out-of-repo-scope working-tree files are omitted on purpose)
 9. `AGENTS.md` — full working rules (read only when reviewer_context.md is insufficient)
 
 ---

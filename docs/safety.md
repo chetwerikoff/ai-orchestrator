@@ -37,6 +37,8 @@ pyrightconfig.json
 
 Runtime artifacts are not staged.
 
+**Stage set (DD-024, `ai_loop_auto.ps1`):** `Stage-SafeProjectFiles` uses **DurableAlwaysCommit** (the `.ai-loop/` entries from the fenced list above: task, implementer_summary, project_summary, repo_map, failures, `archive/rolls/`, and `_debug/session_draft.md` under `.ai-loop/`) plus **ActiveScope ∩ SafeAddPaths**, where **ActiveScope** is the bullet list under `## Files in scope` in `.ai-loop/task.md` (missing section or no bullets → treated as empty). Unconditional directory staging of every `SafeAddPaths` blob no longer happens when scope is empty—only durable paths are staged, with a console warning—so unrelated working-tree paths stay out of the automated commit and out of the filtered **`git_status.txt`** sent to Codex (diff artifacts remain full-tree `git diff HEAD`).
+
 `.ai-loop/implementer.json` records the last **effective** implementer wrapper and model used by the drivers (including OpenCode/Qwen selections) so `continue_ai_loop.ps1` / `ai_loop_auto.ps1 -Resume` can load them when you omit `-CursorCommand` / `-CursorModel`. It is **runtime-only** (gitignored): paths and model IDs may be machine-specific — do not rely on it for durable documentation.
 
 ## Private data

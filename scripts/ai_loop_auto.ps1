@@ -27,6 +27,16 @@ catch {
 New-Item -ItemType Directory -Force -Path $AiLoop | Out-Null
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
 
+$script:DurableAlwaysCommitPaths = @(
+    '.ai-loop/task.md',
+    '.ai-loop/implementer_summary.md',
+    '.ai-loop/project_summary.md',
+    '.ai-loop/repo_map.md',
+    '.ai-loop/failures.md',
+    '.ai-loop/archive/rolls/',
+    '.ai-loop/_debug/session_draft.md'
+)
+
 function Get-ImplementerStatePath {
     param([string]$AiLoopRoot)
     return (Join-Path $AiLoopRoot "implementer.json")
@@ -282,6 +292,185 @@ function Get-SafeAddPathList {
     return $SafeAddPaths.Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
 }
 
+function Normalize-RepoRelativePath {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace([string]$Path)) {
+        return ''
+    }
+    $s = ([string]$Path).Trim() -replace '\\', '/'
+    if ($s.StartsWith('./')) {
+        $s = $s.Substring(2)
+    }
+    return $s
+}
+
+function Get-ActiveScope {
+    param([string]$TaskMdPath)
+    if (-not (Test-Path -LiteralPath $TaskMdPath)) {
+        return @()
+    }
+    $lines = @(Get-Content -LiteralPath $TaskMdPath -ErrorAction SilentlyContinue)
+    $inScope = $false
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in $lines) {
+        if ($line -match '^\s*##\s') {
+            if ($inScope) {
+                break
+            }
+            if ($line -match '^\s*##\s+Files\s+in\s+scope\s*$') {
+                $inScope = $true
+            }
+            continue
+        }
+        if ($inScope) {
+            $trim = $line.Trim()
+            if ($trim -match '^(?:[-*]|\d+\.)\s+(.+)$') {
+                $item = $Matches[1].Trim().Trim([char]0x0060)
+                $item = $item -replace '\s*\([^)]*\)\s*$', ''
+                $item = $item.Trim()
+                if (-not [string]::IsNullOrWhiteSpace($item)) {
+                    [void]$out.Add($item)
+                }
+            }
+        }
+    }
+    return @($out)
+}
+
+function Test-PathUnderSafeAddEntry {
+    param(
+        [string]$CandidatePath,
+        [string[]]$SafeEntries
+    )
+    $c = Normalize-RepoRelativePath -Path $CandidatePath
+    if ([string]::IsNullOrWhiteSpace($c)) {
+        return $false
+    }
+    foreach ($eRaw in $SafeEntries) {
+        if ([string]::IsNullOrWhiteSpace($eRaw)) {
+            continue
+        }
+        $e = Normalize-RepoRelativePath -Path $eRaw.Trim()
+        if ($e.EndsWith('/')) {
+            $eNoTrail = $e.TrimEnd('/')
+            if ($c -eq $eNoTrail) {
+                return $true
+            }
+            if ($c.StartsWith($e, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        else {
+            if ($c -eq $e) {
+                return $true
+            }
+            if ($c.StartsWith($e + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+function Test-PathUnderScopePrefixSet {
+    param(
+        [string]$CandidatePath,
+        [string[]]$PrefixEntries
+    )
+    $c = Normalize-RepoRelativePath -Path $CandidatePath
+    if ([string]::IsNullOrWhiteSpace($c)) {
+        return $false
+    }
+    foreach ($pRaw in $PrefixEntries) {
+        if ([string]::IsNullOrWhiteSpace($pRaw)) {
+            continue
+        }
+        $p = Normalize-RepoRelativePath -Path $pRaw.Trim()
+        if ($p.EndsWith('/')) {
+            $pNoTrail = $p.TrimEnd('/')
+            if ($c -eq $pNoTrail) {
+                return $true
+            }
+            if ($c.StartsWith($p, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        else {
+            if ($c -eq $p) {
+                return $true
+            }
+            if ($c.StartsWith($p + '/', [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+    }
+    return $false
+}
+
+function Test-ScopeEntryCoveredByDurable {
+    param(
+        [string]$ScopeEntry,
+        [string[]]$DurableEntries
+    )
+    return (Test-PathUnderScopePrefixSet -CandidatePath $ScopeEntry -PrefixEntries $DurableEntries)
+}
+
+function Test-PorcelainPathInReviewFilter {
+    param(
+        [string]$RelPath,
+        [string[]]$DurableEntries,
+        [string[]]$ActiveScopeEntries,
+        [string[]]$SafeEntries
+    )
+    if (Test-PathUnderScopePrefixSet -CandidatePath $RelPath -PrefixEntries $DurableEntries) {
+        return $true
+    }
+    if (-not (Test-PathUnderSafeAddEntry -CandidatePath $RelPath -SafeEntries $SafeEntries)) {
+        return $false
+    }
+    return (Test-PathUnderScopePrefixSet -CandidatePath $RelPath -PrefixEntries $ActiveScopeEntries)
+}
+
+function Get-PorcelainPathsFromLine {
+    param([string]$Line)
+    if ([string]::IsNullOrWhiteSpace($Line) -or $Line.Length -lt 4) {
+        return @()
+    }
+    $rest = $Line.Substring(3).Trim()
+    if ([string]::IsNullOrWhiteSpace($rest)) {
+        return @()
+    }
+    if ($rest -match ' -> ') {
+        $parts = $rest -split ' -> ', 2
+        $a = Normalize-RepoRelativePath -Path $parts[0].Trim().Trim([char]0x0022)
+        $b = Normalize-RepoRelativePath -Path $parts[1].Trim().Trim([char]0x0022)
+        return @($a, $b)
+    }
+    return @(Normalize-RepoRelativePath -Path $rest.Trim([char]0x0022))
+}
+
+function Test-GitStatusLinePassesScopeFilter {
+    param(
+        [string]$Line,
+        [string[]]$DurableEntries,
+        [string[]]$ActiveScopeEntries,
+        [string[]]$SafeEntries
+    )
+    $paths = @(Get-PorcelainPathsFromLine -Line $Line)
+    if ($paths.Count -eq 0) {
+        return $false
+    }
+    foreach ($p in $paths) {
+        if ([string]::IsNullOrWhiteSpace($p)) {
+            continue
+        }
+        if (Test-PorcelainPathInReviewFilter -RelPath $p -DurableEntries $DurableEntries -ActiveScopeEntries $ActiveScopeEntries -SafeEntries $SafeEntries) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Save-GitReviewArtifactsForCodex {
     param(
         [string]$GitStatusOut,
@@ -291,8 +480,22 @@ function Save-GitReviewArtifactsForCodex {
 
     Push-Location $ProjectRoot
     try {
-        @(git status --short --porcelain --untracked-files=all 2>$null) |
-            Set-Content -LiteralPath $GitStatusOut -Encoding UTF8
+        $taskMdPath = Join-Path $ProjectRoot ".ai-loop/task.md"
+        $activeScope = @(Get-ActiveScope -TaskMdPath $taskMdPath)
+        $safeList = @(Get-SafeAddPathList)
+        $durable = @($script:DurableAlwaysCommitPaths)
+
+        $rawStatus = @(git status --short --porcelain --untracked-files=all 2>$null)
+        $filtered = [System.Collections.Generic.List[string]]::new()
+        foreach ($ln in $rawStatus) {
+            if ([string]::IsNullOrWhiteSpace([string]$ln)) {
+                continue
+            }
+            if (Test-GitStatusLinePassesScopeFilter -Line $ln -DurableEntries $durable -ActiveScopeEntries $activeScope -SafeEntries $safeList) {
+                [void]$filtered.Add($ln)
+            }
+        }
+        $filtered | Set-Content -LiteralPath $GitStatusOut -Encoding UTF8
         @(git diff HEAD 2>$null) | Set-Content -LiteralPath $DiffPatchOut -Encoding UTF8
         @(git diff --stat HEAD 2>$null) | Set-Content -LiteralPath $DiffStatOut -Encoding UTF8
     }
@@ -1191,11 +1394,50 @@ function Stage-SafeProjectFiles {
 
     Push-Location $ProjectRoot
     try {
-        foreach ($rel in @(Get-SafeAddPathList)) {
+        foreach ($rel in @($script:DurableAlwaysCommitPaths)) {
             if ([string]::IsNullOrWhiteSpace($rel)) {
                 continue
             }
-            git add -- $rel.Trim() 2>$null
+            $t = $rel.Trim()
+            $full = Join-Path $ProjectRoot $t
+            if (Test-Path -LiteralPath $full) {
+                git add -- $t 2>$null
+            }
+        }
+
+        $taskMdPath = Join-Path $ProjectRoot ".ai-loop/task.md"
+        $activeScope = @(Get-ActiveScope -TaskMdPath $taskMdPath)
+        $safeList = @(Get-SafeAddPathList)
+
+        if ($activeScope.Count -eq 0) {
+            Write-Warning "[scope-filter] ActiveScope is empty; staging durable paths only."
+        }
+        else {
+            foreach ($ent in $activeScope) {
+                if ([string]::IsNullOrWhiteSpace($ent)) {
+                    continue
+                }
+                if (Test-ScopeEntryCoveredByDurable -ScopeEntry $ent -DurableEntries @($script:DurableAlwaysCommitPaths)) {
+                    continue
+                }
+                if (-not (Test-PathUnderSafeAddEntry -CandidatePath $ent -SafeEntries $safeList)) {
+                    continue
+                }
+                $trimEnt = $ent.Trim()
+                $fullEnt = Join-Path $ProjectRoot $trimEnt
+                # Stage when the path exists on disk, or when it is still in the index (e.g. tracked
+                # file deleted in the working tree) so `git add` records the deletion in the index.
+                $stillInIndex = $false
+                if (-not (Test-Path -LiteralPath $fullEnt)) {
+                    $cachedHits = @(git ls-files --cached -- $trimEnt 2>$null)
+                    if ($cachedHits.Count -gt 0) {
+                        $stillInIndex = $true
+                    }
+                }
+                if ((Test-Path -LiteralPath $fullEnt) -or $stillInIndex) {
+                    git add -- $trimEnt 2>$null
+                }
+            }
         }
     }
     finally {
