@@ -631,6 +631,10 @@ Important:
 - If new files are required by the task, make sure they are present in the diff/status.
 - Do not ask for manual steps unless absolutely required.
 
+## Implementer summary metadata
+
+If `.ai-loop/implementer_summary.md` still contains the placeholder text "No task has been completed yet" or a minimal stub like "Fix pass N completed" BUT the diff shows substantial implementation work, treat this as at most a **MEDIUM** issue (metadata lag). Do NOT make it HIGH or CRITICAL when the code changes are otherwise correct. Focus your verdict on whether the implementation is complete and correct, not on the metadata file.
+
 Check:
 1. Was the task completed?
 2. Are tests meaningful and passing?
@@ -695,11 +699,26 @@ Brief summary.
     Write-Host ""
     Write-Host "Running Codex review..."
 
-    $codexArgs = @("exec", (ConvertTo-CrtSafeArg -Value $prompt))
     $codexOutPath = Join-Path $AiLoop "codex_review.md"
+    $codexTempPrompt = Join-Path $env:TEMP "codex_review_prompt_$([System.IO.Path]::GetRandomFileName()).md"
+    [System.IO.File]::WriteAllText($codexTempPrompt, $prompt, [System.Text.Encoding]::UTF8)
 
     try {
-        $codexStdoutStderr = @(& codex @codexArgs 2>&1)
+        # Use --file when available (avoids Windows CRT quoting issues and consistently
+        # produces the "tokens used\nNNNN" footer for token display).
+        $helpText = ""
+        try {
+            $prevEA2 = $ErrorActionPreference; $ErrorActionPreference = "SilentlyContinue"
+            $helpText = (& codex exec --help 2>&1 | Out-String)
+            $ErrorActionPreference = $prevEA2
+        } catch { $ErrorActionPreference = $prevEA2 }
+
+        $codexStdoutStderr = @()
+        if ($helpText -match '(?i)--file\b') {
+            $codexStdoutStderr = @(& codex exec --file $codexTempPrompt 2>&1)
+        } else {
+            $codexStdoutStderr = @(Get-Content -LiteralPath $codexTempPrompt -Raw -Encoding UTF8 | & codex exec 2>&1)
+        }
         $codexExit = $LASTEXITCODE
 
         $textLines = foreach ($item in $codexStdoutStderr) {
@@ -738,7 +757,7 @@ Brief summary.
     catch {
         Write-Warning "Codex invocation error (token capture may be incomplete): $($_.Exception.Message)"
         try {
-            & codex @codexArgs 2>&1 | Out-File -LiteralPath $codexOutPath -Encoding utf8
+            Get-Content -LiteralPath $codexTempPrompt -Raw -Encoding UTF8 | & codex exec 2>&1 | Out-File -LiteralPath $codexOutPath -Encoding utf8
         }
         catch {
             Write-Warning "Codex fallback redirect failed: $($_.Exception.Message)"
@@ -775,6 +794,9 @@ Brief summary.
             Write-Warning "Codex token usage hook skipped (fallback path): $($_.Exception.Message)"
         }
         return $LASTEXITCODE
+    }
+    finally {
+        Remove-Item -LiteralPath $codexTempPrompt -Force -ErrorAction SilentlyContinue
     }
 }
 

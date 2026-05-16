@@ -488,16 +488,14 @@ def test_invoke_implementer_implementation_wraps_path_sets_for_compare_object() 
 def test_native_argv_escape_present_in_both_scripts() -> None:
     """PS 5.1 native-arg quoting workaround: ConvertTo-CrtSafeArg must be defined in both drivers.
 
-    ai_loop_auto.ps1     — uses the helper for Codex prompts (codex exec argv).
-    ai_loop_task_first.ps1 — defines the helper but Cursor prompt is now delivered via
-                             stdin through run_cursor_agent.ps1 (avoids cmd.exe batch-line
-                             limit), so no ConvertTo-CrtSafeArg -Value call is required there.
+    ai_loop_auto.ps1     — defines the helper; Codex prompt is now delivered via
+                           --file / stdin (avoids CRT quoting issues and produces the
+                           tokens-used footer), so the -Value call is no longer required.
+    ai_loop_task_first.ps1 — defines the helper; Cursor prompt delivered via stdin.
     """
     for name in ("ai_loop_task_first.ps1", "ai_loop_auto.ps1"):
         text = (_SCRIPTS / name).read_text(encoding="utf-8")
         assert "function ConvertTo-CrtSafeArg" in text, f"{name} missing ConvertTo-CrtSafeArg definition"
-    auto = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    assert "ConvertTo-CrtSafeArg -Value" in auto, "ai_loop_auto.ps1 must escape Codex prompt via ConvertTo-CrtSafeArg"
 
 
 def test_ai_loop_auto_writes_diff_summary() -> None:
@@ -1665,8 +1663,8 @@ def test_format_codex_token_summary_lines_empty_without_footer() -> None:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def test_show_codex_review_console_summary_lines_no_severity_prefix() -> None:
-    """Codex console summary prints plain verdict lines (no [PASS] / [HIGH] prefixes)."""
+def test_show_codex_review_console_summary_severity_prefix() -> None:
+    """Console summary prefixes verdict with [PASS] or highest non-empty severity (e.g. [HIGH])."""
     ps = _powershell_exe()
     if not ps:
         pytest.skip("No pwsh or powershell on PATH")
@@ -1745,8 +1743,7 @@ def test_show_codex_review_console_summary_lines_no_severity_prefix() -> None:
         )
         assert proc_pass.returncode == 0, (proc_pass.stdout or "") + (proc_pass.stderr or "")
         pass_cap = cap.read_text(encoding="utf-8", errors="replace")
-        assert "Codex verdict: PASS" in pass_cap
-        assert "[PASS]" not in pass_cap
+        assert "[PASS] Codex verdict: PASS" in pass_cap
 
         if cap.exists():
             cap.unlink()
@@ -1772,9 +1769,198 @@ def test_show_codex_review_console_summary_lines_no_severity_prefix() -> None:
         )
         assert proc_fix.returncode == 0, (proc_fix.stdout or "") + (proc_fix.stderr or "")
         fix_cap = cap.read_text(encoding="utf-8", errors="replace")
-        assert "Codex verdict: FIX_REQUIRED" in fix_cap
-        assert "[HIGH]" not in fix_cap
+        assert "[HIGH] Codex verdict: FIX_REQUIRED" in fix_cap
         assert "Codex reason:" in fix_cap
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_get_codex_highest_severity_label_critical() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    helpers = _extract_codex_console_summary_helpers(auto_text)
+    rec = str((_SCRIPTS / "record_token_usage.ps1").resolve())
+    scratch = _orch_scratch("codex_sev_critical")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        md_path = scratch / "r.md"
+        md_path.write_text(
+            textwrap.dedent(
+                """
+                VERDICT: FIX_REQUIRED
+
+                CRITICAL:
+                - Unbounded memory use in hot path.
+
+                HIGH:
+                - minor
+
+                """
+            ).strip(),
+            encoding="utf-8",
+        )
+        harness = scratch / "_orch_codex_sev.ps1"
+        rec_q = rec.replace("'", "''")
+        harness.write_text(
+            textwrap.dedent(
+                """
+                param([Parameter(Mandatory)][string]$MarkdownPath)
+                $ErrorActionPreference = 'Stop'
+                . '__REC__'
+                __HELPERS__
+                $raw = Get-Content -LiteralPath $MarkdownPath -Raw -Encoding utf8
+                Write-Output (Get-CodexHighestSeverityLabel -ReviewMarkdownRaw $raw)
+                """
+            )
+            .strip()
+            .replace("__REC__", rec_q)
+            .replace("__HELPERS__", helpers),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness), str(md_path)],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, detail
+        assert (proc.stdout or "").strip() == "CRITICAL"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_get_codex_highest_severity_label_medium_only() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    helpers = _extract_codex_console_summary_helpers(auto_text)
+    rec = str((_SCRIPTS / "record_token_usage.ps1").resolve())
+    scratch = _orch_scratch("codex_sev_medium")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        md_path = scratch / "r.md"
+        md_path.write_text(
+            textwrap.dedent(
+                """
+                VERDICT: FIX_REQUIRED
+
+                CRITICAL:
+                - none
+
+                HIGH:
+                - ...
+
+                MEDIUM:
+                - Doc gap only.
+
+                """
+            ).strip(),
+            encoding="utf-8",
+        )
+        harness = scratch / "_orch_codex_sev.ps1"
+        rec_q = rec.replace("'", "''")
+        harness.write_text(
+            textwrap.dedent(
+                """
+                param([Parameter(Mandatory)][string]$MarkdownPath)
+                $ErrorActionPreference = 'Stop'
+                . '__REC__'
+                __HELPERS__
+                $raw = Get-Content -LiteralPath $MarkdownPath -Raw -Encoding utf8
+                Write-Output (Get-CodexHighestSeverityLabel -ReviewMarkdownRaw $raw)
+                """
+            )
+            .strip()
+            .replace("__REC__", rec_q)
+            .replace("__HELPERS__", helpers),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness), str(md_path)],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, detail
+        assert (proc.stdout or "").strip() == "MEDIUM"
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+
+def test_get_codex_highest_severity_label_empty_sections() -> None:
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+
+    auto_text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    helpers = _extract_codex_console_summary_helpers(auto_text)
+    rec = str((_SCRIPTS / "record_token_usage.ps1").resolve())
+    scratch = _orch_scratch("codex_sev_empty")
+    scratch.mkdir(parents=True, exist_ok=True)
+    try:
+        md_path = scratch / "r.md"
+        md_path.write_text(
+            textwrap.dedent(
+                """
+                VERDICT: FIX_REQUIRED
+
+                CRITICAL:
+                - none
+                HIGH:
+                - None
+                MEDIUM:
+                - none
+
+                """
+            ).strip(),
+            encoding="utf-8",
+        )
+        harness = scratch / "_orch_codex_sev.ps1"
+        rec_q = rec.replace("'", "''")
+        harness.write_text(
+            textwrap.dedent(
+                """
+                param([Parameter(Mandatory)][string]$MarkdownPath)
+                $ErrorActionPreference = 'Stop'
+                . '__REC__'
+                __HELPERS__
+                $raw = Get-Content -LiteralPath $MarkdownPath -Raw -Encoding utf8
+                Write-Output (Get-CodexHighestSeverityLabel -ReviewMarkdownRaw $raw)
+                """
+            )
+            .strip()
+            .replace("__REC__", rec_q)
+            .replace("__HELPERS__", helpers),
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(harness), str(md_path)],
+            cwd=str(scratch),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
+        )
+        detail = (proc.stdout or "") + (proc.stderr or "")
+        assert proc.returncode == 0, detail
+        assert (proc.stdout or "").strip() == ""
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 
