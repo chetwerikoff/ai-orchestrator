@@ -39,6 +39,36 @@ function Normalize-PlannerOutput {
     }
     return $Output
 }
+function Normalize-ReviewerOutput {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Output
+    )
+    $lines = @($Output -split "`r?`n")
+    foreach ($ln in $lines) {
+        $one = $ln.TrimStart([char]0xFEFF).Trim()
+        if ($one -eq "NO_BLOCKING_ISSUES") { return "NO_BLOCKING_ISSUES" }
+    }
+    $anchorIdx = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*ISSUES:\s*$') { $anchorIdx = $i }
+    }
+    if ($anchorIdx -lt 0) {
+        return $Output.TrimStart([char]0xFEFF).Trim()
+    }
+    $slice = @($lines[$anchorIdx..($lines.Count - 1)])
+    $cut = $slice.Count
+    for ($j = 0; $j -lt $slice.Count; $j++) {
+        $tln = $slice[$j].Trim()
+        if ($tln -match '^(?i)tokens\s+used\s*$') {
+            $cut = $j
+            break
+        }
+    }
+    if ($cut -lt $slice.Count) { $slice = @($slice[0..($cut - 1)]) }
+    return ($slice -join "`n").TrimEnd()
+}
 function Test-ReviewerOutputStrict {
     param([Parameter(Mandatory)][string]$Output)
     $t = $Output.Trim()
@@ -275,7 +305,10 @@ try {
                 break
             }
             foreach ($seg in "## Iteration $i - reviewer output", $issues, "") { [void]$traceLines.Add($seg) }
-            $revFmt = Test-ReviewerOutputStrict -Output $issues
+            $issuesNorm = Normalize-ReviewerOutput -Output $issues
+            $reviewerStrictIn = $issuesNorm
+            if ([string]::IsNullOrWhiteSpace($reviewerStrictIn)) { $reviewerStrictIn = " " }
+            $revFmt = Test-ReviewerOutputStrict -Output $reviewerStrictIn
             if (-not $revFmt.Ok) {
                 [void]$traceLines.Add("## Iteration $i - REVIEW_STATUS: REVIEWER_OUTPUT_MALFORMED")
                 [void]$traceLines.Add("Reviewer output was not exactly NO_BLOCKING_ISSUES nor a strict ISSUES: list (each non-blank issue line must be '- [logic|complexity|scope|missing|architecture|safety] <text>'). Keeping current draft. task.md was written WITHOUT a successful Codex verdict.")
@@ -283,7 +316,7 @@ try {
                 $reviewLoopExitKind = "degraded"
                 break
             }
-            if (($issues.Trim()) -eq "NO_BLOCKING_ISSUES") {
+            if ($issuesNorm -eq "NO_BLOCKING_ISSUES") {
                 [void]$traceLines.Add("Exit: NO_BLOCKING_ISSUES at iteration $i.")
                 $reviewLoopExitKind = "no_issues"
                 Write-Host "Reviewer: NO_BLOCKING_ISSUES $([char]0x2014) exited at iteration $i."
@@ -291,9 +324,9 @@ try {
             }
             if ($NoRevision) {
                 $tracePathEarly = Join-Path $ProjectRoot ".ai-loop\planner_review_trace.md"
-                $traceEarly = @("REVIEW_STATUS: BLOCKING_ISSUES_FOUND -- task.md was NOT written", $issues) -join "`n"
+                $traceEarly = @("REVIEW_STATUS: BLOCKING_ISSUES_FOUND -- task.md was NOT written", $issuesNorm) -join "`n"
                 Set-Content -LiteralPath $tracePathEarly -Value $traceEarly -Encoding UTF8
-                Write-Host $issues -ForegroundColor Red
+                Write-Host $issuesNorm -ForegroundColor Red
                 Write-Host "Wrote review trace: $tracePathEarly"
                 $blockNoWrite = $true
                 break
@@ -316,7 +349,7 @@ try {
 "no preamble, no fenced wrap, no HTML comments. Keep implementation under ~80 lines.", "",
 "If you believe the previous draft was already correct and reject all issues, you may output the previous draft verbatim plus the Architect",
 "notes in ## Important." )) -join "`n"
-            $revisionPrompt = @($planPromptBody, "## AGENTS.md", $agentsBody, "## project_summary.md", $summaryBody, "## repo_map.md", $repoMapBody, "## USER ASK", ($resolvedAsk + $briefSuffix), "## CURRENT DRAFT", $current, "## REVIEWER ISSUES", $issues, $revisionInstructions) -join "`n`n"
+            $revisionPrompt = @($planPromptBody, "## AGENTS.md", $agentsBody, "## project_summary.md", $summaryBody, "## repo_map.md", $repoMapBody, "## USER ASK", ($resolvedAsk + $briefSuffix), "## CURRENT DRAFT", $current, "## REVIEWER ISSUES", $issuesNorm, $revisionInstructions) -join "`n`n"
             $revLines = @($revisionPrompt | & $cmdPath @pwArgs)
             $revised = ($revLines | ForEach-Object { "$_" }) -join "`n"
             if ($LASTEXITCODE -ne 0) {

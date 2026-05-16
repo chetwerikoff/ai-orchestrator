@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import re
 import shutil
 import subprocess
@@ -2799,8 +2800,11 @@ def test_ai_loop_plan_review_invariants() -> None:
     assert "function Normalize-PlannerOutput" in text
     assert "Normalize-PlannerOutput -Output $output" in text
     assert "Normalize-PlannerOutput -Output $revised" in text
+    assert "function Normalize-ReviewerOutput" in text
     assert "function Test-ReviewerOutputStrict" in text
-    assert '$revFmt = Test-ReviewerOutputStrict -Output $issues' in text
+    assert '$issuesNorm = Normalize-ReviewerOutput -Output $issues' in text
+    assert '$reviewerStrictIn = $issuesNorm' in text
+    assert 'Test-ReviewerOutputStrict -Output $reviewerStrictIn' in text
     assert "$reviewLoopExitKind" in text
     assert 'if ($reviewLoopExitKind -eq "max_iterations")' in text
     assert "-gt 3)" in text
@@ -2924,6 +2928,72 @@ def _reviewer_output_strict_ok(output: str) -> bool:
 )
 def test_reviewer_output_strict_matches_planner_contract(body: str, expected_ok: bool) -> None:
     assert _reviewer_output_strict_ok(body) is expected_ok
+
+
+def _powershell_normalize_and_strict_via_plan_script(raw: str) -> tuple[str, bool]:
+    """Dot-source ``ai_loop_plan.ps1`` helpers; mirrors the ``-WithReview`` normalization + strict path."""
+    ps = _powershell_exe()
+    if not ps:
+        pytest.skip("No pwsh or powershell on PATH")
+    root = _orch_scratch("norm_reviewer_out")
+    root.mkdir(parents=True, exist_ok=True)
+    try:
+        trx = root / "transcript.txt"
+        trx.write_text(raw, encoding="utf-8")
+        plan_lit = _ps_single_quoted_literal(str((_SCRIPTS / "ai_loop_plan.ps1").resolve()))
+        runner = root / "_nr.ps1"
+        runner.write_text(
+            "$ErrorActionPreference = 'Stop'\n"
+            f". '{plan_lit}'\n"
+            "$rawText = Get-Content -LiteralPath $args[0] -Raw -Encoding utf8\n"
+            "$norm = Normalize-ReviewerOutput -Output $rawText\n"
+            "$reviewerStrictIn = $norm\n"
+            'if ([string]::IsNullOrWhiteSpace($reviewerStrictIn)) { $reviewerStrictIn = " " }\n'
+            "$strict = Test-ReviewerOutputStrict -Output $reviewerStrictIn\n"
+            "$normBytes = [System.Text.Encoding]::UTF8.GetBytes($norm)\n"
+            '$b64Norm = [Convert]::ToBase64String($normBytes)\n'
+            'Write-Output ("NORM64:" + $b64Norm)\n'
+            '$strictFlag = if ($strict.Ok) { "1" } else { "0" }\n'
+            'Write-Output ("STRICT:" + $strictFlag)\n',
+            encoding="utf-8",
+        )
+        proc = subprocess.run(
+            [ps, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(runner), str(trx)],
+            cwd=str(root),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        detail = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        assert proc.returncode == 0, detail
+        out_lines = proc.stdout.strip().splitlines()
+        nb64 = next(x for x in out_lines if x.startswith("NORM64:"))[7:]
+        sflag = next(x for x in out_lines if x.startswith("STRICT:"))[7:]
+        normalized = base64.b64decode(nb64.encode()).decode("utf-8")
+        strict_ok = sflag.strip() == "1"
+        return normalized, strict_ok
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+@pytest.mark.parametrize(
+    ("doc", "expect_ok"),
+    [
+        ("codex\n\nISSUES:\n\n- [logic] example issue text\n", True),
+        ("ISSUES:\n\n- [scope] drift\n\ntokens used\n\n123456\nextra\n", True),
+        ("ISSUES:\n\n- [logic] stale\njunk\nISSUES:\n\n- [missing] need tests\ntOkEnS\tused\n999\n", True),
+        ("NO_BLOCKING_ISSUES\n", True),
+        ("ISSUES:\n\n- [architecture] mismatch\n", True),
+        ("", False),
+        ("    \t\n\r\n", False),
+    ],
+)
+def test_normalize_reviewer_output_pipeline_matches_strict_contract(doc: str, expect_ok: bool) -> None:
+    normalized, strict_ok = _powershell_normalize_and_strict_via_plan_script(doc)
+    assert strict_ok == expect_ok
+    if expect_ok:
+        assert _reviewer_output_strict_ok(normalized)
 
 
 def test_install_copies_reviewer_files() -> None:

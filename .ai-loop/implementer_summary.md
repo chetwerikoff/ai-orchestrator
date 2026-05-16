@@ -2,27 +2,30 @@
 
 ## Changed files
 
-- `scripts/ai_loop_auto.ps1` — **`Commit-And-Push`** no longer calls **`Test-WorkingTreeTasksConflictWithScope`**, so untracked or dirty `tasks/*.md` outside scope does not block a Codex PASS commit. **`Stage-SafeProjectFiles`** skips `SafeAddPaths` entries under `tasks/` when **`Test-TaskMdScopeAllowsTasksQueue`** is false, with a one-line **`[scope-filter]`** `Write-Host`; durable `.ai-loop/` paths from **`$script:DurableAlwaysCommitPaths`** still stage as before. **`Extract-FixPrompt` / `Stop-UnsafeQueueCleanup`** (reactive fix-prompt guard) unchanged.
-- `tests/test_orchestrator_validation.py` — coverage for scope-gated `tasks/` staging and for **`Commit-And-Push`** not invoking the working-tree **`tasks/`** pre-gate on PASS (`test_scope_filter_excludes_tasks_user_ask`, `test_scope_filter_includes_explicit_tasks_file`, `test_commit_and_push_omits_working_tree_tasks_unsafe_gate`; plus existing DD-024 scope/deletion cases).
-- `.ai-loop/project_summary.md` — durable note that PASS no longer uses the working-tree **`tasks/`** pre-gate; protection remains on the fix-prompt path; **`Stage-SafeProjectFiles`** gates **`tasks/`** staging by scope.
+- `scripts/ai_loop_plan.ps1` — added `Normalize-ReviewerOutput`; reviewer loop now normalizes Codex stdout before `Test-ReviewerOutputStrict`; whitespace-only normalized values use a one-space strict input so binding works on Windows PS 5.1 while strict still fails closed.
+- `tests/test_orchestrator_validation.py` — PowerShell subprocess harness + parametrize cases for normalization + strict acceptance; review invariant strings updated; added `base64` for harness output.
+- `.ai-loop/project_summary.md` — one-line **Last Completed Task** note and corrected **Notes** bullet for `-WithReview` normalization.
 
 ## Tests
 
-- Ran: `python -m pytest -q` → **194 passed** (1 Pytest cache warning on Windows: existing `.pytest_cache` nodeids path).
+- `python -m pytest -q` — **201 passed** (1 unrelated pytest cache warning).
+
+## Task-specific verification
+
+- `Parser::ParseFile` on `scripts/ai_loop_plan.ps1` — not run here (shell invocation was blocked in this environment); run locally:  
+  `powershell -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('scripts\ai_loop_plan.ps1', [ref]`$null, [ref]`$null)"`
 
 ## Implementation summary
 
-Parallel planner queue files under `tasks/` can sit untracked without aborting **`Commit-And-Push`** after a clean PASS. Risk is shifted to staging: bulk **`git add tasks/`** is avoided unless **`## Files in scope`** allows the queue, while implementer fix prompts that target unscoped **`tasks/`** paths still halt via **`Test-FixPromptArtifactsTasksConflict`** / **`Stop-UnsafeQueueCleanup`** (including **`-Resume`** from **`next_implementer_prompt.md`**).
-
-## Task-specific CLI / live-run
-
-- Task scope targets **`ai_loop_auto.ps1`**; AGENTS.md documents optional PowerShell **`Parser::ParseFile`** checks on orchestrator scripts. **`Parser::ParseFile` for `scripts\ai_loop_auto.ps1`** was **not** run in this pass — run locally if you want a syntax-only verify.
+- Added `Normalize-ReviewerOutput` aligned with the task: any line `NO_BLOCKING_ISSUES` wins, else slice from the **last** `ISSUES:` header, drop a case-insensitive whole-line `tokens used` footer and following lines, trim trailing whitespace; no `ISSUES:` returns BOM-stripped trimmed full text (often empty for noise-only transcripts).
+- Wired normalization at the single reviewer strict gate; revision / blocking paths use `$issuesNorm`; trace still records raw `$issues` per iteration.
+- Harness tests dot-source `ai_loop_plan.ps1` and round-trip normalized text via base64 to assert strict outcomes.
 
 ## Skipped
 
-- Git commit/push (orchestrator handles git).
+- None.
 
 ## Remaining risks
 
-- Intentional commits of new queue specs still require **`tasks/`** or a specific **`tasks/…`** path in **`## Files in scope`**; otherwise those files stay unstaged by design.
-- A malformed or hostile fix prompt could still trip **`UNSAFE_QUEUE_CLEANUP`** when it references **`tasks/`** without scope; that is the intended fail-closed behavior for the fix loop.
+- If a reviewer ever embeds a stray standalone `NO_BLOCKING_ISSUES` line together with an `ISSUES:` block, normalization returns the clean pass token by spec (first rule wins).
+- Unusual non-`tokens used` usage footers still pass through and could still trip strict validation until covered by a future normalization rule.
