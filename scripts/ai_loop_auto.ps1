@@ -1006,6 +1006,77 @@ function Format-CodexTokenSummaryLines {
     return @($base, ('  ' + $splitTxt))
 }
 
+function Get-CodexHighestSeverityLabel {
+    param([AllowEmptyString()][string]$ReviewMarkdownRaw)
+
+    $scan = Get-ReviewVerdictLineScanResult -ReviewText $ReviewMarkdownRaw
+    if ($scan.LastVerdictLineIndex -lt 0) {
+        return ""
+    }
+    $start = $scan.LastVerdictLineIndex + 1
+    if ($start -ge $scan.Lines.Count) {
+        return ""
+    }
+
+    $lines = @($scan.Lines[$start..($scan.Lines.Count - 1)])
+    $headRx = [regex]::new(
+        '^\s*(?:[#]{1,6}\s*)?(?<sev>CRITICAL|HIGH|MEDIUM)\s*:\s*$',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    $priorities = @('CRITICAL', 'HIGH', 'MEDIUM')
+
+    foreach ($want in $priorities) {
+        for ($idx = 0; $idx -lt $lines.Count; $idx++) {
+            $hm = $headRx.Match([string]$lines[$idx])
+            if (-not $hm.Success) {
+                continue
+            }
+            if ($hm.Groups['sev'].Value.ToUpperInvariant() -ne $want) {
+                continue
+            }
+
+            $hasRealBullet = $false
+            for ($j = $idx + 1; $j -lt $lines.Count; $j++) {
+                $lnTrimmed = ([string]$lines[$j]).TrimEnd()
+                if ($headRx.IsMatch($lnTrimmed)) {
+                    break
+                }
+                if ([regex]::IsMatch($lnTrimmed, '^\s*#{1,6}\s+\S')) {
+                    break
+                }
+                if ([regex]::IsMatch($lnTrimmed, '^\s*(?!-+|\*+)\s*\S(?:.*\S)?:\s*$')) {
+                    break
+                }
+                $bulletM = [regex]::Match($lnTrimmed, '^\s*-\s+(?<body>.+)$')
+                if (-not $bulletM.Success) {
+                    continue
+                }
+                $body = $bulletM.Groups['body'].Value.Trim()
+                if ([string]::IsNullOrWhiteSpace($body)) {
+                    continue
+                }
+                if ($body.Equals('none', [StringComparison]::OrdinalIgnoreCase)) {
+                    continue
+                }
+                if ($body -eq '...') {
+                    continue
+                }
+                if (($body.Length -eq 1) -and ([int][char]$body[0] -eq 0x2026)) {
+                    continue
+                }
+                $hasRealBullet = $true
+                break
+            }
+
+            if ($hasRealBullet) {
+                return $want
+            }
+        }
+    }
+
+    return ""
+}
+
 function Show-CodexReviewConsoleSummary {
     param(
         [ValidateSet('PASS', 'FIX_REQUIRED')]
@@ -1015,10 +1086,16 @@ function Show-CodexReviewConsoleSummary {
 
     Write-Host ""
     if ($Verdict -eq 'PASS') {
-        Write-Host 'Codex verdict: PASS'
+        Write-Host '[PASS] Codex verdict: PASS'
     }
     else {
-        Write-Host 'Codex verdict: FIX_REQUIRED'
+        $sev = Get-CodexHighestSeverityLabel -ReviewMarkdownRaw $ReviewMarkdownRaw
+        if (-not [string]::IsNullOrWhiteSpace($sev)) {
+            Write-Host "[$sev] Codex verdict: FIX_REQUIRED"
+        }
+        else {
+            Write-Host 'Codex verdict: FIX_REQUIRED'
+        }
     }
 
     if ($Verdict -eq 'FIX_REQUIRED') {
@@ -1854,6 +1931,15 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         $fixPrompt = "Tests are failing. Fix them before any other changes.`n`n$failText"
         Write-NextImplementerPrompt -PromptText $fixPrompt.TrimEnd()
         Run-ImplementerFix -FixIterationIndex $i | Out-Null
+        $summaryPathRed = Join-Path $AiLoop "implementer_summary.md"
+        try {
+            $summaryRed = Get-Content -LiteralPath $summaryPathRed -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+            if ([string]::IsNullOrWhiteSpace($summaryRed) -or ($summaryRed -match 'No task has been completed yet')) {
+                $minSummaryRed = "# Implementer summary`n`nTest-fix pass $i completed. See diff for changed files and test result."
+                Set-Content -LiteralPath $summaryPathRed -Value $minSummaryRed -Encoding UTF8
+            }
+        }
+        catch { Write-Warning "Could not check implementer_summary after test-fix pass: $_" }
         continue
     }
 
@@ -1922,7 +2008,20 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         exit 1
     }
 
-    Run-ImplementerFix -FixIterationIndex ([int]$script:AiaResumePreloopFixIterations + $i) | Out-Null
+    $fixIdx = [int]$script:AiaResumePreloopFixIterations + $i
+    Run-ImplementerFix -FixIterationIndex $fixIdx | Out-Null
+
+    # Guard: if implementer left the placeholder stub, replace with a minimal valid summary
+    # so the next Codex pass does not cycle on metadata instead of reviewing actual code.
+    $summaryPath = Join-Path $AiLoop "implementer_summary.md"
+    try {
+        $summaryNow = Get-Content -LiteralPath $summaryPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+        if ([string]::IsNullOrWhiteSpace($summaryNow) -or ($summaryNow -match 'No task has been completed yet')) {
+            $minSummary = "# Implementer summary`n`nFix pass $fixIdx completed. See diff for changed files and test result."
+            Set-Content -LiteralPath $summaryPath -Value $minSummary -Encoding UTF8
+        }
+    }
+    catch { Write-Warning "Could not check implementer_summary after fix pass: $_" }
 }
 
 Write-FinalStatus "STOPPED: max iterations reached. Manual review required."

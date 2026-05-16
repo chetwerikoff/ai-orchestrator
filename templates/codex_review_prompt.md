@@ -33,6 +33,10 @@ Check:
 
 Do not request manual steps unless absolutely required. If the implementer deferred the task instead of implementing it, return `VERDICT: FIX_REQUIRED` with a concrete fix prompt.
 
+## Implementer summary metadata
+
+If `.ai-loop/implementer_summary.md` still contains the placeholder text "No task has been completed yet" **but the diff shows substantial implementation work**, treat this as at most a **MEDIUM** issue (metadata lag — the orchestrator auto-fills a minimal stub when the agent omits it). Do **not** make it a HIGH or CRITICAL blocker when the code changes are otherwise correct. Focus your verdict on whether the implementation is complete and correct, not on the metadata file.
+
 ## Queued task specs (scope drift)
 
 Do not suggest deleting or modifying `tasks/*.md` unless the active `.ai-loop/task.md` includes `tasks/` or that specific file in `## Files in scope` and the task explicitly requests queue cleanup. Those files are queued task specifications maintained by the planner, not scratch or temporary outputs.
