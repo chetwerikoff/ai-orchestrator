@@ -1810,6 +1810,17 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         exit 7
     }
 
+    if ($iterTestExit -ne 0) {
+        Write-Host ""
+        Write-Host "Tests failed — skipping Codex review and sending directly to implementer fix." -ForegroundColor Yellow
+        $failSummary = Join-Path $AiLoop "test_failures_summary.md"
+        $failText = if (Test-Path $failSummary) { Get-Content $failSummary -Raw } else { Get-Content (Join-Path $AiLoop "test_output.txt") -Raw -ErrorAction SilentlyContinue }
+        $fixPrompt = "Tests are failing. Fix them before any other changes.`n`n$failText"
+        Write-NextImplementerPrompt -PromptText $fixPrompt.TrimEnd()
+        Run-ImplementerFix -FixIterationIndex $i | Out-Null
+        continue
+    }
+
     Run-CodexReview -Iteration $i | Out-Null
 
     $combinedCodexCapture = ""
@@ -1828,12 +1839,6 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         $combinedCodexCapture = ""
     }
     Show-CodexReviewConsoleSummary -Verdict $codexVerdict -ReviewMarkdownRaw $combinedCodexCapture
-
-    if ($codexVerdict -eq "PASS" -and $iterTestExit -ne 0) {
-        Write-Host ""
-        Write-Host "Codex returned PASS but tests failed (exit $iterTestExit) — overriding to FIX_REQUIRED to prevent committing broken state." -ForegroundColor Yellow
-        $codexVerdict = "FIX_REQUIRED"
-    }
 
     if ($codexVerdict -eq "PASS") {
         $didCommit = Commit-And-Push
