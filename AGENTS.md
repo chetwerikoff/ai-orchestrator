@@ -64,6 +64,9 @@ The default `SafeAddPaths` literal is `src/,tests/,README.md,AGENTS.md,scripts/,
 ## Templates contract
 When you add or remove a file in `templates/`, also check `scripts/install_into_project.ps1` so auto-copied target files stay correct.
 
+**Prompt content must live in `templates/`, never inlined in `.ps1` files.**
+`Run-CodexReview` (and any future reviewer wrappers) must load their prompt from `templates/codex_review_prompt.md` at runtime. Inlining a copy as a here-string creates a second source of truth that silently drifts. If you need to change review behaviour, edit the template — the script must not be touched. A test (`test_run_codex_review_loads_prompt_from_template`) enforces this contract and will fail if a here-string copy is introduced.
+
 ## Decision document policy
 - `docs/architecture.md` is the single source of truth for target design.
 - `docs/decisions.md` tracks numbered `DD-XXX` decisions; when superseded, mark inline and keep the entry; add replacements with higher numbers — never delete.

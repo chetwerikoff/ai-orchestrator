@@ -498,6 +498,24 @@ def test_native_argv_escape_present_in_both_scripts() -> None:
         assert "function ConvertTo-CrtSafeArg" in text, f"{name} missing ConvertTo-CrtSafeArg definition"
 
 
+def test_run_codex_review_loads_prompt_from_template() -> None:
+    """Run-CodexReview must read templates/codex_review_prompt.md at runtime.
+
+    Inline here-string prompts in ai_loop_auto.ps1 are forbidden: they create a
+    second source of truth that silently drifts from the template. The function
+    must reference the template path; the template file is the single source of truth.
+    """
+    auto = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    assert "codex_review_prompt.md" in auto, (
+        "Run-CodexReview must load its prompt from templates/codex_review_prompt.md. "
+        "Do not inline the prompt as a here-string — edit the template file instead."
+    )
+    tmpl = (_ROOT / "templates" / "codex_review_prompt.md")
+    assert tmpl.exists(), "templates/codex_review_prompt.md must exist"
+    assert "VERDICT:" in tmpl.read_text(encoding="utf-8"), \
+        "templates/codex_review_prompt.md must contain the VERDICT: output instruction"
+
+
 def test_ai_loop_auto_writes_diff_summary() -> None:
     script = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
     assert "diff_summary.txt" in script
@@ -2703,10 +2721,11 @@ def test_reviewer_context_template_exists() -> None:
 
 
 def test_embedded_prompt_uses_reviewer_context_not_agents_as_default() -> None:
-    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
-    literal = _extract_run_codex_review_prompt_literal(text)
-    assert "reviewer_context.md" in literal
-    assert literal.index("reviewer_context.md") < literal.index("AGENTS.md")
+    # Prompt now lives in templates/codex_review_prompt.md (single source of truth).
+    # Verify the template (not a hardcoded copy) contains the correct priority order.
+    tmpl = (_ROOT / "templates" / "codex_review_prompt.md").read_text(encoding="utf-8")
+    assert "reviewer_context.md" in tmpl
+    assert tmpl.index("reviewer_context.md") < tmpl.index("AGENTS.md")
 
 
 def test_codex_template_skips_test_output_when_failures_summary_present() -> None:

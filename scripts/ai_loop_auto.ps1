@@ -606,87 +606,17 @@ function Run-CodexReview {
 
     Ensure-AiLoopFiles
 
-    $prompt = @'
-You are the reviewer in an authenticated development loop.
-
-Read in this priority order (stop reading once verdict is clear):
-
-1. `.ai-loop/task.md` - current task contract
-2. `.ai-loop/reviewer_context.md` - bounded working-rules summary (preferred over AGENTS.md)
-3. `.ai-loop/implementer_summary.md` - implementer's report on the latest iteration
-4. `.ai-loop/diff_summary.txt` - short git diff --stat
-5. `.ai-loop/test_failures_summary.md` - filtered failures (read when present; do not read test_output.txt unless this summary is absent or insufficient)
-6. `.ai-loop/last_diff.patch` - full diff only when exact patch context is required for a specific finding; prefer reading only the changed files relevant to that finding
-7. `.ai-loop/test_output.txt` - raw pytest output (read only when test_failures_summary.md is absent or insufficient)
-8. `.ai-loop/git_status.txt` - short porcelain status
-9. `AGENTS.md` - full working rules (read only when reviewer_context.md is insufficient)
-
-Review the latest changes.
-
-Important:
-- project_summary.md is durable project context.
-- task.md is the current task contract.
-- The user explicitly authorized the scope described in .ai-loop/task.md.
-- If the implementer deferred the task instead of implementing it, mark FIX_REQUIRED and provide a concrete fix prompt.
-- If new files are required by the task, make sure they are present in the diff/status.
-- Do not ask for manual steps unless absolutely required.
-
-## Implementer summary metadata
-
-If `.ai-loop/implementer_summary.md` still contains the placeholder text "No task has been completed yet" or a minimal stub like "Fix pass N completed" BUT the diff shows substantial implementation work, treat this as at most a **MEDIUM** issue (metadata lag). Do NOT make it HIGH or CRITICAL when the code changes are otherwise correct. Focus your verdict on whether the implementation is complete and correct, not on the metadata file.
-
-Check:
-1. Was the task completed?
-2. Are tests meaningful and passing?
-3. Are there Critical or High issues?
-4. Is project_summary.md updated when durable project-level context changed?
-5. Is it safe to run the final test gate, commit, and push?
-
-## Diff size budget
-
-If `diff_summary.txt` reports more than 300 changed lines OR more than 8 changed files, read `diff_summary.txt` first. Prefer opening only the repository files changed for the relevant finding instead of loading all of `last_diff.patch`. Load `last_diff.patch` only when exact patch context is required; if you load it, justify briefly in `FINAL_NOTE`.
-
-## Test execution policy
-
-The orchestrator already ran `pytest` before this review. Prefer `.ai-loop/test_failures_summary.md` when present; do not read `.ai-loop/test_output.txt` unless that summary is absent or insufficient for your finding. Do not re-run the full test suite. A targeted run of a single test file or test (`python -m pytest -q path/to/test_file.py::test_name`) is allowed only when a specific finding in this review requires direct verification. If you run any tests, state in one line in `FINAL_NOTE` exactly what you ran and why.
-
-Return exactly:
-
-VERDICT: PASS or FIX_REQUIRED
-
-CRITICAL:
-- ...
-
-HIGH:
-- ...
-
-MEDIUM:
-- ...
-
-FIX_PROMPT_FOR_IMPLEMENTER:
-Between this label and `FINAL_NOTE:`, write either the literal `none` when no fixes are required, or one fenced JSON block that satisfies the schema below.
-
-```json
-{
-  "fix_required": true,
-  "files": ["src/foo.py", "tests/test_foo.py"],
-  "changes": [
-    { "path": "src/foo.py", "kind": "edit|add|delete", "what": "one-line directive" }
-  ],
-  "acceptance": "pytest -q passes; <other concrete criteria>"
-}
-```
-
-Rules:
-- `fix_required` must be `true` whenever your verdict is `FIX_REQUIRED`, and `false` when your verdict is `PASS`.
-- `files` is the deduplicated union of `changes[].path`.
-- Each `changes[].kind` must be exactly one of: `edit`, `add`, `delete`.
-- `acceptance` is a single concrete sentence.
-- The fenced JSON must be valid JSON (parseable by `ConvertFrom-Json`).
-
-FINAL_NOTE:
-Brief summary.
-'@
+    # Load review prompt from template — single source of truth.
+    # Never inline prompt content here; edit templates/codex_review_prompt.md instead.
+    $tmplPath = Join-Path $PSScriptRoot "..\templates\codex_review_prompt.md"
+    $prompt = ""
+    if (Test-Path -LiteralPath $tmplPath) {
+        $prompt = Get-Content -LiteralPath $tmplPath -Raw -Encoding UTF8 -ErrorAction SilentlyContinue
+    }
+    if ([string]::IsNullOrWhiteSpace($prompt)) {
+        Write-Warning "Run-CodexReview: templates/codex_review_prompt.md not found or empty; using built-in fallback."
+        $prompt = "You are the reviewer in an authenticated development loop. Read .ai-loop/task.md, .ai-loop/implementer_summary.md, .ai-loop/diff_summary.txt, .ai-loop/last_diff.patch, .ai-loop/test_output.txt. Return VERDICT: PASS or FIX_REQUIRED with CRITICAL:/HIGH:/MEDIUM: sections, FIX_PROMPT_FOR_IMPLEMENTER:, and FINAL_NOTE:."
+    }
 
     $codexPromptBytes = 0
     try {
