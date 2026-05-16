@@ -1208,6 +1208,10 @@ function Try-ResumeFromExistingReview {
             exit 0
         }
 
+        Write-Host ""
+        Write-Host "Codex verdict: FIX_REQUIRED"
+        Write-Host "Extracting fix prompt for implementer..."
+
         if (Extract-FixPrompt) {
             Write-Host "Extracted fix prompt from existing Codex review."
             Run-ImplementerFix | Out-Null
@@ -1313,6 +1317,10 @@ for ($i = 1; $i -le $MaxIterations; $i++) {
         try { & "$PSScriptRoot\show_token_report.ps1" } catch { Write-Warning "Token report failed: $_" }
         exit 0
     }
+
+    Write-Host ""
+    Write-Host "Codex verdict: FIX_REQUIRED"
+    Write-Host "Extracting fix prompt for implementer..."
 
     $hasPrompt = Extract-FixPrompt
 

@@ -662,6 +662,19 @@ def test_ai_loop_auto_resume_explicit_cursor_command_skips_persisted_implementer
     assert cmd_gate < chunk.index("Read-ImplementerStateObject")
 
 
+def test_ai_loop_auto_announces_fix_required_before_extract_fix_prompt() -> None:
+    """Non-PASS path mirrors PASS visibility: FIX_REQUIRED + extracting line before Extract-FixPrompt."""
+    text = (_SCRIPTS / "ai_loop_auto.ps1").read_text(encoding="utf-8")
+    fix_ann = 'Write-Host "Codex verdict: FIX_REQUIRED"'
+    extract_ann = 'Write-Host "Extracting fix prompt for implementer..."'
+    assert fix_ann in text
+    assert extract_ann in text
+    _, _, main_iteration = text.partition("for ($i = 1; $i -le $MaxIterations; $i++)")
+    verdict_in_main = main_iteration.index("$codexVerdict = Get-CodexVerdict")
+    fix_in_main = main_iteration.index(fix_ann, verdict_in_main)
+    assert fix_in_main > verdict_in_main
+
+
 def test_safety_doc_documents_implementer_json_runtime_policy() -> None:
     t = (_ROOT / "docs" / "safety.md").read_text(encoding="utf-8")
     assert "implementer.json" in t
