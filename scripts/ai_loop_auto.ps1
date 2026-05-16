@@ -511,8 +511,39 @@ function Save-GitReviewArtifactsForCodex {
             }
         }
         $filtered | Set-Content -LiteralPath $GitStatusOut -Encoding UTF8
-        @(git diff HEAD 2>$null) | Set-Content -LiteralPath $DiffPatchOut -Encoding UTF8
-        @(git diff --stat HEAD 2>$null) | Set-Content -LiteralPath $DiffStatOut -Encoding UTF8
+
+        $scopedDiffPaths = [System.Collections.Generic.List[string]]::new()
+        foreach ($rel in @($durable)) {
+            if ([string]::IsNullOrWhiteSpace($rel)) {
+                continue
+            }
+            [void]$scopedDiffPaths.Add($rel.Trim())
+        }
+        foreach ($ent in $activeScope) {
+            if ([string]::IsNullOrWhiteSpace($ent)) {
+                continue
+            }
+            if (Test-ScopeEntryCoveredByDurable -ScopeEntry $ent -DurableEntries $durable) {
+                continue
+            }
+            if (-not (Test-PathUnderSafeAddEntry -CandidatePath $ent -SafeEntries $safeList)) {
+                continue
+            }
+            [void]$scopedDiffPaths.Add($ent.Trim())
+        }
+        $diffPathArgs = @($scopedDiffPaths)
+        if ($diffPathArgs.Count -eq 0) {
+            $patchLines = @(git diff HEAD 2>$null)
+            $statLines = @(git diff --stat HEAD 2>$null)
+            Set-Content -LiteralPath $DiffPatchOut -Encoding UTF8 -Value $patchLines
+            Set-Content -LiteralPath $DiffStatOut -Encoding UTF8 -Value $statLines
+        }
+        else {
+            $patchLines = @(git diff HEAD -- @diffPathArgs 2>$null)
+            $statLines = @(git diff --stat HEAD -- @diffPathArgs 2>$null)
+            Set-Content -LiteralPath $DiffPatchOut -Encoding UTF8 -Value $patchLines
+            Set-Content -LiteralPath $DiffStatOut -Encoding UTF8 -Value $statLines
+        }
     }
     finally {
         Pop-Location

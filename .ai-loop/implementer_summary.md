@@ -2,31 +2,23 @@
 
 ## Changed files
 
-- `scripts/record_token_usage.ps1` — `Write-CliCaptureTokenUsageIfParsed` gains optional `-DedupeId` (SHA-256 fingerprint of capture text per id; skips duplicate append after a successful write).
-- `scripts/ai_loop_auto.ps1` — Codex review journaling via `Write-CliCaptureTokenUsageIfParsed` with `script_name` **`ai_loop_auto.codex_review`** and per-iteration `-DedupeId`; `Set-PassTokenReportEmittedFlag` marks when PASS path runs `show_token_report.ps1` successfully (resume + normal PASS).
-- `scripts/ai_loop_task_first.ps1` — Clears marker before chaining; after successful auto, skips tail `show_token_report.ps1` when the flag exists (removes stale flag afterward).
-- `docs/workflow.md`, `.ai-loop/project_summary.md` — Token journal labels, task-first single report behavior, Cursor parsing limitations.
-- `tests/test_token_usage.py` — Dedupe test, `ai_loop_auto.codex_review` capture test, `ai_loop_task_first` parse smoke.
+- `scripts/ai_loop_auto.ps1` — `Save-GitReviewArtifactsForCodex` builds scoped diff path args (durable + active scope under SafeAddPaths, skipping scope entries covered by durable), runs `git diff HEAD -- …` / `git diff --stat HEAD -- …`, bare `git diff HEAD` when the path list is empty; uses `Set-Content -Value` so empty diffs still write `last_diff.patch` and `diff_summary.txt`.
+- `tests/test_orchestrator_validation.py` — snapshot test for scope-filtered review artifacts; `test_git_status_filtered` / `test_parallel_user_ask_file_excluded_from_scope_filter` assert patch/stat exclude parallel `tasks/` noise; added tests for staged `tasks/` deletion exclusion, in-scope script inclusion, empty scoped-path fallback.
+- `.ai-loop/project_summary.md` — DD-024 wording: all three Codex review artifacts are scope-filtered.
 
 ## Tests
 
-- `python -m pytest -q` → **204 passed** (1 PytestCacheWarning on Windows cache path; environmental).
+`python -m pytest -q` — **208 passed** (full suite after Set-Content fix).
 
-## Task-specific commands
+## Implementation summary
 
-- PowerShell AST parse: repository tests include `_parse_file_via_ast` for edited `*.ps1` (same posture as `AGENTS.md` one-liners).
+Codex now receives `diff_summary.txt` and `last_diff.patch` restricted to the same path set as `git_status.txt`, so staged or working-tree changes outside scope (e.g. `tasks/` when scope omits `tasks/`) no longer leak into the diff artifacts and trigger false `UNSAFE_QUEUE_CLEANUP` from reviewer fix prompts. Empty scoped path list still fails open to a full-tree diff.
 
-## Implementation (short)
+## Task-specific command output
 
-- Auto-loop Codex rows use the shared CLI capture helper with project-root hint, distinct `script_name`, and dedupe guard for accidental double-hooks in one process.
-- Task-first no longer prints a second token report on a chained PASS when the child auto loop already succeeded at `show_token_report.ps1`.
-- No new Cursor CLI parser: documented that only existing stable patterns are recognized (no guessing).
-
-## Skipped
-
-- None required; no capture-time changes in `run_cursor_agent.ps1` (no confirmed additional Cursor output shape).
+Full pytest run as above; PowerShell parse check for `ai_loop_auto.ps1` not re-run (change is localized; CI/AGENTS recipe unchanged).
 
 ## Remaining risks
 
-- Codex/Cursor CLI output formats can change; `ConvertFrom-CliTokenUsage` and journals depend on stable patterns.
-- `.tmp/pass_token_report_shown.flag` is only for task-first vs auto coordination; it is deleted at each `ai_loop_auto.ps1` start and before each chained child run.
+- `git diff` still does not show **untracked** files; porcelain-only paths can appear in `git_status.txt` but not in patch/stat (pre-existing limitation).
+- Very large scoped path lists could approach command-line length limits on unusual machines (same class of risk as large `git add` argument lists).
